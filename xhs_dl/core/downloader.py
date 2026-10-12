@@ -75,16 +75,19 @@ class XhsDownloader:
 
     def __init__(self, output_dir: str = "./xhs_downloads",
                  delay: Tuple[float, float] = (2, 5),
-                 on_progress: Optional[Callable] = None):
+                 on_progress: Optional[Callable] = None,
+                 max_images: int = 15):
         """
         Args:
             output_dir: 保存目录
             delay: 每次请求间的随机等待范围（秒）
             on_progress: 进度回调 fn(note_result, index, total)
+            max_images: 单篇最大允许图片数，超过前置熔断拒绝下载
         """
         self.output_dir = output_dir
         self.delay = delay
         self.on_progress = on_progress
+        self.max_images = max_images
         self.session = requests.Session()
         self.session.headers.update(HEADERS)
 
@@ -158,6 +161,15 @@ class XhsDownloader:
             nr.author = (note.get("user", {}).get("nickname", "")
                          or note.get("user", {}).get("name", ""))
             nr.note_type = "video" if note.get("type") == "video" else "normal"
+
+            # 前置熔断拦截：校验图片总数，超限时零媒体下载即刻熔断阻断
+            media = self._get_media_urls(note)
+            nr.image_count = len(media)
+            if nr.note_type != "video" and self.max_images and len(media) > self.max_images:
+                nr.error = f"图片数量超限 ({len(media)}张 > {self.max_images}张)，触发前置熔断拦截，跳过下载"
+                logger.warning(f"[{index}/{total}] 前置熔断拦截: 《{nr.title}》{nr.error}")
+                return nr
+
             nr.success = True
 
             # Step 4: 保存
@@ -170,8 +182,6 @@ class XhsDownloader:
             self._save_text(note_dir, nr, full_url)
 
             # 图片
-            media = self._get_media_urls(note)
-            nr.image_count = len(media)
             for i, (mtype, murl) in enumerate(media):
                 time.sleep(random.uniform(0.3, 0.7))
                 ext = ".mp4" if mtype == "video" else ".jpg"

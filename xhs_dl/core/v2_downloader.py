@@ -34,10 +34,11 @@ class EngineNotReady(RuntimeError):
 class LocalCliEngine:
     """XHS-Downloader 的本地 CLI 适配器。"""
 
-    def __init__(self, home: Optional[str] = None, timeout: int = 300, image_format: str = "jpg"):
+    def __init__(self, home: Optional[str] = None, timeout: int = 300, image_format: str = "jpg", max_images: int = 15):
         self.home = self._discover_home(home)
         self.timeout = timeout
         self.image_format = image_format
+        self.max_images = max_images
         self.python = self._discover_python()
 
     @staticmethod
@@ -119,6 +120,7 @@ class LocalCliEngine:
             "--url", self._canonicalize_source_url(url),
             "--work-path", str(output_dir.parent),
             "--folder-name", output_dir.name,
+            "--max-images", str(self.max_images),
         ]
         environment = self._subprocess_environment(self.home)
         try:
@@ -141,6 +143,23 @@ class LocalCliEngine:
         stdout = (completed.stdout or "") + (completed.stderr or "")
         clean_stdout = re.sub(r"\x1b\[[0-?]*[ -/]*[@-~]", "", stdout)
         metadata = self._extract_metadata(clean_stdout)
+
+        # 检查前置熔断拦截：如果因图片超限被熔断，直接返回拦截结果，无需执行文件落地
+        if metadata.get("_intercepted"):
+            intercept_msg = metadata.get("_intercept_reason", f"图片数量超过限制({self.max_images}张)，前置熔断已跳过")
+            title = str(metadata.get("作品标题") or "")
+            author = str(metadata.get("作者昵称") or "")
+            note_id = str(metadata.get("作品ID") or "")
+            logger.warning(f"触发前置熔断拦截: 《{title}》- {intercept_msg}")
+            return NoteResult(
+                url=url,
+                note_id=note_id,
+                title=title,
+                author=author,
+                error=intercept_msg,
+                engine="local-cli",
+            )
+
         after = self._media_files(output_dir)
         new_files = sorted(
             path for path, signature in after.items()

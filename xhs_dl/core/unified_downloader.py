@@ -20,6 +20,7 @@ class UnifiedDownloader:
         engine_home=None,
         timeout=300,
         image_format="jpg",
+        max_images=15,
         engines=None,
     ):
         self.output_dir = output_dir
@@ -28,13 +29,14 @@ class UnifiedDownloader:
         self.engine_home = engine_home
         self.timeout = timeout
         self.image_format = image_format
+        self.max_images = max_images
         self.engines = dict(engines or {})
 
     def _engine(self, platform):
         if platform not in self.engines:
             if platform == "xhs":
                 self.engines[platform] = LocalCliEngine(
-                    self.engine_home, timeout=self.timeout, image_format=self.image_format
+                    self.engine_home, timeout=self.timeout, image_format=self.image_format, max_images=self.max_images
                 )
             elif platform == "douyin":
                 self.engines[platform] = DouyinBrowserEngine(

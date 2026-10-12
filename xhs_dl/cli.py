@@ -52,6 +52,8 @@ def main():
                         help="每条笔记最大等待秒数（默认: 300）")
     parser.add_argument("--image-format", choices=["jpg", "png", "keep"], default="jpg",
                         help="图片输出格式（默认: jpg）")
+    parser.add_argument("--max-images", type=int, default=15,
+                        help="单篇笔记最大图片数上限（默认: 15，超过则前置熔断拒绝下载）")
     args = parser.parse_args()
 
     # 无参数启动（例如双击启动文件）时，进入一次粘贴输入模式。
@@ -104,7 +106,7 @@ def main():
 
     if args.engine == "v1":
         print("  [提醒] 正在使用旧版 V1，引擎输出可能带平台水印。")
-        dl = XhsDownloader(output_dir=args.output, delay=delay, on_progress=on_progress)
+        dl = XhsDownloader(output_dir=args.output, delay=delay, on_progress=on_progress, max_images=args.max_images)
     else:
         from xhs_dl.core.unified_downloader import UnifiedDownloader
         dl = UnifiedDownloader(
@@ -114,6 +116,7 @@ def main():
             engine_home=args.engine_home,
             timeout=args.timeout,
             image_format=args.image_format,
+            max_images=args.max_images,
         )
     result = dl.download(all_urls)
 
