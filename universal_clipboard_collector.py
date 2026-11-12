@@ -82,6 +82,7 @@ notify_cfg = LOADED_CONFIG.get("notification", {})
 feishu_cfg = notify_cfg.get("feishu", {})
 rules_cfg = LOADED_CONFIG.get("classification_rules", {})
 filter_cfg = LOADED_CONFIG.get("filter_rules", {})
+project_routing_cfg = LOADED_CONFIG.get("project_routing", {})
 MAX_IMAGE_ALLOWED = int(filter_cfg.get("max_images_allowed", 15))
 
 # 运行时数据与日志目录 (自适应解耦：优先 config -> 宿主历史兼容路径 -> 本地 data 目录)
@@ -123,6 +124,85 @@ HISTORY_FILE = DATA_DIR / "clipboard_history.json"
 QUEUE_FILE = DATA_DIR / "clipboard_pending_queue.json"
 HEARTBEAT_FILE = DATA_DIR / "collector_heartbeat.json"
 MODE_FILE = DATA_DIR / "collector_mode.json"
+
+# ---- 连续失败熔断（三振暂停）------------------------------------------------
+# 用户铁律：连续失败 3 次即自动暂停采集，避免通道失效时持续刷平台风控。
+# 统计口径：仅统计"真实下载失败"（解析受限 / 网络异常）。
+# 规则类过滤（商业广告拦截、超 15 图熔断）不计入，否则正常筛选会误停采集器。
+FAIL_STREAK_FILE = DATA_DIR / "collector_failure_streak.json"
+try:
+    FAIL_PAUSE_THRESHOLD = max(1, int(rc_cfg.get("consecutive_failure_pause", 3)))
+except Exception:
+    FAIL_PAUSE_THRESHOLD = 3
+
+
+def _load_fail_streak() -> dict:
+    try:
+        data = json.loads(FAIL_STREAK_FILE.read_text(encoding="utf-8"))
+        if isinstance(data, dict):
+            return data
+    except Exception:
+        pass
+    return {"count": 0, "last_url": "", "last_reason": "", "updated_at": ""}
+
+
+def record_download_failure(url: str, reason: str) -> int:
+    """累计连续失败次数并落盘；返回当前连续失败计数。"""
+    data = _load_fail_streak()
+    data["count"] = int(data.get("count", 0)) + 1
+    data["last_url"] = url
+    data["last_reason"] = str(reason)[:200]
+    data["updated_at"] = time.strftime("%Y-%m-%d %H:%M:%S")
+    try:
+        FAIL_STREAK_FILE.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+    except Exception as ex:
+        log_daemon(f"[FailGuard] 写失败计数失败: {ex}")
+    return data["count"]
+
+
+def reset_download_failure_streak() -> None:
+    """一旦有成功入库，连续失败计数清零。"""
+    data = _load_fail_streak()
+    if int(data.get("count", 0)) == 0:
+        return
+    data.update({"count": 0, "last_url": "", "last_reason": "",
+                 "reset_at": time.strftime("%Y-%m-%d %H:%M:%S")})
+    try:
+        FAIL_STREAK_FILE.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+    except Exception:
+        pass
+
+
+def trip_failure_pause(count: int, last_url: str, reason: str) -> None:
+    """达到阈值：写入暂停标志，冻结采集（重启也不会自动恢复）。"""
+    try:
+        PAUSE_FILE.parent.mkdir(parents=True, exist_ok=True)
+        PAUSE_FILE.write_text(json.dumps({
+            "paused": True,
+            "paused_at": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
+            "paused_by": "auto-fail-guard",
+            "consecutive_failures": count,
+            "last_url": last_url,
+            "reason": f"连续 {count} 次下载失败，自动熔断暂停，防止持续触发平台风控：{str(reason)[:120]}",
+            "resume": "排查通道后删除本文件即可恢复采集",
+        }, ensure_ascii=False, indent=2), encoding="utf-8")
+    except Exception as ex:
+        log_daemon(f"[FailGuard] 写暂停标志失败: {ex}")
+    msg = (f"⛔ 已连续 {count} 次采集失败，自动暂停采集\n"
+           f"🔗 最后一条: {str(last_url)[:60]}\n"
+           f"💡 原因: {str(reason)[:50]}\n"
+           f"✅ 队列已冻结保留，修复通道后删除 clipboard-collector.paused 即可续采")
+    try:
+        send_desktop_notification(msg, title="采集已自动熔断暂停", status="error")
+    except Exception:
+        pass
+    try:
+        send_feishu_error_sync("采集自动熔断", last_url,
+                               f"连续 {count} 次失败已暂停采集: {str(reason)[:60]}")
+    except Exception:
+        pass
+    log_daemon(f"[FailGuard] 连续失败 {count} 次，已写入暂停标志: {PAUSE_FILE}")
+
 
 def get_current_collector_mode() -> dict:
     """获取当前采集模式 (auto: 自动智能分类 | manual: 手动指定文件夹模式)"""
@@ -192,7 +272,7 @@ def update_heartbeat(status: str = "idle", queue_len: int = 0, history_len: int 
             "queue_len": queue_len,
             "history_len": history_len,
             "extra": extra,
-            "version": "3.8.3"
+            "version": "3.8.4-local"
         }
         tmp = HEARTBEAT_FILE.with_suffix(".tmp")
         with open(tmp, "w", encoding="utf-8") as f:
@@ -252,6 +332,14 @@ else:
 
 C_DOWNLOADS_DIR = Path(storage_cfg.get("unclassified_downloads_dir", str(Path.home() / "Downloads")))
 
+# 项目级关键词路由 (优先级高于城市/季节分流；关键词与落点均可在 config.json 的 project_routing 中随时增删)
+_doubao_route = project_routing_cfg.get("doubao_pullnew", {})
+DOUBAO_ROUTE_ENABLED = bool(_doubao_route.get("enabled", True)) and bool(_doubao_route.get("keywords"))
+DOUBAO_KEYWORDS = [str(k).lower() for k in _doubao_route.get("keywords", [])]
+DOUBAO_MATERIAL_DIR = Path(_doubao_route.get("material_dir", r"D:\AICode\项目推进\projects\豆包拉新\素材库\参考爆款"))
+DOUBAO_LINK_MD = Path(_doubao_route.get("link_md_file", r"D:\AICode\项目推进\projects\豆包拉新\对标灵感链接.md"))
+NOTIFY_UNCLASSIFIED_FEISHU = bool(project_routing_cfg.get("notify_unclassified_feishu", True))
+
 # 对标账号清单
 SECOND_BRAIN_BENCHMARK_FILE = Path(bm_cfg.get("second_brain_benchmark_file", r"D:\SecondBrain\zwm-second-brain\03-项目\01-团建项目—江湖有旅人\对标账号与样板观察清单.md"))
 PROJECT_BENCHMARK_FILE = Path(bm_cfg.get("project_benchmark_file", r"D:\AICode\项目推进\projects\江湖有旅人\主项目\05-知识库\06-数据与复盘\复盘文件\素材库归档文档\对标账号完整清单.md"))
@@ -287,7 +375,7 @@ if not NOTIFY_PY and SKILL_ROOT.parent.exists():
             NOTIFY_PY = Path(root) / "shared_notify.py"
             break
 
-def send_desktop_notification(msg: str, title: str = "素材采集中枢", status: str = "success", action_target: str = ""):
+def send_desktop_notification(msg: str, title: str = "素材采集中枢", status: str = "success", action_target: str = "", duration_ms: int = 3500):
     if not notify_cfg.get("enable_desktop_toast", True):
         return False
     
@@ -303,7 +391,7 @@ def send_desktop_notification(msg: str, title: str = "素材采集中枢", statu
                 status=status,
                 app_name="万能素材采集中枢",
                 position="BottomRight",
-                duration_ms=8000,
+                duration_ms=duration_ms,
                 icon_key="download",
                 action_target=action_target,
                 action_label="点击打开素材目录" if action_target else "点击查看",
@@ -395,8 +483,11 @@ def send_feishu_material_sync(metadata: dict, queue_rem_count: int = 0):
         target_dir = metadata.get("target_dir", "")
         is_unclassified = metadata.get("is_unclassified", False)
         platform = metadata.get("platform", "小红书")
-        season = metadata.get("season", "四季通用")
+        note_type = metadata.get("note_type", "图文")
+        vid_cnt = metadata.get("videos_count", 0)
         content_len = metadata.get("content_length", 0)
+        media_desc = f"{img_cnt} 张高清大图" + (f"+{vid_cnt} 条视频" if vid_cnt else "") + f" ｜ {content_len} 字文案"
+        season = metadata.get("season", "四季通用")
         
         # 统计素材库大盘
         stats = get_material_library_stats(city)
@@ -416,7 +507,7 @@ def send_feishu_material_sync(metadata: dict, queue_rem_count: int = 0):
                 f"**📌 标题**：[{title}]({url})\n\n"
                 f"**🔗 原文短链 (点击一键复制)**：\n```text\n{url}\n```\n\n"
                 f"**📂 本地暂存目录 (点击一键复制)**：\n```text\n{target_dir}\n```\n\n"
-                f"**🏷️ 规格**：{platform}图文 ｜ {img_cnt} 张高清大图 ｜ {content_len} 字文案\n"
+                f"**🏷️ 规格**：{platform}{note_type} ｜ {media_desc}\n"
                 f"**⚠️ 分类提示**：未识别到江浙沪地名（暂存 C 盘下载目录，请手动归入对应城市）\n"
                 f"**📊 库容大盘**：精准库 {tot_prec} 套 ｜ 四季库 {tot_aut} 套 ｜ 队列: {queue_str}"
             )
@@ -427,7 +518,7 @@ def send_feishu_material_sync(metadata: dict, queue_rem_count: int = 0):
                 f"**🔗 原文短链 (点击一键复制)**：\n```text\n{url}\n```\n\n"
                 f"**🎯 采集模式**：手动定向归档模式（目标专题：`{city}`）\n\n"
                 f"**📂 本地存储目录 (点击一键复制)**：\n```text\n{target_dir}\n```\n\n"
-                f"**🏷️ 规格**：{platform}图文 ｜ {img_cnt} 张高清大图 ｜ {content_len} 字文案\n"
+                f"**🏷️ 规格**：{platform}{note_type} ｜ {media_desc}\n"
                 f"**📊 专题大盘**：已归入【{city}】专题 ｜ 队列: {queue_str}"
             )
             title_header = f"已定向采入【{city}】· {title[:20]}"
@@ -437,7 +528,7 @@ def send_feishu_material_sync(metadata: dict, queue_rem_count: int = 0):
                 f"**🔗 原文短链 (点击一键复制)**：\n```text\n{url}\n```\n\n"
                 f"**📂 本地存储目录 (点击一键复制)**：\n```text\n{target_dir}\n```\n\n"
                 f"{season_block}"
-                f"**🏷️ 规格**：{platform}图文 ｜ {img_cnt} 张高清大图 ｜ {content_len} 字文案\n"
+                f"**🏷️ 规格**：{platform}{note_type} ｜ {media_desc}\n"
                 f"**📊 大盘**：【{city}】现存 {city_cnt} 套 ｜ 精准库 {tot_prec} 套 ｜ 四季库 {tot_aut} 套 ｜ 队列: {queue_str}"
             )
             title_header = f"已采入【{city}】· {title[:20]}"
@@ -496,7 +587,12 @@ CITY_RULES = rules_cfg.get("city_rules") or {
     "苏州": ["苏州", "西山岛", "东山", "太湖", "昆山", "常熟", "同里", "周庄", "阳澄湖"],
     "上海": ["上海", "崇明", "青浦", "奉贤", "金山", "淀山湖", "滴水湖"],
     "湖州": ["湖州", "南浔", "龙之梦", "太湖龙之梦", "长兴", "图影", "仁皇山", "原乡小镇", "弁山"],
-    "特色拓展地": ["婺源", "篁岭", "婺女洲", "黄山", "宏村", "西递", "丽水", "松阳", "缙云", "景德镇", "三清山", "望仙谷", "葛仙村", "衢州", "江山", "温州", "雁荡山", "楠溪江", "嘉兴", "乌镇", "西塘", "武夷山"]
+    "无锡": ["无锡", "鼋头渚", "拈花湾", "军嶂古道", "军嶂", "灵山胜境", "太湖翠屏"],
+    "常州": ["常州", "东方盐湖城", "茅山", "恐龙园", "龙凤谷", "冠嶂古道"],
+    "江西婺源": ["婺源", "篁岭", "婺女洲", "望仙谷", "葛仙村", "三清山", "景德镇"],
+    "嘉兴": ["嘉兴", "乌镇", "西塘", "盐官", "海宁", "桐乡"],
+    "丽水": ["丽水", "缙云", "仙都", "松阳", "云和梯田", "古堰画乡"],
+    "温州": ["温州", "雁荡山", "楠溪江"]
 }
 
 def detect_city(title: str, content: str) -> str:
@@ -548,16 +644,63 @@ COLLECTION_PATTERNS = [
     r'江浙沪\w*合集',
 ]
 
+def detect_project_route(title: str, content: str):
+    """项目级关键词路由：命中返回路由键 (如 'doubao_pullnew')，未命中返回 None (继续走团建城市/季节分流)"""
+    if not DOUBAO_ROUTE_ENABLED:
+        return None
+    full_text = f"{title} {content}".lower()
+    for kw in DOUBAO_KEYWORDS:
+        if kw in full_text:
+            return "doubao_pullnew"
+    return None
+
+def append_project_link_record(route_key, title: str, url: str):
+    """项目路由命中后，把原链接追加进对应项目的灵感链接 md (不存在则自动创建表头)"""
+    if route_key != "doubao_pullnew":
+        return
+    try:
+        DOUBAO_LINK_MD.parent.mkdir(parents=True, exist_ok=True)
+        content = DOUBAO_LINK_MD.read_text(encoding="utf-8", errors="ignore") if DOUBAO_LINK_MD.exists() else ""
+        if url and url in content:
+            return
+        ts = time.strftime("%Y-%m-%d %H:%M")
+        if not content:
+            content = (
+                "# 豆包拉新 · 手机端对标灵感链接库\n\n"
+                "> 手机随时点开看灵感、找对标。\n\n---\n\n## 📌 灵感对标池\n\n"
+            )
+        seq = content.count("### ") + 1
+        section = (
+            f"\n### {seq:02d}. {title[:40]}（剪贴板自动采集）\n"
+            f"- **采集时间**：{ts}\n"
+            f"- **直达链接**：[{url}]({url})\n"
+        )
+        with open(DOUBAO_LINK_MD, "a", encoding="utf-8") as f:
+            f.write(section)
+        log_daemon(f"📎 已追加豆包拉新灵感链接: 《{title[:24]}》 -> {DOUBAO_LINK_MD.name}")
+    except Exception as e:
+        log_daemon(f"⚠️ 项目灵感链接写入异常: {e}")
+
 def detect_traffic_and_category(title: str, content: str) -> tuple[str, str]:
-    """智能识别流量类型 (精准流量/泛流量) 与目标二级分类/城市"""
+    """智能识别流量类型 (精准流量/泛流量) 与目标二级分类/城市
+
+    优先级铁律（2026-11-06 用户明确）：行政区 > 主题货架。
+    只要命中具体城市（安吉/莫干山/杭州...），就绝不落"团建游戏/大合集"主题货架；
+    主题货架只收无行政区归属的内容。此前正文偶提一次"团建游戏"就会把
+    安吉温泉别墅这类城市笔记整体劫走，属缺陷。
+    """
     t_lower = title.lower()
     c_lower = content.lower()
     full_text = f"{t_lower} {c_lower}"
 
-    # 1. 优先判定小游戏 / 破冰互动 (直接分流至泛流量/团建游戏)
-    for kw in GAME_KEYWORDS:
-        if kw in t_lower or kw in c_lower:
-            return "泛流量", "团建游戏"
+    # 0. 行政区匹配最优先（detect_city 内部已是 标题 > 正文主体 > 全文 的顺序）
+    detected_city = detect_city(title, content)
+
+    # 1. 小游戏 / 破冰互动：仅在未识别到行政区时分流至泛流量/团建游戏
+    if detected_city == "地点待确认":
+        for kw in GAME_KEYWORDS:
+            if kw in t_lower or kw in c_lower:
+                return "泛流量", "团建游戏"
 
     # 2. 判定跨城大合集 / 周边游大盘 (直接分流至泛流量/大合集)
     is_collection = False
@@ -570,9 +713,6 @@ def detect_traffic_and_category(title: str, content: str) -> tuple[str, str]:
             if re.search(pat, title):
                 is_collection = True
                 break
-
-    # 3. 城市匹配检测
-    detected_city = detect_city(title, content)
 
     if is_collection:
         # 如果既是大合集又命中了城市，若标题明显强调"周边/多城/合集/N个景点/短途游"，仍归入泛流量大合集
@@ -653,11 +793,32 @@ def extract_creator_name(url: str, raw_text: str, title_hint: str) -> tuple[str,
     """提取博主名字与平台"""
     platform = "小红书" if ("xhs" in url.lower() or "xiaohongshu" in url.lower() or "小红书" in raw_text) else "抖音"
     m_at = re.search(r'@([^\s，。！？\n\r]+)', raw_text)
-    if m_at:
+    if m_at and not m_at.group(1).endswith((".com", ".cn", ".net")):
         return m_at.group(0), platform
-    m_bracket = re.search(r'【([^】]+?)(?:的图文作品|的作品)?】', raw_text)
+    m_bracket = re.search(r'【([^】]+?)(?:的图文作品|的作品|的主页)?】', raw_text)
     if m_bracket:
         return f"@{m_bracket.group(1)}", platform
+    # 针对抖音个人主页，尝试使用 Playwright 快速抓取博主真实昵称
+    if "douyin" in url.lower() or "iesdouyin" in url.lower():
+        try:
+            from playwright.sync_api import sync_playwright
+            with sync_playwright() as p:
+                browser = p.chromium.launch(channel="msedge", headless=True)
+                page = browser.new_page(locale="zh-CN")
+                page.goto(url, wait_until="domcontentloaded", timeout=12000)
+                page.wait_for_timeout(2000)
+                author = page.evaluate("""() => {
+                    const h1 = document.querySelector('h1');
+                    if (h1 && h1.innerText.trim()) return h1.innerText.trim();
+                    const title = document.title || '';
+                    const m = title.match(/^(.*?)(?:的抖音|\\s*-\\s*抖音)/);
+                    return m ? m[1].trim() : '';
+                }""")
+                browser.close()
+                if author:
+                    return f"@{author}", platform
+        except Exception:
+            pass
     return f"@{title_hint[:15]}", platform
 
 def register_benchmark_account(target_url: str, raw_text: str, title_hint: str) -> tuple[bool, str]:
@@ -690,7 +851,7 @@ def register_benchmark_account(target_url: str, raw_text: str, title_hint: str) 
                     content_proj += "\n" + new_row
 
                 # 追加变更记录
-                log_marker = "|---|---|---|"
+                log_marker = "## 📝 变更记录\n\n| 日期 (时间) | 执行者 | 记录 |\n|---|---|---|"
                 if log_marker in content_proj:
                     p1, p2 = content_proj.split(log_marker, 1)
                     log_row = f"\n| {now_str} | 反重力 | 剪贴板自动建档 {platform} 对标账号 {creator_name}（{next_id}） |"
@@ -728,7 +889,7 @@ def register_benchmark_account(target_url: str, raw_text: str, title_hint: str) 
                 else:
                     content_sb += "\n" + new_entry
                 
-                log_marker = "|---|---|---|"
+                log_marker = "## 📝 变更记录\n\n| 日期 (时间) | 执行者 | 记录 |\n|---|---|---|"
                 if log_marker in content_sb:
                     p1, p2 = content_sb.split(log_marker, 1)
                     log_row = f"\n| {now_str} | 反重力 | 剪贴板自动识别并归档 {platform} 对标账号 {creator_name} |"
@@ -750,24 +911,34 @@ def is_profile_or_homepage(url: str, raw_text: str = "") -> bool:
     t_lower = raw_text.lower()
     if "user/profile" in u_lower or "user/profile" in t_lower:
         return True
-    if "/user/" in u_lower:
+    if "/user/" in u_lower or "/share/user/" in u_lower:
         return True
-    if "ta的主页" in t_lower or "查看ta的主页" in t_lower or "的主页" in t_lower:
+    if any(k in t_lower for k in ["ta的主页", "查看ta的主页", "的主页", "更多作品", "查看ta的更多作品", "ta的更多作品", "查看作品", "打开抖音搜索，查看ta"]):
         return True
+    if "v.douyin.com" in u_lower or "xhslink" in u_lower:
+        try:
+            import urllib.request
+            req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 16_6 like Mac OS X)"})
+            with urllib.request.urlopen(req, timeout=2.5) as resp:
+                final_u = resp.geturl().lower()
+                if "/user/" in final_u or "/share/user/" in final_u or "user/profile" in final_u:
+                    return True
+        except Exception:
+            pass
     return False
 
 def check_url_type(target_url: str) -> tuple[bool, str]:
     """检查链接是否为单篇笔记。如果确定是主页返回 (False, 'UNSUPPORTED_PROFILE: 博主个人主页')"""
     u_lower = target_url.lower()
-    if "user/profile" in u_lower or "/user/" in u_lower:
+    if "user/profile" in u_lower or "/user/" in u_lower or "/share/user/" in u_lower:
         return False, "UNSUPPORTED_PROFILE: 博主个人主页"
-    if "xhslink" in u_lower:
+    if "xhslink" in u_lower or "v.douyin.com" in u_lower:
         try:
             import urllib.request
-            req = urllib.request.Request(target_url, headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"})
-            with urllib.request.urlopen(req, timeout=3.0) as resp:
+            req = urllib.request.Request(target_url, headers={"User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 16_6 like Mac OS X)"})
+            with urllib.request.urlopen(req, timeout=2.5) as resp:
                 final_url = resp.geturl().lower()
-                if "user/profile" in final_url or "/user/" in final_url:
+                if "user/profile" in final_url or "/user/" in final_url or "/share/user/" in final_url:
                     return False, "UNSUPPORTED_PROFILE: 短链重定向至博主个人主页"
         except Exception:
             pass
@@ -814,7 +985,11 @@ class QueueManager:
                         self.failed = data.get("failed", [])
                         self.cooldown_until = data.get("cooldown_until", 0.0)
                         self.cooldown_reason = data.get("cooldown_reason", "")
+                        for item in self.queue:
+                            if not item.get("id"):
+                                item["id"] = f"xhs_{int(time.time()*1000)}_{random.randint(100, 999)}"
                 except Exception as e:
+                    log_daemon(f"[Queue Load Error]: {e}")
                     if sys.stdout:
                         print(f"[Queue Load Error]: {e}")
                     self.queue = []
@@ -876,11 +1051,17 @@ class QueueManager:
                             self.failed = data.get("failed", [])
                             self.cooldown_until = data.get("cooldown_until", 0.0)
                             self.cooldown_reason = data.get("cooldown_reason", "")
+                            for item in self.queue:
+                                if not item.get("id"):
+                                    item["id"] = f"xhs_{int(time.time()*1000)}_{random.randint(100, 999)}"
                             self._last_mtime = mtime
                 except Exception:
                     pass
             if self.queue:
-                return dict(self.queue[0])
+                head = self.queue[0]
+                if not head.get("id"):
+                    head["id"] = f"xhs_{int(time.time()*1000)}_{random.randint(100, 999)}"
+                return dict(head)
             return None
 
     def pop_success(self, item_id: str):
@@ -1100,12 +1281,63 @@ def extract_all_clean_targets(raw_text: str) -> list[tuple[str, str, str]]:
     return results
 
 
+def detect_commercial_ad(title: str, content: str, author: str = "") -> tuple[bool, str]:
+    """
+    智能拦截商业广告、车企营销、租车包车、代泊停车及无关商业软文
+    返回: (is_ad: bool, reason: str)
+    """
+    title = (title or "").strip()
+    content = (content or "").strip()
+    author = (author or "").strip()
+    full_text = f"{title} {author} {content}"
+
+    # 1. 账号主体黑名单：汽车租赁、租车、代泊、二手车、4S店、摄影工作室等商业服务号
+    commercial_author_kws = filter_cfg.get("author_blacklist_keywords", [
+        "汽车租赁", "租车公司", "租车服务", "汽车服务部", "汽车销售", 
+        "名车汇", "二手车", "4S店", "泊车", "代泊", "停车服务", "婚纱摄影", "装修设计",
+        "行李寄存", "无忧存", "小铁", "途简单", "存知己", "存包", "寄存平台"
+    ])
+    for akw in commercial_author_kws:
+        if akw in author:
+            return True, f"商业营销账号主体(作者包含'{akw}')"
+
+    # 2. 全文穿透广告/杂质拦截（解决剪贴板无关键词、下载后文案正文/话题藏暗桩的问题）
+    title_ad_patterns = filter_cfg.get("title_ad_patterns", [
+        r"提车(日记|记录|分享)?", r"喜提", r"新座驾", r"试驾(体验|报告)?", 
+        r"购车(指南|攻略|心得)?", r"选车(攻略)?", r"落地价", r"交付(日记|实况)",
+        r"(租车|包车)首选", r"专业的?(上海|杭州|江浙沪)?租车公司", r"\d+[-~至]\d+座.*(大巴|中巴|商务车).*包车",
+        r"机场停车(攻略)?.*(仅需|只要|天)", r"室内每天仅需\d+元", r"代泊",
+        r"摩登汽车", r"车模", r"车展实拍", r"车主真实(口碑|感受)",
+        r"寄存(点|柜|处|攻略)?", r"行李寄存", r"储物柜", r"存包(处|点|攻略)?", r"不拖箱",
+        r"亚宠展", r"宠物展", r"逛展(攻略)?", r"展会攻略", r"漫展", r"婚博会", r"铲屎官", r"养宠人", r"(仙本那|巴厘岛|大阪|清迈|普吉岛|马尔代夫|新马泰)", r"(CCD\s*(拍照|相机)?|生活感拍照)", r"(火鸡面|凤爪拌火鸡面)", r"(带娃出行|遛娃宝藏地|亲子餐厅)", r"(福利票|团购票|特价门票|早鸟票|代订门票)", r"(海鲜小馆|海鲜大排档|惊喜看过来|热卖好货|热销团购)", r"(外宴茶歇|自助餐上门|豪华包车)", r"(?i)staycation", r"(丝滑度假|酒店测评|情侣探店)"
+    ])
+    for pat in title_ad_patterns:
+        if re.search(pat, full_text):
+            return True, f"采集后入库拦截：正文/标题/话题命中营销杂质特征('{pat}')"
+
+    # 3. 车企/汽车软文特征（品牌车企宣传新车、自驾充电桩等营销）
+    car_brand_marketing = filter_cfg.get("content_ad_patterns", [
+        "摩登汽车", "岚图追光", r"充电站\d+\s*处", "沿途充电站", "纯电续航", "百公里电耗",
+        r"行李寄存", r"寄存点", r"自助寄存", r"储物柜", r"寄存柜", r"存包",
+        r"亚宠展", r"宠物展", r"逛展攻略", r"展会门票", r"薅羊毛指南"
+    ])
+    for cbm in car_brand_marketing:
+        if re.search(cbm, full_text):
+            return True, f"内容命中车企营销特征('{cbm}')"
+
+    # 4. 纯商业租车宣传特征
+    if any(k in title for k in ["租车", "包车", "客运"]) and any(k in full_text for k in ["常年提供", "苏沛", "锦路", "华轶"]):
+        return True, "内容命中租车/客运商业广告"
+
+    return False, ""
+
 # 核心下载执行函数
 def execute_download_and_file(target_url: str) -> tuple[bool, str, dict]:
     """
     执行万能下载器无感解包，并完成城市分流、四季硬链接、元数据打标。
     返回: (成功标志, 错误原因或最终文件夹名, 元数据字典)
     """
+    global MAX_IMAGE_ALLOWED
     is_note, type_msg = check_url_type(target_url)
     if not is_note:
         return False, type_msg, {}
@@ -1127,7 +1359,7 @@ def execute_download_and_file(target_url: str) -> tuple[bool, str, dict]:
 
     downloaded_dirs = [d for d in TEMP_DOWNLOAD_DIR.iterdir() if d.is_dir()]
     if not downloaded_dirs:
-        return False, f"未生成素材目录 (可能触发超过 {MAX_IMAGE_ALLOWED} 张前置熔断拦截或页面验证受限)", {}
+        return False, "UNKNOWN_NO_OUTPUT: 下载引擎未产出目录，原因未证实，保留任务并退避重试", {}
 
     work_dir = downloaded_dirs[0]
     folder_name = work_dir.name
@@ -1145,17 +1377,35 @@ def execute_download_and_file(target_url: str) -> tuple[bool, str, dict]:
         except:
             pass
 
-    # 校验是否真正下载到了图片 (防风控空壳)
+    # 校验是否真正下载到了媒体资源 (图片或视频均认可，防风控空壳)
+    VIDEO_SUFFIXES = [".mp4", ".mov", ".avi", ".mkv", ".webm"]
     images = [f for f in work_dir.iterdir() if f.suffix.lower() in [".jpg", ".png", ".jpeg", ".webp"]]
+    videos = [f for f in work_dir.iterdir() if f.suffix.lower() in VIDEO_SUFFIXES]
     img_count = len(images)
-    if img_count == 0:
-        return False, "解析未包含有效图片资源(可能触发页面验证)", {}
+    video_count = len(videos)
+    if img_count == 0 and video_count == 0:
+        return False, "解析未包含有效图片或视频资源(可能触发页面验证)", {}
 
     # 用户明确铁律：超过 15 张的超长素材一律不得落地入库，直接拦截丢弃
-    MAX_IMAGE_ALLOWED = 15
     if img_count > MAX_IMAGE_ALLOWED:
         shutil.rmtree(work_dir, ignore_errors=True)
         return False, f"素材图片超限({img_count}张 > 上限{MAX_IMAGE_ALLOWED}张)，触发超长过滤策略直接拦截丢弃", {}
+
+    # 提取作者信息
+    author_text = ""
+    m_stat = re.match(r"^评\d+-赞\d+-(.+?)-([^-]+)$", folder_name)
+    if m_stat:
+        author_text = m_stat.group(2).strip()
+    if not author_text and content_text:
+        m_auth = re.search(r"作者[：:]\s*(.+)", content_text)
+        if m_auth:
+            author_text = m_auth.group(1).strip()
+
+    # 商业广告与车企/租车/代泊等无关营销前置拦截过滤
+    is_ad, ad_reason = detect_commercial_ad(title_text, content_text, author_text)
+    if is_ad:
+        shutil.rmtree(work_dir, ignore_errors=True)
+        return False, f"检测到商业广告/营销软文({ad_reason})，触发广告拦截策略直接丢弃", {}
 
     # 动态检测当前采集路由模式 (自动识别模式 vs 手动定向归类模式)
     mode_info = get_current_collector_mode()
@@ -1168,6 +1418,7 @@ def execute_download_and_file(target_url: str) -> tuple[bool, str, dict]:
         target_category = manual_target
         target_city = manual_target
         is_unclassified = False
+        project_routed = None
         
         # 兼容相对路径（相对于素材库根目录）或绝对路径
         if Path(manual_target).is_absolute():
@@ -1176,22 +1427,34 @@ def execute_download_and_file(target_url: str) -> tuple[bool, str, dict]:
             city_dest_dir = BASE_MATERIAL_DIR / manual_target
         final_target_dir = city_dest_dir / folder_name
     else:
-        # 智能流量类型与目标二级分类/城市识别 (大合集/团建游戏直通顶层平级货架)
-        traffic_type, target_category = detect_traffic_and_category(title_text, content_text)
-        is_unclassified = (traffic_type == "未分类")
-
-        if is_unclassified:
-            # 用户明确要求：无法判断分类时，下载到 C 盘下载文件夹 (C:\Users\z\Downloads)
-            city_dest_dir = C_DOWNLOADS_DIR
-            target_city = "未分类(暂存C盘下载)"
+        # 项目级关键词路由 (最高优先级)：豆包拉新等命中即直落对应项目素材库
+        project_routed = None
+        route_key = detect_project_route(title_text, content_text) if curr_mode == "auto" else None
+        if route_key == "doubao_pullnew":
+            traffic_type = "项目路由"
+            target_category = "豆包拉新·参考爆款"
+            target_city = "豆包拉新"
+            is_unclassified = False
+            project_routed = route_key
+            city_dest_dir = DOUBAO_MATERIAL_DIR
             final_target_dir = city_dest_dir / folder_name
         else:
-            target_city = target_category
-            if traffic_type == "泛流量":
-                city_dest_dir = PAN_TRAFFIC_DIR / target_category
+            # 智能流量类型与目标二级分类/城市识别 (大合集/团建游戏直通顶层平级货架)
+            traffic_type, target_category = detect_traffic_and_category(title_text, content_text)
+            is_unclassified = (traffic_type == "未分类")
+
+            if is_unclassified:
+                # 用户明确要求：无法判断分类时，下载到 C 盘下载文件夹 (C:\Users\z\Downloads) 并飞书通知待人工定夺
+                city_dest_dir = C_DOWNLOADS_DIR
+                target_city = "未分类(暂存C盘下载)"
+                final_target_dir = city_dest_dir / folder_name
             else:
-                city_dest_dir = PRECISION_DIR / target_category
-            final_target_dir = city_dest_dir / folder_name
+                target_city = target_category
+                if traffic_type == "泛流量":
+                    city_dest_dir = PAN_TRAFFIC_DIR / target_category
+                else:
+                    city_dest_dir = PRECISION_DIR / target_category
+                final_target_dir = city_dest_dir / folder_name
 
     city_dest_dir.mkdir(parents=True, exist_ok=True)
     if final_target_dir.exists():
@@ -1216,7 +1479,7 @@ def execute_download_and_file(target_url: str) -> tuple[bool, str, dict]:
     # 季节判断与硬链接目录预备 (支持春、夏、秋、冬及四季通用多维穿透)
     # 注意：在手动定向模式下专注于该专项合集，不自动向四季目录扩散
     season_work_dirs = []
-    if curr_mode == "auto":
+    if curr_mode == "auto" and not project_routed:
         matched_seasons = detect_season_matches(title_text, content_text)
         season_name = "、".join(matched_seasons)
         if not is_unclassified:
@@ -1230,6 +1493,9 @@ def execute_download_and_file(target_url: str) -> tuple[bool, str, dict]:
                 # 严格按照 [季节]/[流量类型]/[城市或大盘]/[帖子包] 规范层级构建硬链接
                 s_target_dir = s_base / traffic_type / target_category / folder_name
                 season_work_dirs.append((s, s_target_dir))
+    elif project_routed:
+        matched_seasons = ["项目路由"]
+        season_name = "项目直达(无季节扩散)"
     else:
         matched_seasons = ["指定专题"]
         season_name = f"手动定向({manual_target})"
@@ -1251,7 +1517,8 @@ def execute_download_and_file(target_url: str) -> tuple[bool, str, dict]:
         "source": "剪贴板监听",
         "engine": "万能下载器 v3.8.3",
         "platform": platform,
-        "tags": ["剪切板下载", "万能下载器下载", f"{platform}图文", traffic_type, target_city] + [f"{s}素材" for s in matched_seasons],
+        "tags": ["剪切板下载", "万能下载器下载", f"{platform}{'视频' if video_count > 0 else '图文'}", traffic_type, target_city] + [f"{s}素材" for s in matched_seasons],
+        "project_route": project_routed or "",
         "downloaded_at": time.strftime("%Y-%m-%d %H:%M:%S"),
         "url": target_url,
         "source_url": target_url,
@@ -1259,6 +1526,9 @@ def execute_download_and_file(target_url: str) -> tuple[bool, str, dict]:
         "share_url": target_url,
         "images_count": img_count,
         "images_list": [f.name for f in images],
+        "note_type": "视频" if video_count > 0 else "图文",
+        "videos_count": video_count,
+        "videos_list": [f.name for f in videos],
         "content_length": len(content_text),
         "content_preview": content_text[:120].strip() if content_text else "",
         "folder_name": folder_name,
@@ -1276,16 +1546,14 @@ def execute_download_and_file(target_url: str) -> tuple[bool, str, dict]:
         if sys.stdout:
             print(f"[Metadata Error]: {e}")
 
-    # 确保文案.txt 底部写入可点击的原链接，便于人工直读与追溯
+    # 三大解耦铁律：文案.txt 严禁混入原链接元数据，原链接100%沉淀在 metadata.json 中
+    pass
+
+    # 项目路由命中：把原链接同步追加进对应项目的灵感链接 md (如豆包拉新·对标灵感链接)
     try:
-        final_txt_file = final_target_dir / "文案.txt"
-        if final_txt_file.exists():
-            raw_txt = final_txt_file.read_text(encoding="utf-8", errors="ignore")
-            if target_url not in raw_txt:
-                final_txt_file.write_text(raw_txt.rstrip() + f"\n\n原链接：{target_url}\n", encoding="utf-8")
-                log_daemon(f"📝 已在文案.txt底部追加原链接: {target_url}")
+        append_project_link_record(project_routed, title_text, target_url)
     except Exception as e:
-        log_daemon(f"⚠️ 追加文案原链接异常: {e}")
+        log_daemon(f"⚠️ 项目链接记录异常: {e}")
 
     # 四季分类与 NTFS 原生硬链接分发 (已识别地名才分发，跨卷自动降级保障 100% 留存)
     if not is_unclassified and season_work_dirs:
@@ -1350,8 +1618,20 @@ def queue_worker_loop(queue_mgr: QueueManager, history_set: set):
                 time.sleep(1.0)
                 continue
 
-            item_id = item["id"]
-            url = item["url"]
+            item_id = item.get("id")
+            if not item_id:
+                item_id = item["id"] = f"xhs_{int(time.time()*1000)}_{random.randint(100, 999)}"
+            url = item.get("url")
+            if not url:
+                queue_mgr.pop_discard(item_id, "缺少有效URL")
+                continue
+
+            if url in history_set:
+                if sys.stdout:
+                    print(f"[Worker Skip] URL already captured in history: {url}")
+                queue_mgr.pop_success(item_id)
+                continue
+
             title_hint = item.get("title_hint", "小红书笔记")
             retry_count = item.get("retry_count", 0)
 
@@ -1368,6 +1648,8 @@ def queue_worker_loop(queue_mgr: QueueManager, history_set: set):
                 # 记录到历史去重账本
                 history_set.add(url)
                 save_history(history_set)
+                # 有成功即清零连续失败计数（熔断只看"连续"）
+                reset_download_failure_streak()
                 
                 # 从待下载队列中移除
                 queue_mgr.pop_success(item_id)
@@ -1387,14 +1669,28 @@ def queue_worker_loop(queue_mgr: QueueManager, history_set: set):
                 is_unclassified = metadata.get("is_unclassified", False)
                 
                 platform = metadata.get("platform", "精选")
+                note_type = metadata.get("note_type", "图文")
+                vid_cnt = metadata.get("videos_count", 0)
+                content_len_notify = metadata.get("content_length", 0)
+                if vid_cnt and img_cnt:
+                    media_desc = f"{img_cnt} 张大图+{vid_cnt} 条视频"
+                elif vid_cnt:
+                    media_desc = f"{vid_cnt} 条视频"
+                else:
+                    media_desc = f"{img_cnt} 张原画大图"
+                if content_len_notify:
+                    media_desc += f"+{content_len_notify} 字文案"
                 queue_tip = f" (剩余 {rem_count} 篇排队中)" if rem_count > 0 else ""
-                
+
                 if is_unclassified:
-                    notify_text = f"⚠️ 未能识别地名（已暂存至C盘下载）：《{short_title}》\n📍 点击可直接打开 Downloads 文件夹{queue_tip}"
+                    notify_text = f"⚠️ 拿不准分类（已暂存至C盘下载，等你定夺）：《{short_title}》\n📍 点击可直接打开 Downloads 文件夹，认领后自行归位{queue_tip}"
                     send_desktop_notification(notify_text, title="素材待手动分类", status="warning", action_target=target_folder)
                 elif metadata.get("collection_mode") == "manual":
-                    notify_text = f"✅ 已定向采集入库（{platform}图文）：《{short_title}》\n📍 已归入【🎯 定向专题·{city}】（含 {img_cnt} 张原画大图+文案）{queue_tip}"
+                    notify_text = f"✅ 已定向采集入库（{platform}{note_type}）：《{short_title}》\n📍 已归入【🎯 定向专题·{city}】（含 {media_desc}）{queue_tip}"
                     send_desktop_notification(notify_text, title=f"{platform}定向专题采集", status="success", action_target=target_folder)
+                elif metadata.get("project_route") == "doubao_pullnew":
+                    notify_text = f"✅ 已采集入库（{platform}{note_type}·项目直达）：《{short_title}》\n📍 已归入【豆包拉新·参考爆款】，链接已记入对标灵感链接{queue_tip}"
+                    send_desktop_notification(notify_text, title=f"{platform}豆包拉新采集", status="success", action_target=target_folder)
                 else:
                     traffic_type = metadata.get("traffic_type", "精准流量")
                     if city == "大合集":
@@ -1405,7 +1701,7 @@ def queue_worker_loop(queue_mgr: QueueManager, history_set: set):
                         shelf_desc = f"顶层平级货架·泛流量个人攻略·{city}"
                     else:
                         shelf_desc = f"{traffic_type}·{city}"
-                    notify_text = f"✅ 已自动采集入库（{platform}图文）：《{short_title}》\n📍 已归入【{shelf_desc}】库（含 {img_cnt} 张原画大图+文案）{queue_tip}"
+                    notify_text = f"✅ 已自动采集入库（{platform}{note_type}）：《{short_title}》\n📍 已归入【{shelf_desc}】库（含 {media_desc}）{queue_tip}"
                     send_desktop_notification(notify_text, title=f"{platform}剪贴板采集", status="success", action_target=target_folder)
 
                 # 同步向飞书发送耗材入库卡片 (详细内容，不要图)
@@ -1413,6 +1709,23 @@ def queue_worker_loop(queue_mgr: QueueManager, history_set: set):
                 
                 if sys.stdout:
                     print(f"[Worker Success]: {final_title} filed to {city}")
+
+            elif "商业广告" in result_msg or "广告拦截" in result_msg or "营销软文" in result_msg:
+                # 商业广告与车企/租车/代泊等无关营销拦截策略
+                queue_mgr.pop_discard(item_id, result_msg)
+                rem_count = queue_mgr.get_remaining_count()
+                short_hint = title_hint[:22] + ("..." if len(title_hint) > 22 else "")
+                queue_tip = f" (队列剩余 {rem_count} 篇继续处理中)" if rem_count > 0 else ""
+                warn_notify = (
+                    f"🚫 商业广告已拦截丢弃：《{short_hint}》\n"
+                    f"💡 规则：严禁车企/租车/代泊/商业广告入库，{result_msg}{queue_tip}"
+                )
+                send_desktop_notification(warn_notify, title="商业广告拦截 (已丢弃)", status="warning", duration_ms=2500)
+                send_feishu_error_sync(title_hint, url, f"商业广告拦截丢弃: {result_msg}")
+                if sys.stdout:
+                    print(f"[Worker Discard Ad]: Discarded item {url} ({result_msg}), moving to next...")
+                time.sleep(1.0)
+                continue
 
             elif "素材图片超限" in result_msg or "超长过滤策略" in result_msg:
                 # 用户铁律：单篇素材严格限制 <= 15 张图，超过直接拦截丢弃并显式通知
@@ -1431,8 +1744,8 @@ def queue_worker_loop(queue_mgr: QueueManager, history_set: set):
                 time.sleep(1.0)
                 continue
 
-            elif any(k in result_msg for k in ["未能成功解析", "0目录产出", "404", "无法浏览", "获取数据失败", "UNSUPPORTED_PROFILE", "提取小红书作品链接失败", "暂不支持"]):
-                # 单篇资源级终态或解析受限（私密笔记/已删除/或缺少免登安全凭据）
+            elif any(k in result_msg for k in ["未能成功解析", "0目录产出", "404", "无法浏览", "获取数据失败", "UNSUPPORTED_PROFILE", "提取小红书作品链接失败", "暂不支持", "前置熔断", "超限"]):
+                # 单篇资源级终态或解析受限（私密笔记/已删除/或缺少免登安全凭据/超限前置拦截）
                 # 关键：这属于单篇笔记自身属性问题，绝非 IP 级风控，严禁触发长达数分钟的全局队头死锁！
                 queue_mgr.pop_discard(item_id, result_msg)
                 rem_count = queue_mgr.get_remaining_count()
@@ -1440,6 +1753,17 @@ def queue_worker_loop(queue_mgr: QueueManager, history_set: set):
                 queue_tip = f" (队列剩余 {rem_count} 篇继续处理中)" if rem_count > 0 else ""
 
                 if "UNSUPPORTED_PROFILE" in result_msg or "提取小红书作品链接失败" in result_msg:
+                    try:
+                        is_new, creator = register_benchmark_account(url, item.get("raw_text", ""), title_hint)
+                        if is_new:
+                            send_desktop_notification(
+                                f"🎯 检测到博主主页，已自动归档至【团建对标库】：《{creator}》\\n💡 已同步更新项目对标清单与第二大脑",
+                                title="对标账号自动建档",
+                                status="success",
+                                action_target=str(PROJECT_BENCHMARK_FILE)
+                            )
+                    except Exception:
+                        pass
                     warn_notify = (
                         f"⚠️ 链接类型不符或非单篇图文笔记：《{short_hint}》\n"
                         f"💡 提示：万能下载器专精单篇图文笔记采集，非图文已跳过{queue_tip}"
@@ -1449,13 +1773,19 @@ def queue_worker_loop(queue_mgr: QueueManager, history_set: set):
                 else:
                     warn_notify = (
                         f"⚠️ 单篇笔记解析受限已移入异常：《{short_hint}》\n"
-                        f"💡 原因: 笔记受限/私密或长链缺失Token{queue_tip}"
+                        f"💡 原因: {result_msg[:40]}{queue_tip}"
                     )
                     send_desktop_notification(warn_notify, title="单篇受限已跳过", status="warning")
                     send_feishu_error_sync(title_hint, url, f"单篇笔记解析受限或缺少Token ({result_msg[:40]})")
 
+                log_daemon(f"[Worker Discard]: Discarded item {url} ({result_msg}), moving to next...")
                 if sys.stdout:
                     print(f"[Worker Discard]: Discarded item {url} ({result_msg}), moving to next...")
+                # 连续失败熔断：同一通道连续挂掉说明是通道问题，不是单篇问题
+                _fail_n = record_download_failure(url, result_msg)
+                if _fail_n >= FAIL_PAUSE_THRESHOLD:
+                    trip_failure_pause(_fail_n, url, result_msg)
+                    return
                 # 仅保留拟人微间隔 1.5 秒，立即流转执行队列下一篇！
                 time.sleep(1.5)
                 continue
@@ -1480,12 +1810,19 @@ def queue_worker_loop(queue_mgr: QueueManager, history_set: set):
                     )
                     send_desktop_notification(cd_notify, title="冷却缓冲保护中", status="warning")
 
+                log_daemon(f"[Worker Warning]: {result_msg}, enter cooldown {backoff_sec}s")
                 if sys.stdout:
                     print(f"[Worker Warning]: {result_msg}, enter cooldown {backoff_sec}s")
+                # 连续失败熔断：网络/频次类失败同样计入
+                _fail_n = record_download_failure(url, result_msg)
+                if _fail_n >= FAIL_PAUSE_THRESHOLD:
+                    trip_failure_pause(_fail_n, url, result_msg)
+                    return
 
         except Exception as ex:
+            log_daemon(f"[Worker Loop Fatal Exception]: {ex}\n{traceback.format_exc()}")
             if sys.stdout:
-                print(f"[Worker Loop Exception]: {ex}")
+                print(f"[Worker Loop Fatal Exception]: {ex}")
             time.sleep(2.0)
 
 
@@ -1620,8 +1957,8 @@ def main():
             try:
                 is_cooling, _, _ = queue_mgr.is_cooling_down()
                 rem = queue_mgr.get_remaining_count()
-                status = "cooling" if is_cooling else ("downloading" if rem > 0 else "idle")
-                update_heartbeat(status=status, queue_len=rem, history_len=len(history_set))
+                status = "paused" if collection_paused() else ("worker_stopped" if not worker_t.is_alive() else ("cooling" if is_cooling else ("downloading" if rem > 0 else "idle")))
+                update_heartbeat(status=status, queue_len=rem, history_len=len(history_set), extra=json.dumps({"worker_alive": worker_t.is_alive(), "paused": collection_paused(), "current_url": (queue_mgr.peek() or {}).get("url"), "cooldown_until": queue_mgr.cooldown_until}, ensure_ascii=False))
             except Exception:
                 pass
             time.sleep(10.0)
@@ -1695,7 +2032,7 @@ def main():
                                 f"📥 已捕获灵感，排队加工中：《{short_hint}》\n"
                                 f"⏳ 当前排队: 第 {pos} 篇 (防风控拟人处理中{cool_tip}，完成后自动入库并同步飞书)"
                             )
-                            send_desktop_notification(notify_msg, title="采集中枢已捕获", status="info")
+                            send_desktop_notification(notify_msg, title="采集中枢已捕获", status="info", duration_ms=2500)
                         else:
                             if sys.stdout:
                                 print(f"[Skip] Already waiting in pending queue: {target_url}")
