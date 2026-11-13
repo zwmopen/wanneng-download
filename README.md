@@ -29,6 +29,10 @@
 
 Windows 和 AI Skill 的“多平台”表示会尝试处理公开媒体，不代表每个平台或每条内容永久可下载；遇到登录、验证码、地区限制或平台风控时会明确失败。Android/iPhone 不宣称已经同步 Windows 的全部平台能力。
 
+### 给其他 AI 的本地桥接接口
+
+仓库新增 `collector_bridge_api.py`，让同机其他 AI 通过标准 JSON 接口提交公开链接、轮询真实任务状态，并读取已经核实落盘的图片/视频。接口默认只监听 `127.0.0.1:8765`，不接收 Cookie、不读取浏览器登录态；使用方法见 [`docs/collector-bridge-api.md`](docs/collector-bridge-api.md)。
+
 ## V2.8.2 多平台范围
 
 Windows 和 AI Skill 首批识别：小红书、抖音、X/Twitter、B站、YouTube、TikTok、Instagram、Facebook、Pinterest、Reddit、Vimeo、Bluesky。小红书与抖音继续走原专用引擎，其他平台由本地 yt-dlp 和随包 FFmpeg 处理。

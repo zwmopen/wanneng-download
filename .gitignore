@@ -13,6 +13,8 @@ v2_test_output/
 clipboard_history.json
 clipboard_pending_queue.json
 collector_heartbeat.json
+collector_bridge_jobs.json
+bridge_staging/
 WebDriverAgentRunner*
 *.ipa
 *.tmp

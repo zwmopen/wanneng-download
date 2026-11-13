@@ -14,6 +14,12 @@
 - When launched as a Jianghu child with `JIANGHU_PROXY_URL`, the Douyin Edge session now uses that process-scoped proxy explicitly; standalone downloader behavior is unchanged when the variable is absent.
 - The adapter passes the same proxy to HTTP media requests through child-only `HTTP_PROXY`/`HTTPS_PROXY` variables; Windows system proxy settings are not modified.
 
+## [Unreleased collector bridge] - 2026-11-13
+
+- Added `collector_bridge_api.py`, a localhost-only bridge for other AI clients to submit public links, poll correlated jobs, and read only media files verified on disk.
+- Added capability/status envelopes and explicit `accepted`/`queued`/`running`/`completed`/`partial`/`blocked`/`failed` states; accepted work is never reported as parsed work.
+- The bridge does not accept cookies or browser login state. XHS jobs remain truthfully blocked when the local public-link endpoint redirects to login; Douyin can use the existing separate public browser route when the pause marker is XHS-specific.
+
 ## 3.6.0 剪贴板极速无感守护、待下载防风控队列、双平台解析与原生硬链接归档 — 2026-10-01
 
 - **剪贴板极速无感自动采集（Universal Clipboard Collector）**：
