@@ -7,6 +7,7 @@
 - Raised the local collector image cap to 30 for the current configured workspace.
 - Routed Task Scheduler, HKCU Run, and Startup shortcut through the repository launcher; the local config remains outside Git.
 - Restored the eight previously failed links from this batch and queued the additional Hangzhou link. The collector remains paused because XHS resolves to a login page and its local downloader cookie is unset.
+- Douyin's Playwright Edge session now receives the existing process HTTP(S) proxy when no Jianghu-scoped proxy is provided; direct navigation was closing the connection.
 
 ## [Unreleased Jianghu child proxy] - 2026-11-13
 

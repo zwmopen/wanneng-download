@@ -170,16 +170,24 @@ class DouyinBrowserEngine:
 
     @staticmethod
     def _browser_launch_options():
-        """Use a caller-scoped proxy when embedded by Jianghu; standalone stays unchanged."""
+        """Use an explicit caller or process proxy for the public Douyin page."""
         options = {"channel": "msedge", "headless": True}
         proxy = os.environ.get("JIANGHU_PROXY_URL", "").strip()
+        proxy_source = "JIANGHU_PROXY_URL"
+        if not proxy:
+            for env_name in ("HTTPS_PROXY", "https_proxy", "HTTP_PROXY", "http_proxy"):
+                candidate = os.environ.get(env_name, "").strip()
+                if candidate:
+                    proxy = candidate
+                    proxy_source = env_name
+                    break
         if not proxy:
             return options
         parsed = urlsplit(proxy)
         if (parsed.scheme not in {"http", "https", "socks5"}
                 or not parsed.hostname or parsed.username is not None
                 or parsed.password is not None):
-            raise ValueError("JIANGHU_PROXY_URL must be a valid HTTP(S) or SOCKS5 proxy URL")
+            raise ValueError(f"{proxy_source} must be a valid HTTP(S) or SOCKS5 proxy URL")
         options["proxy"] = {"server": proxy}
         return options
 
