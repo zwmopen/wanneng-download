@@ -3,6 +3,8 @@
 import json
 import os
 import threading
+import time
+import uuid
 from pathlib import Path
 
 
@@ -34,11 +36,36 @@ def _read_json(path, default):
 
 
 def _write_json(path, value):
-    temporary = path.with_suffix(path.suffix + ".tmp")
-    temporary.write_text(
-        json.dumps(value, ensure_ascii=False, indent=2), encoding="utf-8"
-    )
-    temporary.replace(path)
+    """Write JSON without sharing one fixed temp filename across processes.
+
+    The clipboard daemon and the Web/desktop downloader can finish at the
+    same time.  A shared ``history.json.tmp`` made those independent writers
+    collide on Windows and turned an otherwise successful download into a
+    failed task.  Give every writer its own sibling temp file and retry the
+    final replace briefly when another process still has the target open.
+    """
+    path.parent.mkdir(parents=True, exist_ok=True)
+    payload = json.dumps(value, ensure_ascii=False, indent=2)
+    last_error = None
+    for attempt in range(4):
+        temporary = path.with_name(
+            f".{path.name}.{os.getpid()}.{threading.get_ident()}."
+            f"{uuid.uuid4().hex}.tmp"
+        )
+        try:
+            temporary.write_text(payload, encoding="utf-8")
+            os.replace(temporary, path)
+            return
+        except PermissionError as exc:
+            last_error = exc
+            time.sleep(0.08 * (attempt + 1))
+        finally:
+            try:
+                temporary.unlink(missing_ok=True)
+            except OSError:
+                pass
+    if last_error:
+        raise last_error
 
 
 def add_history(download_url, note_id, title):
@@ -58,7 +85,12 @@ def add_history(download_url, note_id, title):
             if (old.get("笔记ID") or old.get("下载网址")) != key
         ]
         items.append(item)
-        _write_json(path, items)
+        try:
+            _write_json(path, items)
+        except OSError:
+            # History is an index, not the downloaded asset.  A locked index
+            # must not convert a valid local download into a failed task.
+            pass
     return path
 
 

@@ -349,6 +349,12 @@ BENCHMARK_FILE = PROJECT_BENCHMARK_FILE if PROJECT_BENCHMARK_FILE.exists() else 
 NORMAL_COOLDOWN_RANGE = tuple(rc_cfg.get("normal_cooldown_range", [15.0, 28.0]))
 DEEP_COOLDOWN_BASE = rc_cfg.get("deep_cooldown_base_seconds", 60)
 MAX_RETRIES = rc_cfg.get("max_retries", 4)
+try:
+    DOWNLOAD_TIMEOUT_SECONDS = max(
+        30, int(rc_cfg.get("download_timeout_seconds", 120))
+    )
+except Exception:
+    DOWNLOAD_TIMEOUT_SECONDS = 120
 
 # 引入万能下载器 CLI
 try:
@@ -1101,6 +1107,12 @@ class QueueManager:
                     self.failed.append(target)
                 else:
                     target["status"] = "cooling_down"
+                    # Do not let one platform-stalled link hold the queue
+                    # head while every later link waits behind it.  Keep the
+                    # retry record, move it to the tail, and let the next
+                    # item use the next attempt after the global cooldown.
+                    self.queue.remove(target)
+                    self.queue.append(target)
             
             self.cooldown_until = time.time() + cooldown_seconds
             self.cooldown_reason = f"风控退避保护: {error_msg[:40]}"
@@ -1355,7 +1367,18 @@ def execute_download_and_file(target_url: str) -> tuple[bool, str, dict]:
 
     saved_argv = sys.argv[:]
     try:
-        sys.argv = ["xhs-dl", target_url, "-o", str(TEMP_DOWNLOAD_DIR), "--mode", "fast", "--max-images", str(MAX_IMAGE_ALLOWED)]
+        sys.argv = [
+            "xhs-dl",
+            target_url,
+            "-o",
+            str(TEMP_DOWNLOAD_DIR),
+            "--mode",
+            "fast",
+            "--timeout",
+            str(DOWNLOAD_TIMEOUT_SECONDS),
+            "--max-images",
+            str(MAX_IMAGE_ALLOWED),
+        ]
         xhs_dl_main()
     except SystemExit:
         pass
