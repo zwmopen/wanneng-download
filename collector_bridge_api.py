@@ -36,6 +36,8 @@ from urllib.parse import parse_qsl, quote, urlencode, urlsplit, urlunsplit
 PROJECT_ROOT = Path(__file__).resolve().parent
 JOBS_FILE = PROJECT_ROOT / "collector_bridge_jobs.json"
 BRIDGE_STAGING_DIR = PROJECT_ROOT / "bridge_staging"
+UI_FILE = PROJECT_ROOT / "collector_bridge_ui.html"
+DOC_FILE = PROJECT_ROOT / "docs" / "collector-bridge-api.md"
 PROTOCOL = "collector-bridge/1"
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 8765
@@ -610,6 +612,37 @@ def _public_job(job: dict[str, Any]) -> dict[str, Any]:
     return value
 
 
+def _job_list() -> dict[str, Any]:
+    with JOBS_LOCK:
+        jobs = sorted(JOBS.values(), key=lambda item: item.get("created_at", ""), reverse=True)
+        items = []
+        for job in jobs[:50]:
+            result = job.get("result", {}) if isinstance(job.get("result"), dict) else {}
+            items.append({
+                "job_id": job.get("job_id"),
+                "task_id": job.get("task_id"),
+                "conversation_id": job.get("conversation_id"),
+                "operation": job.get("operation"),
+                "status": job.get("status"),
+                "created_at": job.get("created_at"),
+                "updated_at": job.get("updated_at"),
+                "client": job.get("client", {}),
+                "result": {
+                    "total": result.get("total", len(job.get("links", []))),
+                    "succeeded": result.get("succeeded", 0),
+                    "failed": result.get("failed", 0),
+                    "blocked": result.get("blocked", 0),
+                    "validated": result.get("validated", 0),
+                },
+            })
+    return {
+        "protocol": PROTOCOL,
+        "message_id": f"msg_{uuid.uuid4().hex}",
+        "api_online": True,
+        "items": items,
+    }
+
+
 def _capabilities() -> dict[str, Any]:
     pause = _pause_info()
     xhs_state = "blocked" if pause.get("paused") and re.search(r"小红书|xhs|登录", str(pause.get("reason", "")), re.I) else "unverified"
@@ -740,11 +773,20 @@ class BridgeHandler(BaseHTTPRequestHandler):
 
     def do_GET(self) -> None:  # noqa: N802
         path = urlsplit(self.path).path.rstrip("/") or "/"
+        if path in {"/", "/ui"}:
+            self._serve_ui()
+            return
+        if path == "/docs/collector-bridge-api.md":
+            self._serve_doc()
+            return
         if path == "/api/v1/capabilities":
             self._json(_capabilities())
             return
         if path == "/api/v1/status":
             self._json(_queue_status())
+            return
+        if path == "/api/v1/jobs":
+            self._json(_job_list())
             return
         match = re.fullmatch(r"/api/v1/jobs/([A-Za-z0-9_-]+)", path)
         if match:
@@ -769,6 +811,27 @@ class BridgeHandler(BaseHTTPRequestHandler):
             self._serve_asset(match.group(1), int(match.group(2)))
             return
         self._error("not found", 404)
+
+    def _serve_ui(self) -> None:
+        try:
+            data = UI_FILE.read_bytes()
+        except OSError:
+            data = b"<!doctype html><meta charset='utf-8'><title>Collector bridge</title><p>collector_bridge_ui.html not found.</p>"
+        self.send_response(200)
+        self._headers("text/html; charset=utf-8", len(data))
+        self.end_headers()
+        self.wfile.write(data)
+
+    def _serve_doc(self) -> None:
+        try:
+            data = DOC_FILE.read_bytes()
+        except OSError:
+            self._error("接口说明不存在", 404)
+            return
+        self.send_response(200)
+        self._headers("text/markdown; charset=utf-8", len(data))
+        self.end_headers()
+        self.wfile.write(data)
 
     def _serve_asset(self, job_id: str, asset_index: int) -> None:
         with JOBS_LOCK:

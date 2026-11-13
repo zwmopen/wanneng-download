@@ -12,11 +12,14 @@ python .\collector_bridge_api.py
 
 默认地址为 `http://127.0.0.1:8765`。如需让同一局域网内的另一个进程访问，必须明确传入 `--host`；默认不暴露到局域网。
 
+启动后直接打开 `http://127.0.0.1:8765/`，可以在可视化控制台里提交任务、查看队列/暂停原因、轮询任务进度，并点击已落盘的图片或视频。
+
 ## 能力与状态
 
 ```powershell
 curl.exe http://127.0.0.1:8765/api/v1/capabilities
 curl.exe http://127.0.0.1:8765/api/v1/status
+curl.exe http://127.0.0.1:8765/api/v1/jobs
 ```
 
 能力声明会标明：
