@@ -1291,6 +1291,13 @@ def detect_commercial_ad(title: str, content: str, author: str = "") -> tuple[bo
     author = (author or "").strip()
     full_text = f"{title} {author} {content}"
 
+    # 主题素材应优先保留：地点或亲子词出现在团建玩法里，不代表它是无关广告。
+    topic_keep_patterns = filter_cfg.get("topic_keep_patterns", [
+        r"胡闹厨房", r"团建", r"年会游戏", r"年会活动"
+    ])
+    if any(re.search(pattern, full_text) for pattern in topic_keep_patterns):
+        return False, "命中团建主题素材保留规则"
+
     # 1. 账号主体黑名单：汽车租赁、租车、代泊、二手车、4S店、摄影工作室等商业服务号
     commercial_author_kws = filter_cfg.get("author_blacklist_keywords", [
         "汽车租赁", "租车公司", "租车服务", "汽车服务部", "汽车销售", 
@@ -1744,7 +1751,7 @@ def queue_worker_loop(queue_mgr: QueueManager, history_set: set):
                 time.sleep(1.0)
                 continue
 
-            elif any(k in result_msg for k in ["未能成功解析", "0目录产出", "404", "无法浏览", "获取数据失败", "UNSUPPORTED_PROFILE", "提取小红书作品链接失败", "暂不支持", "前置熔断", "超限"]):
+            elif any(k in result_msg for k in ["未能成功解析", "0目录产出", "404", "无法浏览", "获取数据失败", "UNSUPPORTED_PROFILE", "暂不支持", "前置熔断", "超限"]):
                 # 单篇资源级终态或解析受限（私密笔记/已删除/或缺少免登安全凭据/超限前置拦截）
                 # 关键：这属于单篇笔记自身属性问题，绝非 IP 级风控，严禁触发长达数分钟的全局队头死锁！
                 queue_mgr.pop_discard(item_id, result_msg)
@@ -1752,7 +1759,7 @@ def queue_worker_loop(queue_mgr: QueueManager, history_set: set):
                 short_hint = title_hint[:22] + ("..." if len(title_hint) > 22 else "")
                 queue_tip = f" (队列剩余 {rem_count} 篇继续处理中)" if rem_count > 0 else ""
 
-                if "UNSUPPORTED_PROFILE" in result_msg or "提取小红书作品链接失败" in result_msg:
+                if "UNSUPPORTED_PROFILE" in result_msg:
                     try:
                         is_new, creator = register_benchmark_account(url, item.get("raw_text", ""), title_hint)
                         if is_new:

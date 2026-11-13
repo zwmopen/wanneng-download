@@ -70,8 +70,10 @@ V2 通过独立的 [XHS-Downloader](https://github.com/JoeanAmier/XHS-Downloader
 
 推荐使用 **v3.6.0 便携桌面版**：解压 `universal-downloader-v3.6.0-windows-portable.zip`：
 1. **图形界面**：双击 `万能下载器.exe`，粘贴链接即可开始采集；
-2. **极速剪贴板后台守护**：运行 `python universal_clipboard_collector.py`，随手复制小红书或抖音链接，后台 0.1s 极速侦测并自动下载入库；
+2. **极速剪贴板后台守护**：运行项目根目录的 `XHS-Clipboard-Collector.vbs`，它会加载本机外置配置并启动仓库里的采集器源码；随手复制小红书或抖音链接即可排队处理；
 3. 通用平台组件与本地解析引擎已经随包完整提供，电脑端采集抖音需要系统已安装 Microsoft Edge（不会读取 Edge 的个人资料或登录态）。
+
+直接运行源码时，先设置 `MATERIAL_HUB_CONFIG` 指向本机的 `config.json`；正式自启入口通过 `XHS-Clipboard-Collector.vbs` 设置该变量。配置、素材、队列和日志不进入 Git。
 
 在 PowerShell 中运行：
 

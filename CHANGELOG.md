@@ -1,5 +1,13 @@
 # 变更记录
 
+## [Unreleased Universal collector recovery] - 2026-11-13
+
+- Short-link extraction failures now remain retryable queue work instead of being classified as terminal unsupported content.
+- Added a team-building topic keep rule so generic travel and family keywords do not discard relevant `胡闹厨房` and team-building posts.
+- Raised the local collector image cap to 30 for the current configured workspace.
+- Routed Task Scheduler, HKCU Run, and Startup shortcut through the repository launcher; the local config remains outside Git.
+- Restored the eight previously failed links from this batch and queued the additional Hangzhou link. The collector remains paused because XHS resolves to a login page and its local downloader cookie is unset.
+
 ## [Unreleased Jianghu child proxy] - 2026-11-13
 
 - When launched as a Jianghu child with `JIANGHU_PROXY_URL`, the Douyin Edge session now uses that process-scoped proxy explicitly; standalone downloader behavior is unchanged when the variable is absent.
