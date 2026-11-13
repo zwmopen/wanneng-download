@@ -22,6 +22,7 @@
 - Added a local visual console at `/` for submitting jobs, viewing queue/heartbeat status, polling recent tasks, and opening verified on-disk assets.
 - The console now presents the product as “万能下载器 · 万能采集器”, keeps source image formats by default, makes the four status cards clickable, and wraps long pause messages without horizontal overflow.
 - Queue detail URLs are now real links backed by a local queue-id redirect endpoint, so clicking a displayed URL opens the recorded source instead of doing nothing.
+- Added an idempotent service launcher for the original downloader Web UI (`5678`) and the collector bridge console (`8765`); the dashboard links directly to the original downloader page.
 
 ## 3.6.0 剪贴板极速无感守护、待下载防风控队列、双平台解析与原生硬链接归档 — 2026-10-01
 

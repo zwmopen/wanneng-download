@@ -651,6 +651,11 @@ def _capabilities() -> dict[str, Any]:
         "service": "universal-collector-bridge",
         "api_online": True,
         "bind_default": DEFAULT_HOST,
+        "related_web_ui": {
+            "url": "http://127.0.0.1:5678/",
+            "port": 5678,
+            "role": "原版万能下载器 Web 界面；8765 控制台调用同一套本地引擎",
+        },
         "operations": ["capabilities", "status", "collect_and_parse", "fetch_asset"],
         "authentication": {
             "cookies_used": False,
