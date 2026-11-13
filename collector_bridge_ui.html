@@ -89,7 +89,8 @@
     .inspect-list { display:grid; gap:8px; max-height:360px; overflow:auto; }
     .inspect-row { display:grid; grid-template-columns: minmax(140px,.75fr) minmax(0,1.25fr); gap:12px; align-items:start; padding:11px 12px; border:1px solid var(--line); border-radius:13px; background:rgba(248,250,253,.68); font-size:12px; }
     .inspect-main { min-width:0; }
-    .inspect-url { color:var(--brand-dark); font-family:ui-monospace,SFMono-Regular,Consolas,monospace; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+    .inspect-url { display:block; color:var(--brand-dark); font-family:ui-monospace,SFMono-Regular,Consolas,monospace; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; text-decoration:none; cursor:pointer; }
+    .inspect-url:hover { text-decoration:underline; }
     .inspect-meta { margin-top:4px; color:var(--muted); line-height:1.6; }
     .inspect-error { color:var(--danger); line-height:1.6; overflow-wrap:anywhere; }
     .jobs-panel { margin-top: 18px; }
@@ -254,7 +255,7 @@
         if (!response.ok) throw new Error('队列明细读取失败');
         const data = await response.json();
         const items = data.items || [];
-        const html = items.length ? items.map(item => `<div class="inspect-row"><div class="inspect-main"><div class="inspect-url" title="${escapeHtml(item.url)}">${escapeHtml(item.url)}</div><div class="inspect-meta">${escapeHtml(item.status)} · 重试 ${escapeHtml(String(item.retry_count || 0))} 次 · ${escapeHtml(formatTime(item.added_at))}</div></div><div class="inspect-error">${escapeHtml(item.last_error || item.title_hint || '等待采集')}</div></div>`).join('') : '<div class="empty">待采集队列为空。</div>';
+        const html = items.length ? items.map(item => `<div class="inspect-row"><div class="inspect-main"><a class="inspect-url" href="/api/v1/queue/${encodeURIComponent(item.id)}/open" target="_blank" rel="noreferrer" title="点击打开 ${escapeHtml(item.url)}">${escapeHtml(item.url)}</a><div class="inspect-meta">${escapeHtml(item.status)} · 重试 ${escapeHtml(String(item.retry_count || 0))} 次 · ${escapeHtml(formatTime(item.added_at))}</div></div><div class="inspect-error">${escapeHtml(item.last_error || item.title_hint || '等待采集')}</div></div>`).join('') : '<div class="empty">待采集队列为空。</div>';
         showInspect('待采集队列明细', `共 ${items.length} 条；点击卡片后读取当前队列文件`, html);
       } catch (error) { showInspect('待采集队列明细', '', `<div class="empty">${escapeHtml(error.message)}</div>`); }
     }

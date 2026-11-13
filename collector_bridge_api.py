@@ -759,6 +759,19 @@ def _history_items() -> dict[str, Any]:
     }
 
 
+def _queue_url_for_id(item_id: str) -> str:
+    queue_file = getattr(_collector, "QUEUE_FILE", PROJECT_ROOT / "clipboard_pending_queue.json") if _collector is not None else PROJECT_ROOT / "clipboard_pending_queue.json"
+    data = _read_json_file(Path(queue_file), {})
+    raw_items = data.get("queue", []) if isinstance(data, dict) else []
+    for item in raw_items if isinstance(raw_items, list) else []:
+        if isinstance(item, dict) and str(item.get("id", "")) == item_id:
+            url = str(item.get("url", ""))
+            if re.match(r"^https?://", url, re.I):
+                return url
+            break
+    return ""
+
+
 class BridgeHandler(BaseHTTPRequestHandler):
     server_version = "UniversalCollectorBridge/1"
 
@@ -831,6 +844,17 @@ class BridgeHandler(BaseHTTPRequestHandler):
             return
         if path == "/api/v1/history":
             self._json(_history_items())
+            return
+        match = re.fullmatch(r"/api/v1/queue/([A-Za-z0-9_-]+)/open", path)
+        if match:
+            target_url = _queue_url_for_id(match.group(1))
+            if not target_url:
+                self._error("队列链接不存在", 404)
+                return
+            self.send_response(302)
+            self._headers("text/plain; charset=utf-8", 0)
+            self.send_header("Location", target_url)
+            self.end_headers()
             return
         if path == "/api/v1/jobs":
             self._json(_job_list())

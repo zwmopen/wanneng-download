@@ -21,6 +21,7 @@
 - The bridge does not accept cookies or browser login state. XHS jobs remain truthfully blocked when the local public-link endpoint redirects to login; Douyin can use the existing separate public browser route when the pause marker is XHS-specific.
 - Added a local visual console at `/` for submitting jobs, viewing queue/heartbeat status, polling recent tasks, and opening verified on-disk assets.
 - The console now presents the product as “万能下载器 · 万能采集器”, keeps source image formats by default, makes the four status cards clickable, and wraps long pause messages without horizontal overflow.
+- Queue detail URLs are now real links backed by a local queue-id redirect endpoint, so clicking a displayed URL opens the recorded source instead of doing nothing.
 
 ## 3.6.0 剪贴板极速无感守护、待下载防风控队列、双平台解析与原生硬链接归档 — 2026-10-01
 
