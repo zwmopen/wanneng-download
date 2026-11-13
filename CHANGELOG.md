@@ -1,5 +1,10 @@
 # 变更记录
 
+## [Unreleased Jianghu child proxy] - 2026-11-13
+
+- When launched as a Jianghu child with `JIANGHU_PROXY_URL`, the Douyin Edge session now uses that process-scoped proxy explicitly; standalone downloader behavior is unchanged when the variable is absent.
+- The adapter passes the same proxy to HTTP media requests through child-only `HTTP_PROXY`/`HTTPS_PROXY` variables; Windows system proxy settings are not modified.
+
 ## 3.6.0 剪贴板极速无感守护、待下载防风控队列、双平台解析与原生硬链接归档 — 2026-10-01
 
 - **剪贴板极速无感自动采集（Universal Clipboard Collector）**：

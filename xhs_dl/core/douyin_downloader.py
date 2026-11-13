@@ -5,10 +5,12 @@ the public detail page because a plain HTTP client receives an anti-bot shell.
 Only the current work's public metadata and media URLs are read.
 """
 
+import os
 import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import List
+from urllib.parse import urlsplit
 import requests
 
 from .models import NoteResult
@@ -166,6 +168,21 @@ class DouyinBrowserEngine:
         self.timeout = timeout
         self.image_format = image_format
 
+    @staticmethod
+    def _browser_launch_options():
+        """Use a caller-scoped proxy when embedded by Jianghu; standalone stays unchanged."""
+        options = {"channel": "msedge", "headless": True}
+        proxy = os.environ.get("JIANGHU_PROXY_URL", "").strip()
+        if not proxy:
+            return options
+        parsed = urlsplit(proxy)
+        if (parsed.scheme not in {"http", "https", "socks5"}
+                or not parsed.hostname or parsed.username is not None
+                or parsed.password is not None):
+            raise ValueError("JIANGHU_PROXY_URL must be a valid HTTP(S) or SOCKS5 proxy URL")
+        options["proxy"] = {"server": proxy}
+        return options
+
     def _extract_page(self, url):
         try:
             from playwright.sync_api import sync_playwright
@@ -174,7 +191,7 @@ class DouyinBrowserEngine:
 
         try:
             with sync_playwright() as playwright:
-                browser = playwright.chromium.launch(channel="msedge", headless=True)
+                browser = playwright.chromium.launch(**self._browser_launch_options())
                 context = browser.new_context(
                     locale="zh-CN",
                     user_agent=(

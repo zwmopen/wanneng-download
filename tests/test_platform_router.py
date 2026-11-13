@@ -49,6 +49,29 @@ def test_group_urls_keeps_each_platform_separate_and_preserves_order():
     }
 
 
+def test_douyin_edge_proxy_is_scoped_to_jianghu_child_process(monkeypatch):
+    from xhs_dl.core.douyin_downloader import DouyinBrowserEngine
+
+    monkeypatch.delenv("JIANGHU_PROXY_URL", raising=False)
+    assert DouyinBrowserEngine._browser_launch_options() == {
+        "channel": "msedge", "headless": True,
+    }
+
+    monkeypatch.setenv("JIANGHU_PROXY_URL", "http://127.0.0.1:7896")
+    assert DouyinBrowserEngine._browser_launch_options() == {
+        "channel": "msedge", "headless": True,
+        "proxy": {"server": "http://127.0.0.1:7896"},
+    }
+
+    monkeypatch.setenv("JIANGHU_PROXY_URL", "http://user:password@127.0.0.1:7896")
+    try:
+        DouyinBrowserEngine._browser_launch_options()
+    except ValueError as exc:
+        assert "valid" in str(exc)
+    else:
+        raise AssertionError("proxy credentials must not be accepted")
+
+
 def test_douyin_payload_becomes_download_work_with_expected_folder_and_copy():
     from xhs_dl.core.douyin_downloader import DouyinWork
 
