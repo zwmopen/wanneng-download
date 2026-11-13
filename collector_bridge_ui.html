@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>万能采集器 · 本地控制台</title>
+  <title>万能下载器 · 万能采集器控制台</title>
   <style>
     :root {
       color-scheme: light;
@@ -25,6 +25,7 @@
     body {
       margin: 0;
       min-height: 100vh;
+      overflow-x: hidden;
       color: var(--text);
       background:
         radial-gradient(circle at 15% 0%, rgba(117,166,255,.20), transparent 28rem),
@@ -52,8 +53,12 @@
     .dot.warn { background: var(--warning); box-shadow: 0 0 0 5px rgba(184,109,0,.12); }
     .dot.bad { background: var(--danger); box-shadow: 0 0 0 5px rgba(192,61,80,.12); }
     .metrics { display:grid; grid-template-columns: repeat(4, minmax(0,1fr)); gap: 14px; margin-bottom: 18px; }
+    .metrics > *, .grid > * { min-width:0; }
     .metric, .panel { background: var(--panel); border: 1px solid rgba(219,228,239,.88); box-shadow: var(--shadow); border-radius: var(--radius); }
     .metric { padding: 18px 19px; }
+    .metric-button { width:100%; color:inherit; font:inherit; text-align:left; cursor:pointer; appearance:none; transition: transform .16s ease, box-shadow .16s ease, border-color .16s ease; }
+    .metric-button:hover { transform: translateY(-2px); border-color:#a9c3ff; box-shadow:0 22px 46px rgba(30,55,90,.13), 0 4px 12px rgba(30,55,90,.06); }
+    .metric-button:focus-visible { outline:3px solid rgba(47,109,246,.28); outline-offset:3px; }
     .metric-label { color: var(--muted); font-size: 12px; font-weight: 700; }
     .metric-value { margin-top: 8px; font-size: 28px; font-weight: 850; letter-spacing: -.04em; }
     .metric-note { margin-top: 4px; color: var(--muted); font-size: 11px; white-space: nowrap; overflow:hidden; text-overflow:ellipsis; }
@@ -73,12 +78,20 @@
     .check input { width: 16px; height: 16px; accent-color: var(--brand); }
     .hint { color: var(--muted); font-size: 11px; line-height: 1.6; }
     .message { min-height: 20px; margin: 10px 0 0; color: var(--muted); font-size: 12px; white-space: pre-wrap; }
-    .health-list { display:grid; gap: 10px; }
-    .health-row { display:flex; justify-content:space-between; align-items:center; gap: 12px; padding: 12px 13px; border: 1px solid var(--line); border-radius: 14px; background: rgba(248,250,253,.68); }
-    .health-name { font-size: 12px; font-weight: 800; }
-    .health-value { color: var(--muted); text-align:right; font-size: 12px; max-width: 65%; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+    .health-list { display:grid; gap: 10px; min-width:0; }
+    .health-row { display:flex; justify-content:space-between; align-items:center; gap: 12px; min-width:0; overflow:hidden; padding: 12px 13px; border: 1px solid var(--line); border-radius: 14px; background: rgba(248,250,253,.68); }
+    .health-name { flex:0 0 92px; min-width:0; font-size: 12px; font-weight: 800; }
+    .health-value { flex:1 1 auto; min-width:0; color: var(--muted); text-align:right; font-size: 12px; overflow:hidden; text-overflow:ellipsis; overflow-wrap:anywhere; white-space:normal; }
     .notice { margin-top: 12px; padding: 13px 14px; border-radius: 14px; background: #fff7e8; border: 1px solid #f2d49a; color: #875a08; font-size: 12px; line-height: 1.7; }
     .notice.ok { background: #edf9f3; border-color: #b9e8d0; color: #146b4d; }
+    .inspect { margin-top: 18px; }
+    .inspect.hidden { display:none; }
+    .inspect-list { display:grid; gap:8px; max-height:360px; overflow:auto; }
+    .inspect-row { display:grid; grid-template-columns: minmax(140px,.75fr) minmax(0,1.25fr); gap:12px; align-items:start; padding:11px 12px; border:1px solid var(--line); border-radius:13px; background:rgba(248,250,253,.68); font-size:12px; }
+    .inspect-main { min-width:0; }
+    .inspect-url { color:var(--brand-dark); font-family:ui-monospace,SFMono-Regular,Consolas,monospace; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+    .inspect-meta { margin-top:4px; color:var(--muted); line-height:1.6; }
+    .inspect-error { color:var(--danger); line-height:1.6; overflow-wrap:anywhere; }
     .jobs-panel { margin-top: 18px; }
     .table-wrap { overflow:auto; }
     table { width:100%; border-collapse: collapse; min-width: 720px; }
@@ -107,16 +120,16 @@
     .empty { padding: 28px 12px; text-align:center; color:var(--muted); font-size:12px; }
     footer { margin-top: 20px; color: var(--muted); text-align:center; font-size: 11px; line-height:1.7; }
     @media (max-width: 900px) { .metrics { grid-template-columns: repeat(2, minmax(0,1fr)); } .grid { grid-template-columns: 1fr; } }
-    @media (max-width: 560px) { .shell { width:min(100% - 24px, 1240px); padding-top:18px; } .topbar { flex-direction:column; } .actions { justify-content:flex-start; } .metrics { gap:10px; } .metric { padding:14px; } .metric-value { font-size:24px; } .panel { padding:17px; } .options { grid-template-columns:1fr; } }
+    @media (max-width: 560px) { .shell { width:min(100% - 24px, 1240px); padding-top:18px; } .topbar { flex-direction:column; } .actions { justify-content:flex-start; } .metrics { gap:10px; } .metric { padding:14px; } .metric-value { font-size:24px; } .panel { padding:17px; } .options { grid-template-columns:1fr; } .inspect-row { grid-template-columns:1fr; gap:5px; } .health-name { flex-basis:80px; } }
   </style>
 </head>
 <body>
   <div class="shell">
     <header class="topbar">
       <div>
-        <div class="eyebrow">LOCAL ONLY · COLLECTOR-BRIDGE/1</div>
-        <h1>万能采集器控制台</h1>
-        <p class="subtitle">提交公开链接，查看真实回执，直接打开已落盘的图片和视频。</p>
+        <div class="eyebrow">UNIVERSAL DOWNLOADER · COLLECTOR-BRIDGE/1</div>
+        <h1>万能下载器 · 万能采集器</h1>
+        <p class="subtitle">统一提交公开链接，剪切板只是入口；查看真实回执，直接打开已落盘的图片和视频。</p>
       </div>
       <div class="actions">
         <span class="status-pill"><span class="dot" id="apiDot"></span><span id="apiText">正在连接</span></span>
@@ -126,10 +139,15 @@
     </header>
 
     <section class="metrics">
-      <div class="metric"><div class="metric-label">待采集队列</div><div class="metric-value" id="queueCount">—</div><div class="metric-note" id="queueNote">读取中</div></div>
-      <div class="metric"><div class="metric-label">历史记录</div><div class="metric-value" id="historyCount">—</div><div class="metric-note">已登记链接</div></div>
-      <div class="metric"><div class="metric-label">桥接任务</div><div class="metric-value" id="jobCount">—</div><div class="metric-note">本地任务档案</div></div>
-      <div class="metric"><div class="metric-label">XHS 状态</div><div class="metric-value" id="xhsState">—</div><div class="metric-note" id="xhsNote">能力读取中</div></div>
+      <button class="metric metric-button" data-view="queue" type="button"><div class="metric-label">待采集队列</div><div class="metric-value" id="queueCount">—</div><div class="metric-note" id="queueNote">点击查看链接明细</div></button>
+      <button class="metric metric-button" data-view="history" type="button"><div class="metric-label">历史记录</div><div class="metric-value" id="historyCount">—</div><div class="metric-note">点击查看最近记录</div></button>
+      <button class="metric metric-button" data-view="jobs" type="button"><div class="metric-label">桥接任务</div><div class="metric-value" id="jobCount">—</div><div class="metric-note">点击跳到任务表</div></button>
+      <button class="metric metric-button" data-view="health" type="button"><div class="metric-label">XHS 状态</div><div class="metric-value" id="xhsState">—</div><div class="metric-note" id="xhsNote">点击查看暂停详情</div></button>
+    </section>
+
+    <section class="panel inspect hidden" id="inspectPanel">
+      <div class="panel-head"><div><h2 class="panel-title" id="inspectTitle">明细</h2><p class="panel-kicker" id="inspectMeta">—</p></div><button class="button-secondary" id="closeInspect" type="button">收起</button></div>
+      <div class="inspect-list" id="inspectContent"></div>
     </section>
 
     <main class="grid">
@@ -139,7 +157,7 @@
           <label class="field-label" for="sourceText">分享文本或链接</label>
           <textarea id="sourceText" placeholder="例如：\n上海胡闹厨房 https://xhslink.cn/o/example\n或粘贴一整段小红书 / 抖音分享文案"></textarea>
           <div class="options">
-            <div><label class="field-label" for="format">图片格式</label><select id="format"><option value="jpg">JPG</option><option value="png">PNG</option><option value="keep">保持原格式</option></select></div>
+            <div><label class="field-label" for="format">图片格式</label><select id="format"><option value="keep" selected>保持原格式</option><option value="jpg">JPG</option><option value="png">PNG</option></select></div>
             <div><label class="field-label" for="clientName">调用方名称</label><input id="clientName" value="local-console" autocomplete="off"></div>
           </div>
           <div class="composer-foot">
@@ -175,7 +193,7 @@
       <div class="result-list" id="resultList"></div>
     </section>
 
-    <footer>本地服务只绑定 127.0.0.1 · 任务状态以服务端回读为准 · accepted 不等于 completed</footer>
+    <footer>万能下载器 · 万能采集器 · 本地服务只绑定 127.0.0.1 · 任务状态以服务端回读为准 · accepted 不等于 completed</footer>
   </div>
 
   <script>
@@ -220,6 +238,41 @@
         $('healthNotice').className = 'notice';
         $('healthNotice').textContent = `无法读取本地状态：${error.message}`;
       }
+    }
+
+    function showInspect(title, meta, html) {
+      $('inspectTitle').textContent = title;
+      $('inspectMeta').textContent = meta || '';
+      $('inspectContent').innerHTML = html || '<div class="empty">没有明细。</div>';
+      $('inspectPanel').classList.remove('hidden');
+      $('inspectPanel').scrollIntoView({behavior:'smooth', block:'start'});
+    }
+
+    async function showQueue() {
+      try {
+        const response = await fetch('/api/v1/queue');
+        if (!response.ok) throw new Error('队列明细读取失败');
+        const data = await response.json();
+        const items = data.items || [];
+        const html = items.length ? items.map(item => `<div class="inspect-row"><div class="inspect-main"><div class="inspect-url" title="${escapeHtml(item.url)}">${escapeHtml(item.url)}</div><div class="inspect-meta">${escapeHtml(item.status)} · 重试 ${escapeHtml(String(item.retry_count || 0))} 次 · ${escapeHtml(formatTime(item.added_at))}</div></div><div class="inspect-error">${escapeHtml(item.last_error || item.title_hint || '等待采集')}</div></div>`).join('') : '<div class="empty">待采集队列为空。</div>';
+        showInspect('待采集队列明细', `共 ${items.length} 条；点击卡片后读取当前队列文件`, html);
+      } catch (error) { showInspect('待采集队列明细', '', `<div class="empty">${escapeHtml(error.message)}</div>`); }
+    }
+
+    async function showHistory() {
+      try {
+        const response = await fetch('/api/v1/history');
+        if (!response.ok) throw new Error('历史记录读取失败');
+        const data = await response.json();
+        const items = data.items || [];
+        const html = items.length ? items.map((url, index) => `<div class="inspect-row"><div class="inspect-main"><div class="inspect-meta">最近第 ${index + 1} 条</div></div><div class="inspect-url" title="${escapeHtml(url)}">${escapeHtml(url)}</div></div>`).join('') : '<div class="empty">还没有历史记录。</div>';
+        showInspect('最近历史记录', `共 ${data.history_count || 0} 条，页面展示最近 ${items.length} 条`, html);
+      } catch (error) { showInspect('最近历史记录', '', `<div class="empty">${escapeHtml(error.message)}</div>`); }
+    }
+
+    function focusSection(selector) {
+      const target = document.querySelector(selector);
+      if (target) target.scrollIntoView({behavior:'smooth', block:'start'});
     }
 
     async function loadJobs() {
@@ -288,6 +341,14 @@
     $('refreshButton').addEventListener('click', () => { loadHealth(); loadJobs(); });
     $('jobsRefresh').addEventListener('click', loadJobs);
     $('closeDetail').addEventListener('click', () => { clearTimeout(pollTimer); $('detailPanel').classList.add('hidden'); selectedJob = ''; });
+    $('closeInspect').addEventListener('click', () => $('inspectPanel').classList.add('hidden'));
+    document.querySelectorAll('[data-view]').forEach(card => card.addEventListener('click', () => {
+      const view = card.dataset.view;
+      if (view === 'queue') showQueue();
+      else if (view === 'history') showHistory();
+      else if (view === 'jobs') focusSection('.jobs-panel');
+      else if (view === 'health') focusSection('.grid > .panel:nth-child(2)');
+    }));
     loadHealth(); loadJobs();
     setInterval(() => { loadHealth(); loadJobs(); if (selectedJob) showJob(selectedJob); }, 6000);
   </script>

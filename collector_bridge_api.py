@@ -415,7 +415,7 @@ def _collect_one(job_id: str, index: int, target: dict[str, str], options: dict[
         _update_link(job_id, index, **base)
         return base
 
-    image_format = str(options.get("image_format") or "jpg")
+    image_format = str(options.get("image_format") or "keep")
     if image_format not in {"jpg", "png", "keep"}:
         image_format = "jpg"
     try:
@@ -592,7 +592,7 @@ def _queue_job(targets: list[dict[str, str]], client: dict[str, Any], conversati
         "client": {"name": str(client.get("name") or "unknown")[:120], "version": str(client.get("version") or "")[:80]},
         "receipt": {"state": "accepted", "accepted_at": now},
         "links": links,
-        "options": {"dry_run": bool(options.get("dry_run")), "image_format": options.get("image_format", "jpg"), "max_images": options.get("max_images", 30)},
+        "options": {"dry_run": bool(options.get("dry_run")), "image_format": options.get("image_format", "keep"), "max_images": options.get("max_images", 30)},
         "result": {"dry_run": bool(options.get("dry_run")), "total": len(links), "succeeded": 0, "failed": 0, "blocked": 0, "validated": 0, "assets": []},
         "error": "",
         "retryable": False,
@@ -718,6 +718,47 @@ def _queue_status() -> dict[str, Any]:
     }
 
 
+def _queue_items() -> dict[str, Any]:
+    queue_file = getattr(_collector, "QUEUE_FILE", PROJECT_ROOT / "clipboard_pending_queue.json") if _collector is not None else PROJECT_ROOT / "clipboard_pending_queue.json"
+    data = _read_json_file(Path(queue_file), {})
+    raw_items = data.get("queue", []) if isinstance(data, dict) else []
+    items = []
+    for item in raw_items if isinstance(raw_items, list) else []:
+        if not isinstance(item, dict):
+            continue
+        items.append({
+            "id": item.get("id", ""),
+            "url": _redact_url(str(item.get("url", ""))),
+            "title_hint": str(item.get("title_hint", ""))[:300],
+            "status": item.get("status", "pending"),
+            "retry_count": item.get("retry_count", 0),
+            "last_error": _redact_text(item.get("last_error", "")) if item.get("last_error") else "",
+            "added_at": item.get("added_at", ""),
+        })
+    return {
+        "protocol": PROTOCOL,
+        "message_id": f"msg_{uuid.uuid4().hex}",
+        "api_online": True,
+        "queue_count": len(items),
+        "items": items,
+    }
+
+
+def _history_items() -> dict[str, Any]:
+    history_file = getattr(_collector, "HISTORY_FILE", PROJECT_ROOT / "clipboard_history.json") if _collector is not None else PROJECT_ROOT / "clipboard_history.json"
+    data = _read_json_file(Path(history_file), {})
+    raw_urls = data.get("urls", []) if isinstance(data, dict) else []
+    urls = [_redact_url(str(value)) for value in raw_urls if value]
+    return {
+        "protocol": PROTOCOL,
+        "message_id": f"msg_{uuid.uuid4().hex}",
+        "api_online": True,
+        "history_count": len(urls),
+        "updated_at": data.get("updated_at", "") if isinstance(data, dict) else "",
+        "items": list(reversed(urls[-50:])),
+    }
+
+
 class BridgeHandler(BaseHTTPRequestHandler):
     server_version = "UniversalCollectorBridge/1"
 
@@ -784,6 +825,12 @@ class BridgeHandler(BaseHTTPRequestHandler):
             return
         if path == "/api/v1/status":
             self._json(_queue_status())
+            return
+        if path == "/api/v1/queue":
+            self._json(_queue_items())
+            return
+        if path == "/api/v1/history":
+            self._json(_history_items())
             return
         if path == "/api/v1/jobs":
             self._json(_job_list())
@@ -893,7 +940,7 @@ class BridgeHandler(BaseHTTPRequestHandler):
         options = body.get("options") if isinstance(body.get("options"), dict) else {}
         safe_options = {
             "dry_run": bool(options.get("dry_run", False)),
-            "image_format": str(options.get("image_format") or "jpg"),
+            "image_format": str(options.get("image_format") or "keep"),
             "max_images": options.get("max_images", 30),
         }
         response = _queue_job(targets, client, conversation_id, safe_options)

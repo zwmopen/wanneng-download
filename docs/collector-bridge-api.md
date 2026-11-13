@@ -14,6 +14,8 @@ python .\collector_bridge_api.py
 
 启动后直接打开 `http://127.0.0.1:8765/`，可以在可视化控制台里提交任务、查看队列/暂停原因、轮询任务进度，并点击已落盘的图片或视频。
 
+控制台的图片格式默认是“保持原格式”；顶部四个指标卡可以点击，分别展开队列、历史记录、任务表和运行状态。
+
 ## 能力与状态
 
 ```powershell
@@ -39,7 +41,7 @@ $body = @{
   text = '上海胡闹厨房 https://xhslink.cn/o/example'
   conversation_id = 'other-ai-demo-001'
   client = @{ name = 'other-ai'; version = '1.0' }
-  options = @{ dry_run = $false; image_format = 'jpg' }
+  options = @{ dry_run = $false; image_format = 'keep' }
 } | ConvertTo-Json -Depth 5
 
 curl.exe -X POST http://127.0.0.1:8765/api/v1/jobs `
