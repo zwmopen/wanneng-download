@@ -103,8 +103,8 @@
     .status { display:inline-flex; align-items:center; padding: 4px 8px; border-radius: 999px; font-size: 11px; font-weight: 800; }
     .status.completed { background:#e8f8f0; color:var(--success); }
     .status.running, .status.queued, .status.accepted { background:#eaf1ff; color:#295dc9; }
-    .status.partial, .status.validated { background:#fff6e7; color:var(--warning); }
-    .status.blocked, .status.failed { background:#ffedf0; color:var(--danger); }
+    .status.partial, .status.validated, .status.blocked { background:#fff6e7; color:var(--warning); }
+    .status.failed { background:#ffedf0; color:var(--danger); }
     .link-button { padding:0; border:0; background:transparent; color:var(--brand-dark); cursor:pointer; font:inherit; font-family:ui-monospace, SFMono-Regular, Consolas, monospace; }
     .detail { margin-top: 18px; }
     .detail.hidden { display:none; }
@@ -203,7 +203,7 @@
     let pollTimer = null;
     let selectedJob = '';
     const finalStates = new Set(['completed','partial','blocked','failed']);
-    const labels = {queued:'排队中', running:'采集中', validated:'已校验', completed:'已完成', partial:'部分完成', blocked:'已阻塞', failed:'失败'};
+    const labels = {queued:'排队中', running:'采集中', validated:'已校验', completed:'已完成', partial:'部分完成', blocked:'平台等待', failed:'失败'};
     function escapeHtml(value) { return String(value ?? '').replace(/[&<>"']/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch])); }
     function statusHtml(value) { const key = String(value || 'queued'); return `<span class="status ${escapeHtml(key)}">${escapeHtml(labels[key] || key)}</span>`; }
     function formatTime(value) { if (!value) return '—'; const d = new Date(value); return Number.isNaN(d.getTime()) ? escapeHtml(value) : d.toLocaleString('zh-CN', {hour12:false}); }
@@ -224,7 +224,7 @@
         setMetric('jobCount', status.bridge ? status.bridge.persisted_jobs : null);
         $('queueNote').textContent = paused ? '采集器已暂停' : '等待处理';
         const xhsState = caps.platforms?.xhs?.state || 'unknown';
-        $('xhsState').textContent = xhsState === 'blocked' ? '阻塞' : xhsState;
+        $('xhsState').textContent = xhsState === 'blocked' ? '平台等待' : xhsState;
         $('xhsNote').textContent = caps.platforms?.xhs?.blocked_reason || '匿名公开路径';
         $('collectorState').textContent = paused ? '暂停' : (c.process_alive || '未知');
         $('pauseReason').textContent = paused ? (c.pause.reason || '暂停标记存在') : '无暂停标记';
@@ -233,7 +233,7 @@
         $('douyinState').textContent = caps.platforms?.douyin?.state || 'unknown';
         $('authState').textContent = caps.authentication?.cookies_used === false ? '不读取 Cookie' : '未确认';
         const notice = $('healthNotice');
-        if (paused) { notice.className = 'notice'; notice.textContent = `当前暂停：${c.pause.reason || '暂停标记存在'}。新 XHS 任务会如实返回 blocked。`; }
+        if (paused) { notice.className = 'notice'; notice.textContent = `当前暂停：${c.pause.reason || '暂停标记存在'}。新 XHS 任务会标记为“平台等待”（接口状态仍为 blocked）。`; }
         else { notice.className = 'notice ok'; notice.textContent = '采集器没有暂停标记，桥接服务可以继续接收任务。'; }
       } catch (error) {
         setApiState(false, '桥接离线');
@@ -287,7 +287,7 @@
         if (!items.length) { $('jobsTable').innerHTML = '<div class="empty">还没有桥接任务。</div>'; return; }
         $('jobsTable').innerHTML = `<table><thead><tr><th>任务</th><th>状态</th><th>结果</th><th>调用方</th><th>创建时间</th></tr></thead><tbody>${items.map(item => {
           const r = item.result || {};
-          const summary = item.status === 'validated' ? `${r.validated || 0} 条已校验` : `${r.succeeded || 0} 成功 · ${r.failed || 0} 失败 · ${r.blocked || 0} 阻塞`;
+          const summary = item.status === 'validated' ? `${r.validated || 0} 条已校验` : `${r.succeeded || 0} 成功 · ${r.failed || 0} 失败 · ${r.blocked || 0} 平台等待`;
           return `<tr><td><button class="link-button" data-job="${escapeHtml(item.job_id)}">${escapeHtml(String(item.job_id || '').slice(0, 16))}…</button></td><td>${statusHtml(item.status)}</td><td>${escapeHtml(summary)}</td><td>${escapeHtml(item.client?.name || 'unknown')}</td><td>${formatTime(item.created_at)}</td></tr>`;
         }).join('')}</tbody></table>`;
         document.querySelectorAll('[data-job]').forEach(button => button.addEventListener('click', () => showJob(button.dataset.job)));
@@ -310,7 +310,7 @@
     function renderJob(job) {
       const result = job.result || {};
       $('detailMeta').textContent = `${job.job_id} · ${formatTime(job.created_at)} · ${escapeHtml(job.client?.name || 'unknown')}`;
-      $('detailSummary').innerHTML = [`状态 ${labels[job.status] || job.status}`, `总数 ${result.total ?? (job.links || []).length}`, `成功 ${result.succeeded || 0}`, `阻塞 ${result.blocked || 0}`, `失败 ${result.failed || 0}`, `文件 ${(result.assets || []).length}`].map(text => `<span class="summary-chip">${escapeHtml(text)}</span>`).join('');
+      $('detailSummary').innerHTML = [`状态 ${labels[job.status] || job.status}`, `总数 ${result.total ?? (job.links || []).length}`, `成功 ${result.succeeded || 0}`, `平台等待 ${result.blocked || 0}`, `失败 ${result.failed || 0}`, `文件 ${(result.assets || []).length}`].map(text => `<span class="summary-chip">${escapeHtml(text)}</span>`).join('');
       const links = job.links || [];
       $('resultList').innerHTML = links.length ? links.map(link => {
         const assets = link.assets || [];

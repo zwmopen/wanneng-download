@@ -241,7 +241,7 @@ def _pause_info() -> dict[str, Any]:
     return data
 
 
-def _pause_blocks(platform: str) -> tuple[bool, str, bool]:
+def _pause_blocks(platform: str, manual_override: bool = False) -> tuple[bool, str, bool]:
     """Return (blocked, reason, manual_override).
 
     The current pause marker is specifically for an XHS public-link/login issue.
@@ -254,6 +254,13 @@ def _pause_blocks(platform: str) -> tuple[bool, str, bool]:
     reason = str(info.get("reason") or "采集暂停标记存在")
     is_xhs_specific = bool(re.search(r"小红书|xhs|登录|public.?note", reason, re.I))
     if platform == "douyin" and is_xhs_specific:
+        return False, reason, True
+    # The daemon remains paused, but an explicitly submitted public XHS link
+    # carrying its own xsec_token may be tried once through the bridge. This
+    # does not resume the background queue or invent authentication for ID-only
+    # inputs; it only prevents the stale global pause marker from hiding the
+    # real result of a user-provided public link.
+    if platform == "xhs" and manual_override:
         return False, reason, True
     return True, reason, False
 
@@ -404,7 +411,7 @@ def _collect_one(job_id: str, index: int, target: dict[str, str], options: dict[
         _update_link(job_id, index, **base)
         return base
 
-    blocked, reason, manual_override = _pause_blocks(platform)
+    blocked, reason, manual_override = _pause_blocks(platform, bool(options.get("manual_override")))
     if blocked:
         base.update({
             "status": "blocked",
@@ -592,7 +599,12 @@ def _queue_job(targets: list[dict[str, str]], client: dict[str, Any], conversati
         "client": {"name": str(client.get("name") or "unknown")[:120], "version": str(client.get("version") or "")[:80]},
         "receipt": {"state": "accepted", "accepted_at": now},
         "links": links,
-        "options": {"dry_run": bool(options.get("dry_run")), "image_format": options.get("image_format", "keep"), "max_images": options.get("max_images", 30)},
+        "options": {
+            "dry_run": bool(options.get("dry_run")),
+            "image_format": options.get("image_format", "keep"),
+            "max_images": options.get("max_images", 30),
+            "manual_override": bool(options.get("manual_override")),
+        },
         "result": {"dry_run": bool(options.get("dry_run")), "total": len(links), "succeeded": 0, "failed": 0, "blocked": 0, "validated": 0, "assets": []},
         "error": "",
         "retryable": False,
@@ -668,6 +680,7 @@ def _capabilities() -> dict[str, Any]:
                 "state": xhs_state,
                 "mode": "local_cli_no_cookie",
                 "blocked_reason": pause.get("reason", "") if xhs_state == "blocked" else "",
+                "manual_public_link": "仅带 xsec_token 的明确手动链接可单次尝试；ID 或无鉴权链接仍会阻断",
             },
             "douyin": {
                 "state": "available",
@@ -971,6 +984,7 @@ class BridgeHandler(BaseHTTPRequestHandler):
             "dry_run": bool(options.get("dry_run", False)),
             "image_format": str(options.get("image_format") or "keep"),
             "max_images": options.get("max_images", 30),
+            "manual_override": bool(options.get("manual_override", False)),
         }
         response = _queue_job(targets, client, conversation_id, safe_options)
         self._json(response, 202)

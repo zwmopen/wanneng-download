@@ -17,7 +17,23 @@ from xhs_dl.core.unified_downloader import UnifiedDownloader
 
 JOBS = {}
 JOBS_LOCK = threading.Lock()
+JOB_CONDITION = threading.Condition(JOBS_LOCK)
 DEFAULT_OUTPUT_DIR = str(Path.home() / "Downloads")
+WEB_HISTORY_FILE = Path.home() / ".xhs-dl" / "web_history.json"
+WEB_HISTORY_LOCK = threading.Lock()
+
+
+def _load_web_history():
+    try:
+        value = json.loads(WEB_HISTORY_FILE.read_text(encoding="utf-8"))
+    except (OSError, ValueError, TypeError):
+        return []
+    if not isinstance(value, list):
+        return []
+    return [item for item in value if isinstance(item, dict)][-100:]
+
+
+WEB_HISTORY = _load_web_history()
 
 
 TEMPLATE = r"""<!DOCTYPE html>
@@ -53,15 +69,19 @@ body[data-theme="glass"]{
 body{background:var(--bg);color:var(--text);padding:32px;transition:background var(--ease),color var(--ease)}
 body[data-theme="glass"]:before{content:"";position:fixed;inset:0;pointer-events:none;background:radial-gradient(circle at 14% 18%,rgba(255,255,255,.55),transparent 34%),radial-gradient(circle at 84% 76%,rgba(146,181,204,.22),transparent 36%)}
 .shell{position:relative;z-index:1;max-width:1120px;margin:0 auto}
-.topbar{display:flex;align-items:center;justify-content:space-between;margin-bottom:24px;padding:4px 6px}
+.topbar{display:flex;align-items:center;justify-content:space-between;margin-bottom:24px;padding:4px 6px;gap:16px}
 .brand{display:flex;align-items:center;gap:14px}
 .mark{width:48px;height:48px;border-radius:16px;display:grid;place-items:center;background:var(--panel);box-shadow:var(--shadow-small);font-family:Georgia,serif;font-size:21px;font-weight:700;letter-spacing:-1px}
 .brand h1{font-family:Georgia,"Noto Serif SC",serif;font-size:25px;line-height:1;margin:0 0 7px;letter-spacing:-.4px}
 .brand p{margin:0;color:var(--muted);font-size:13px}
-.theme-switch{flex:0 0 auto;white-space:nowrap;border:1px solid var(--line);background:var(--panel);color:var(--text);box-shadow:var(--shadow-small);border-radius:999px;padding:10px 15px;cursor:pointer;transition:box-shadow var(--ease),transform var(--ease)}
+.top-actions{display:flex;align-items:center;gap:10px;flex:0 0 auto}
+.theme-switch,.settings-button{white-space:nowrap;border:1px solid var(--line);background:var(--panel);color:var(--text);box-shadow:var(--shadow-small);border-radius:999px;padding:10px 15px;cursor:pointer;transition:box-shadow var(--ease),transform var(--ease)}
 .theme-switch:hover{box-shadow:var(--shadow-hover)}
+.settings-button:hover{box-shadow:var(--shadow-hover)}
 .theme-switch:active{box-shadow:var(--shadow-inset);transform:translateY(1px)}
+.settings-button:active{box-shadow:var(--shadow-inset);transform:translateY(1px)}
 .workspace{display:grid;grid-template-columns:minmax(0,1.25fr) minmax(300px,.75fr);gap:24px;align-items:start}
+.right-stack{display:grid;gap:18px;min-width:0}
 .surface{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius-xl);box-shadow:var(--shadow);padding:28px;transition:background var(--ease),box-shadow var(--ease)}
 body[data-theme="glass"] .surface{backdrop-filter:blur(16px) saturate(115%);-webkit-backdrop-filter:blur(16px) saturate(115%)}
 .eyebrow{display:flex;align-items:center;gap:8px;color:var(--muted);font-size:12px;letter-spacing:.12em;text-transform:uppercase;margin-bottom:10px}
@@ -84,6 +104,15 @@ textarea::placeholder,input::placeholder{color:#8092a2}
 .primary:disabled{cursor:not-allowed;opacity:.58;transform:none;box-shadow:none}
 .privacy{display:flex;gap:10px;margin-top:16px;color:var(--muted);font-size:12px;line-height:1.65}
 .shield{flex:0 0 25px;height:25px;border-radius:9px;display:grid;place-items:center;background:var(--active);font-size:12px}
+.settings-note{margin:2px 0 0;padding:0 14px 14px;color:var(--muted);font-size:11px;line-height:1.65}
+.waiting-card,.queue-card,.history-card{padding:22px 24px}
+.panel-head{display:flex;align-items:center;justify-content:space-between;gap:12px}
+.panel-title{font-size:16px;font-weight:800;margin:0}.panel-sub{font-size:12px;color:var(--muted);margin:6px 0 0;line-height:1.55}
+.count-badge{min-width:42px;height:34px;padding:0 10px;display:grid;place-items:center;border-radius:12px;background:var(--active);color:var(--text);font-size:18px;font-weight:800;box-shadow:var(--shadow-small)}
+.queue-list,.history-list{display:flex;flex-direction:column;gap:9px;margin-top:15px;max-height:220px;overflow:auto;padding:2px 4px 2px 1px}
+.task-row{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:11px 12px;border:1px solid var(--line);border-radius:13px;background:var(--soft);font-size:12px;line-height:1.45}
+.task-main{min-width:0}.task-title{display:block;font-weight:700;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.task-meta{display:block;color:var(--muted);margin-top:3px;font-size:11px}.task-state{flex:0 0 auto;color:var(--muted);font-size:11px}.task-state.ok{color:var(--ok)}.task-state.fail{color:var(--bad)}
+.panel-empty{padding:13px 4px 2px;color:var(--muted);font-size:12px}
 .status-card{min-height:420px;display:flex;flex-direction:column}
 .status-head{display:flex;align-items:flex-start;justify-content:space-between;gap:16px}
 .state-dot{width:11px;height:11px;border-radius:999px;background:#8da0af;box-shadow:0 0 0 6px rgba(141,160,175,.12);margin-top:6px;transition:background var(--ease)}
@@ -107,8 +136,8 @@ textarea::placeholder,input::placeholder{color:#8092a2}
 button:focus-visible,textarea:focus-visible,input:focus-visible,select:focus-visible{outline:3px solid rgba(47,111,159,.32);outline-offset:3px}
 @keyframes pulse{0%,100%{box-shadow:0 0 0 5px rgba(71,123,157,.13)}50%{box-shadow:0 0 0 10px rgba(71,123,157,.04)}}
 @keyframes travel{0%{transform:translateX(-110%)}50%{transform:translateX(80%)}100%{transform:translateX(280%)}}
-@media(max-width:760px){body{padding:18px 14px}.workspace{grid-template-columns:1fr}.surface{padding:20px;border-radius:22px}.settings{grid-template-columns:1fr}.topbar{align-items:flex-start}.brand p{max-width:210px}.status-card{min-height:330px}h2{font-size:25px}}
-@media(max-width:480px){.topbar{gap:10px}.brand{min-width:0;gap:10px}.brand p{display:none}.mark{width:40px;height:40px;border-radius:13px;font-size:18px}.brand h1{font-size:22px;margin:9px 0 0}.theme-switch{padding:9px 11px;font-size:12px}.surface{padding:18px}textarea{min-height:190px}}
+@media(max-width:760px){body{padding:18px 14px}.workspace{grid-template-columns:1fr}.surface{padding:20px;border-radius:22px}.settings{grid-template-columns:1fr}.topbar{align-items:flex-start}.brand p{max-width:210px}.status-card{min-height:330px}}
+@media(max-width:480px){.topbar{gap:10px}.brand{min-width:0;gap:10px}.brand p{display:none}.mark{width:40px;height:40px;border-radius:13px;font-size:18px}.brand h1{font-size:22px;margin:9px 0 0}.theme-switch,.settings-button{padding:9px 11px;font-size:12px}.surface{padding:18px}textarea{min-height:190px}}
 @media(prefers-reduced-motion:reduce){*,*:before,*:after{animation:none!important;transition:none!important;scroll-behavior:auto!important}}
 @supports not ((backdrop-filter:blur(1px)) or (-webkit-backdrop-filter:blur(1px))){body[data-theme="glass"] .surface{background:#edf4f8}}
 </style>
@@ -117,7 +146,7 @@ button:focus-visible,textarea:focus-visible,input:focus-visible,select:focus-vis
 <main class="shell">
   <header class="topbar">
     <div class="brand"><div class="mark">∞</div><div><h1>__APP_NAME__</h1><p>多平台公开媒体 · 本地保存 · 无需登录</p></div></div>
-    <button class="theme-switch" id="themeButton" type="button" aria-label="切换视觉主题">克制玻璃</button>
+    <div class="top-actions"><button class="settings-button" id="settingsButton" type="button">设置</button><button class="theme-switch" id="themeButton" type="button" aria-label="切换视觉主题">克制玻璃</button></div>
   </header>
   <section class="workspace">
     <div class="surface">
@@ -129,16 +158,29 @@ button:focus-visible,textarea:focus-visible,input:focus-visible,select:focus-vis
       <details class="advanced"><summary>保存位置和速度</summary><div class="settings">
         <div><label for="outdir">保存位置</label><input id="outdir" type="text"></div>
         <div><label for="mode">下载节奏</label><select id="mode"><option value="fast">快速 · 3–8 秒</option><option value="normal">标准 · 8–15 秒</option><option value="cautious" selected>稳妥 · 35–55 秒</option><option value="slow">慢速 · 55–85 秒</option><option value="very-slow">极慢 · 110–160 秒</option></select></div>
-        <div><label for="format">图片格式</label><select id="format"><option value="jpg" selected>JPG（推荐）</option><option value="png">PNG（无损）</option><option value="keep">保持原格式</option></select></div>
-      </div></details>
+        <div><label for="format">图片格式</label><select id="format"><option value="keep" selected>保持原格式（推荐）</option><option value="jpg">JPG</option><option value="png">PNG（无损）</option></select></div>
+      </div><p class="settings-note">设置会保存在本机。AI 或脚本也可以调用 <code>POST /api/jobs</code>；查看能力用 <code>GET /api/capabilities</code>。</p></details>
       <button class="primary" id="go" type="button">开始下载</button>
       <div class="privacy"><span class="shield">✓</span><span>公开笔记无需账号、密码或 Cookie。链接默认只交给本机引擎，不会静默发送到在线解析网站。</span></div>
     </div>
-    <aside class="surface status-card" aria-live="polite">
-      <div class="status-head"><div><p class="status-title" id="statusTitle">等待任务</p><p class="status-sub" id="statusSub">还没有开始下载</p></div><span class="state-dot" id="stateDot"></span></div>
-      <div class="progress-wrap"><div class="progress-track"><div class="progress-bar" id="progressBar"></div></div><div class="progress-meta"><span id="progressText">0 / 0</span><span id="successText">成功 0</span></div></div>
-      <div class="empty" id="empty"><div class="empty-symbol">↓</div><strong>结果会在这里逐条出现</strong><span>关闭页面不会删除已经保存到本地的文件。</span></div>
-      <div class="results" id="results"></div>
+    <aside class="right-stack" aria-live="polite">
+      <section class="surface waiting-card">
+        <div class="panel-head"><div><p class="panel-title">等待任务</p><p class="panel-sub" id="waitingSub">当前没有排队的下载</p></div><span class="count-badge" id="waitingCount">0</span></div>
+      </section>
+      <section class="surface status-card">
+        <div class="status-head"><div><p class="status-title" id="statusTitle">正在进行的任务</p><p class="status-sub" id="statusSub">还没有开始下载</p></div><span class="state-dot" id="stateDot"></span></div>
+        <div class="progress-wrap"><div class="progress-track"><div class="progress-bar" id="progressBar"></div></div><div class="progress-meta"><span id="progressText">0 / 0</span><span id="successText">成功 0</span></div></div>
+        <div class="empty" id="empty"><div class="empty-symbol">↓</div><strong>结果会在这里逐条出现</strong><span>关闭页面不会删除已经保存到本地的文件。</span></div>
+        <div class="results" id="results"></div>
+      </section>
+      <section class="surface queue-card">
+        <div class="panel-head"><div><p class="panel-title">排队任务</p><p class="panel-sub">按顺序使用本地下载引擎，避免并发撞上平台限流</p></div></div>
+        <div class="queue-list" id="queueList"><div class="panel-empty">暂无排队任务</div></div>
+      </section>
+      <section class="surface history-card">
+        <div class="panel-head"><div><p class="panel-title">历史下载记录</p><p class="panel-sub">最近完成或失败的任务会保存在本机</p></div></div>
+        <div class="history-list" id="historyList"><div class="panel-empty">暂无历史记录</div></div>
+      </section>
     </aside>
   </section>
   <p class="footnote">仅处理你有权保存的公开内容 · 创作者嵌入原图的署名会保留 · __APP_NAME__ V__APP_VERSION__</p>
@@ -149,16 +191,19 @@ const $=id=>document.getElementById(id);let activeJob=null,pollTimer=null,jobSta
 function applyTheme(theme){const next=theme==='glass'?'glass':'neo';document.body.dataset.theme=next;localStorage.setItem(THEME_KEY,next);$('themeButton').textContent=next==='neo'?'克制玻璃':'拟态悬浮'}
 applyTheme(localStorage.getItem(THEME_KEY)||'neo');
 $('themeButton').addEventListener('click',()=>applyTheme(document.body.dataset.theme==='neo'?'glass':'neo'));
-$('outdir').value=localStorage.getItem(OUTPUT_KEY)||DEFAULT_OUTPUT;$('mode').value=localStorage.getItem(MODE_KEY)||'cautious';$('format').value=localStorage.getItem(FORMAT_KEY)||'jpg';
+$('settingsButton').addEventListener('click',()=>{const panel=document.querySelector('.advanced');panel.open=true;panel.scrollIntoView({behavior:'smooth',block:'center'});});
+$('outdir').value=localStorage.getItem(OUTPUT_KEY)||DEFAULT_OUTPUT;$('mode').value=localStorage.getItem(MODE_KEY)||'cautious';$('format').value=localStorage.getItem(FORMAT_KEY)||'keep';
 $('outdir').addEventListener('change',e=>localStorage.setItem(OUTPUT_KEY,e.target.value.trim()));$('mode').addEventListener('change',e=>localStorage.setItem(MODE_KEY,e.target.value));$('format').addEventListener('change',e=>localStorage.setItem(FORMAT_KEY,e.target.value));
 function setState(status,title,sub){$('stateDot').className='state-dot '+status;$('statusTitle').textContent=title;$('statusSub').textContent=sub}
 function render(job){const total=job.total||0,done=job.done||0,success=job.success||0,running=job.status==='running'||job.status==='queued';$('progressBar').classList.toggle('active',running&&done===0);if(!(running&&done===0)){$('progressBar').style.transform='none';$('progressBar').style.width=(total?Math.round(done/total*100):0)+'%'}$('progressText').textContent=`${done} / ${total}`;$('successText').textContent=`成功 ${success}`;
   const items=job.items||[];$('empty').style.display=items.length?'none':'block';$('results').classList.toggle('show',items.length>0);$('results').innerHTML='';items.forEach(it=>{const d=document.createElement('div');d.className='result '+(it.success?'ok':'fail');const top=document.createElement('div');top.className='result-top';const name=document.createElement('span');name.className='result-name';name.textContent=it.title||it.error||'未命名笔记';const count=document.createElement('span');count.className='result-count';count.textContent=it.success?`${it.image_success||0} 张`:'失败';top.append(name,count);d.append(top);if(!it.success&&it.error){const err=document.createElement('div');err.className='result-error';err.textContent=it.error;d.append(err)}$('results').append(d)});
-  if(job.status==='running'||job.status==='queued')setState('running','正在逐条提取',total?`已完成 ${done} 条，共 ${total} 条`:'正在准备本地引擎');else if(job.status==='completed')setState(job.failed?'error':'done',job.failed?'任务完成，有失败项':'全部保存完成',`成功 ${job.success||0} 条，失败 ${job.failed||0} 条`);else if(job.status==='error')setState('error','任务没有完成',job.error||'请稍后重试')}
-function finish(){activeJob=null;$('go').disabled=false;$('go').textContent='开始下载'}
-async function poll(){if(!activeJob)return;try{const r=await fetch('/api/jobs/'+activeJob);const job=await r.json();if(!r.ok)throw new Error(job.error||'读取任务失败');if(job.status==='completed'||job.status==='error'){const wait=Math.max(0,MIN_PROGRESS_MS-(Date.now()-jobStartedAt));if(wait){pollTimer=setTimeout(()=>{render(job);finish()},wait);return}render(job);finish();return}render(job);pollTimer=setTimeout(poll,700)}catch(e){setState('error','连接中断',e.message);$('progressBar').classList.remove('active');$('go').disabled=false;$('go').textContent='重新开始';activeJob=null}}
-async function start(){if(activeJob)return;const text=$('input').value.trim();if(!text){$('input').focus();setState('error','还缺少分享文本','请先粘贴至少一条小红书或抖音链接');return}const output_dir=$('outdir').value.trim()||DEFAULT_OUTPUT,mode=$('mode').value,image_format=$('format').value;localStorage.setItem(OUTPUT_KEY,output_dir);localStorage.setItem(MODE_KEY,mode);localStorage.setItem(FORMAT_KEY,image_format);jobStartedAt=Date.now();$('go').disabled=true;$('go').textContent='正在准备…';$('progressBar').classList.add('active');$('progressBar').style.width='38%';$('progressText').textContent='准备中';$('successText').textContent='';$('results').innerHTML='';$('results').classList.remove('show');$('empty').style.display='block';setState('running','正在准备','连接本地无水印引擎');try{const r=await fetch('/api/jobs',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({text,output_dir,mode,image_format})});const data=await r.json();if(!r.ok)throw new Error(data.error||'创建任务失败');activeJob=data.job_id;$('go').textContent='下载进行中';poll()}catch(e){$('progressBar').classList.remove('active');setState('error','无法开始',e.message);$('go').disabled=false;$('go').textContent='重新开始'}}
-$('go').addEventListener('click',start);$('input').addEventListener('keydown',e=>{if((e.ctrlKey||e.metaKey)&&e.key==='Enter')start()});
+  if(job.status==='queued')setState('running','等待执行',total?`排队中，共 ${total} 条`:'等待本地引擎');else if(job.status==='running')setState('running','正在逐条提取',total?`已完成 ${done} 条，共 ${total} 条`:'正在准备本地引擎');else if(job.status==='completed')setState(job.failed?'error':'done',job.failed?'任务完成，有失败项':'全部保存完成',`成功 ${job.success||0} 条，失败 ${job.failed||0} 条`);else if(job.status==='error')setState('error','任务没有完成',job.error||'请稍后重试')}
+function renderRows(target,list,kind){target.innerHTML='';if(!list||!list.length){const empty=document.createElement('div');empty.className='panel-empty';empty.textContent=kind==='history'?'暂无历史记录':'暂无排队任务';target.append(empty);return}list.forEach(job=>{const row=document.createElement('div');row.className='task-row';const main=document.createElement('div');main.className='task-main';const title=document.createElement('span');title.className='task-title';const first=(job.items||[])[0];title.textContent=(first&&first.title)||`任务 ${String(job.job_id||'').slice(0,8)}`;const meta=document.createElement('span');meta.className='task-meta';meta.textContent=`${job.done||0} / ${job.total||0} 条 · 成功 ${job.success||0}`;main.append(title,meta);const state=document.createElement('span');state.className='task-state '+(job.status==='completed'?'ok':job.status==='error'?'fail':'');state.textContent=job.status==='completed'?'完成':job.status==='error'?'失败':job.status==='running'?'进行中':'等待';row.append(main,state);target.append(row)})}
+async function refreshDashboard(){try{const r=await fetch('/api/jobs');if(!r.ok)return;const data=await r.json();const waiting=data.waiting||[];const running=data.running||[];$('waitingCount').textContent=waiting.length;$('waitingSub').textContent=waiting.length?`有 ${waiting.length} 个任务等待本地引擎`:'当前没有排队的下载';renderRows($('queueList'),waiting,'queue');renderRows($('historyList'),data.history||[],'history');if(!activeJob&&running[0])setState('running','正在逐条提取',`任务进行中，共 ${running[0].total||0} 条`)}catch(_){}}
+function finish(){activeJob=null;$('go').disabled=false;$('go').textContent='开始下载';refreshDashboard()}
+async function poll(){if(!activeJob)return;try{const r=await fetch('/api/jobs/'+activeJob);const job=await r.json();if(!r.ok)throw new Error(job.error||'读取任务失败');if(job.status==='completed'||job.status==='error'){const wait=Math.max(0,MIN_PROGRESS_MS-(Date.now()-jobStartedAt));if(wait){pollTimer=setTimeout(()=>{render(job);finish()},wait);return}render(job);finish();return}render(job);refreshDashboard();pollTimer=setTimeout(poll,700)}catch(e){setState('error','连接中断',e.message);$('progressBar').classList.remove('active');$('go').disabled=false;$('go').textContent='重新开始';activeJob=null}}
+async function start(){if(activeJob)return;const text=$('input').value.trim();if(!text){$('input').focus();setState('error','还缺少分享文本','请先粘贴至少一条公开媒体链接');return}const output_dir=$('outdir').value.trim()||DEFAULT_OUTPUT,mode=$('mode').value,image_format=$('format').value;localStorage.setItem(OUTPUT_KEY,output_dir);localStorage.setItem(MODE_KEY,mode);localStorage.setItem(FORMAT_KEY,image_format);jobStartedAt=Date.now();$('go').disabled=true;$('go').textContent='正在准备…';$('progressBar').classList.add('active');$('progressBar').style.width='38%';$('progressText').textContent='准备中';$('successText').textContent='';$('results').innerHTML='';$('results').classList.remove('show');$('empty').style.display='block';setState('running','正在准备','连接本地无水印引擎');try{const r=await fetch('/api/jobs',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({text,output_dir,mode,image_format})});const data=await r.json();if(!r.ok)throw new Error(data.error||'创建任务失败');activeJob=data.job_id;$('go').textContent='下载进行中';poll()}catch(e){$('progressBar').classList.remove('active');setState('error','无法开始',e.message);$('go').disabled=false;$('go').textContent='重新开始'}}
+$('go').addEventListener('click',start);$('input').addEventListener('keydown',e=>{if((e.ctrlKey||e.metaKey)&&e.key==='Enter')start()});refreshDashboard();setInterval(refreshDashboard,2500);
 </script>
 </body>
 </html>"""
@@ -176,6 +221,62 @@ def _item_payload(item):
     }
 
 
+def _job_summary(job):
+    """Return the small, safe shape used by the queue and history panels."""
+    return {
+        "job_id": job.get("job_id", ""),
+        "status": job.get("status", ""),
+        "created_at": job.get("created_at", 0),
+        "finished_at": job.get("finished_at", 0),
+        "total": job.get("total", 0),
+        "done": job.get("done", 0),
+        "success": job.get("success", 0),
+        "failed": job.get("failed", 0),
+        "output_dir": job.get("output_dir", ""),
+        "error": job.get("error", ""),
+        "items": [
+            {
+                "success": item.get("success", False),
+                "title": item.get("title", ""),
+                "error": item.get("error", ""),
+                "image_success": item.get("image_success", 0),
+            }
+            for item in (job.get("items") or [])[-8:]
+            if isinstance(item, dict)
+        ],
+    }
+
+
+def _save_web_history():
+    with WEB_HISTORY_LOCK:
+        snapshot = copy.deepcopy(WEB_HISTORY[-100:])
+    try:
+        WEB_HISTORY_FILE.parent.mkdir(parents=True, exist_ok=True)
+        temporary = WEB_HISTORY_FILE.with_suffix(".tmp")
+        temporary.write_text(
+            json.dumps(snapshot, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+        temporary.replace(WEB_HISTORY_FILE)
+    except OSError:
+        # Download results should never fail because the optional UI history
+        # file is unavailable or read-only.
+        pass
+
+
+def _record_web_history(job):
+    if not job:
+        return
+    summary = _job_summary(job)
+    with WEB_HISTORY_LOCK:
+        WEB_HISTORY[:] = [
+            value for value in WEB_HISTORY if value.get("job_id") != summary["job_id"]
+        ]
+        WEB_HISTORY.append(summary)
+        del WEB_HISTORY[:-100]
+    _save_web_history()
+
+
 def _update_job(job_id, **values):
     with JOBS_LOCK:
         if job_id in JOBS:
@@ -183,7 +284,23 @@ def _update_job(job_id, **values):
 
 
 def _run_job(job_id, urls, output_dir, delay, image_format):
-    _update_job(job_id, status="running")
+    # Run one download job at a time.  This keeps the original UI's queue
+    # meaningful and avoids turning a burst of pasted links into concurrent
+    # requests against a public platform.
+    with JOB_CONDITION:
+        while True:
+            job = JOBS.get(job_id)
+            if job is None:
+                return
+            running = any(
+                value.get("status") == "running"
+                for key, value in JOBS.items()
+                if key != job_id
+            )
+            if not running:
+                job["status"] = "running"
+                break
+            JOB_CONDITION.wait(timeout=0.5)
 
     def on_progress(item, index, total):
         with JOBS_LOCK:
@@ -204,28 +321,87 @@ def _run_job(job_id, urls, output_dir, delay, image_format):
         _update_job(
             job_id,
             status="completed",
+            finished_at=time.time(),
             done=result.total,
             success=result.success_count,
             failed=result.fail_count,
             output_dir=result.output_dir,
         )
     except Exception as exc:
-        _update_job(job_id, status="error", error=str(exc))
+        _update_job(job_id, status="error", finished_at=time.time(), error=str(exc))
+    finally:
+        with JOBS_LOCK:
+            finished = copy.deepcopy(JOBS.get(job_id))
+        if finished and finished.get("status") in {"completed", "error"}:
+            _record_web_history(finished)
+        with JOB_CONDITION:
+            JOB_CONDITION.notify_all()
 
 
 class Handler(BaseHTTPRequestHandler):
     """HTTP 请求处理。"""
 
     def do_GET(self):
-        if self.path in ("/", "/index.html"):
+        path = self.path.split("?", 1)[0]
+        if path in ("/", "/index.html"):
             html = TEMPLATE.replace(
                 "__DEFAULT_OUTPUT_JSON__",
                 json.dumps(DEFAULT_OUTPUT_DIR, ensure_ascii=False),
             ).replace("__APP_VERSION__", __version__).replace("__APP_NAME__", APP_NAME)
             self._html(html)
             return
-        if self.path.startswith("/api/jobs/"):
-            job_id = self.path.rsplit("/", 1)[-1]
+        if path == "/api/capabilities":
+            self._json(
+                {
+                    "name": APP_NAME,
+                    "version": __version__,
+                    "transport": "local-http",
+                    "auth": "none on loopback; do not expose this port publicly",
+                    "platforms": ["xiaohongshu", "douyin", "public-media"],
+                    "image_formats": ["keep", "jpg", "png"],
+                    "default_image_format": "keep",
+                    "endpoints": {
+                        "submit": "POST /api/jobs",
+                        "job": "GET /api/jobs/<job_id>",
+                        "dashboard": "GET /api/jobs",
+                    },
+                }
+            )
+            return
+        if path == "/api/jobs":
+            with JOBS_LOCK:
+                current = [copy.deepcopy(value) for value in JOBS.values()]
+            waiting = [
+                _job_summary(value)
+                for value in sorted(
+                    current, key=lambda item: item.get("created_at", 0)
+                )
+                if value.get("status") == "queued"
+            ]
+            running = [
+                _job_summary(value)
+                for value in sorted(
+                    current, key=lambda item: item.get("created_at", 0)
+                )
+                if value.get("status") == "running"
+            ]
+            with WEB_HISTORY_LOCK:
+                history = copy.deepcopy(list(reversed(WEB_HISTORY[-50:])))
+            self._json(
+                {
+                    "waiting": waiting,
+                    "running": running,
+                    "history": history,
+                    "counts": {
+                        "waiting": len(waiting),
+                        "running": len(running),
+                        "history": len(history),
+                    },
+                }
+            )
+            return
+        if path.startswith("/api/jobs/"):
+            job_id = path.rsplit("/", 1)[-1]
             with JOBS_LOCK:
                 job = copy.deepcopy(JOBS.get(job_id))
             if job is None:
@@ -260,7 +436,7 @@ class Handler(BaseHTTPRequestHandler):
             return
         mode = body.get("mode", "cautious")
         delay = DELAY_MODES.get(mode, DELAY_MODES["cautious"])
-        image_format = body.get("image_format", "jpg")
+        image_format = body.get("image_format", "keep")
         if image_format not in {"jpg", "png", "keep"}:
             self._json({"error": "图片格式无效"}, 400)
             return

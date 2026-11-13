@@ -1,6 +1,7 @@
 param(
-    [int]$BridgePort = 8765,
-    [int]$DownloaderPort = 5678
+    [int]$DownloaderPort = 5678,
+    [switch]$StartBridge,
+    [int]$BridgePort = 8765
 )
 
 $ErrorActionPreference = "Stop"
@@ -39,12 +40,14 @@ function Ensure-Service([string]$Name, [string]$Arguments, [int]$Port, [string]$
 }
 
 $results = @()
-$results += Ensure-Service "collector-bridge" "collector_bridge_api.py --host 127.0.0.1 --port $BridgePort" $BridgePort "collector_bridge_runtime.log" "collector_bridge_runtime.err.log"
 $results += Ensure-Service "universal-downloader-web" "-m xhs_dl.web.app" $DownloaderPort "universal_downloader_web.log" "universal_downloader_web.err.log"
+if ($StartBridge) {
+    $results += Ensure-Service "collector-bridge" "collector_bridge_api.py --host 127.0.0.1 --port $BridgePort" $BridgePort "collector_bridge_runtime.log" "collector_bridge_runtime.err.log"
+}
 
 foreach ($result in $results) {
     try {
-        $url = if ($result.name -eq "collector-bridge") { "http://127.0.0.1:$($result.port)/api/v1/status" } else { "http://127.0.0.1:$($result.port)/" }
+        $url = if ($result.name -eq "collector-bridge") { "http://127.0.0.1:$($result.port)/api/v1/status" } else { "http://127.0.0.1:$($result.port)/api/capabilities" }
         $response = Invoke-WebRequest -Uri $url -UseBasicParsing -TimeoutSec 10
         if ($response.StatusCode -ne 200) { throw "HTTP $($response.StatusCode)" }
     } catch {
