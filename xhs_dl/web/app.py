@@ -6,6 +6,7 @@ import hashlib
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 import threading
@@ -31,7 +32,11 @@ JOB_IDEMPOTENCY = {}
 DEFAULT_OUTPUT_DIR = str(Path.home() / "Downloads")
 WEB_HISTORY_FILE = Path.home() / ".xhs-dl" / "web_history.json"
 WEB_HISTORY_LOCK = threading.Lock()
+COLLECTION_TASKS_FILE = Path.home() / ".xhs-dl" / "collection_tasks.json"
+COLLECTION_TASKS_LOCK = threading.RLock()
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
+TOOLBOX_PROJECT = Path(os.environ.get("JIANGHU_TOOLBOX_ROOT", r"D:\AICode\工具开发\projects\jianghu-collector-gui"))
+TOOLBOX_BRIDGE_DIR = Path(os.environ.get("JIANGHU_BRIDGE_DIR", r"D:\Program Files\江湖工具箱\MinApp"))
 CLIPBOARD_QUEUE_FILE = PROJECT_ROOT / "clipboard_pending_queue.json"
 CLIPBOARD_HISTORY_FILE = PROJECT_ROOT / "clipboard_history.json"
 COLLECTOR_HEARTBEAT_FILE = PROJECT_ROOT / "collector_heartbeat.json"
@@ -50,6 +55,329 @@ def _load_web_history():
 
 
 WEB_HISTORY = _load_web_history()
+
+
+def _load_collection_tasks():
+    try:
+        value = json.loads(COLLECTION_TASKS_FILE.read_text(encoding="utf-8"))
+    except (OSError, ValueError, TypeError):
+        return {}
+    if not isinstance(value, list):
+        return {}
+    tasks = {
+        str(item.get("job_id")): item
+        for item in value[-100:]
+        if isinstance(item, dict) and item.get("job_id")
+    }
+    for item in tasks.values():
+        if item.get("status") in {"queued", "discovering", "download_queued"}:
+            item["status"] = "unknown"
+            item["message"] = "服务重启后未能确认采集进程状态；先检查工具箱任务，避免重复提交"
+    return tasks
+
+
+COLLECTION_TASKS = _load_collection_tasks()
+
+
+def _save_collection_tasks():
+    with COLLECTION_TASKS_LOCK:
+        snapshot = copy.deepcopy(list(COLLECTION_TASKS.values())[-100:])
+    try:
+        COLLECTION_TASKS_FILE.parent.mkdir(parents=True, exist_ok=True)
+        temporary = COLLECTION_TASKS_FILE.with_suffix(".tmp")
+        temporary.write_text(json.dumps(snapshot, ensure_ascii=False, indent=2), encoding="utf-8")
+        temporary.replace(COLLECTION_TASKS_FILE)
+    except OSError:
+        pass
+
+
+def _update_collection_task(job_id, **values):
+    with COLLECTION_TASKS_LOCK:
+        task = COLLECTION_TASKS.get(job_id)
+        if task is None:
+            return
+        task.update(values)
+        task["updated_at"] = time.time()
+    _save_collection_tasks()
+
+
+def _toolbox_capability_snapshot():
+    cli_file = TOOLBOX_PROJECT / "jianghu_cli.py"
+    status_file = TOOLBOX_BRIDGE_DIR / "bridge_status.json"
+    status = "offline"
+    age_seconds = None
+    native = {}
+    try:
+        age_seconds = max(0, time.time() - status_file.stat().st_mtime)
+        if age_seconds <= 5:
+            native = json.loads(status_file.read_text(encoding="utf-8-sig"))
+            status = "online" if isinstance(native, dict) and native.get("running") is True else "offline"
+        else:
+            status = "stale"
+    except (OSError, ValueError, TypeError):
+        pass
+    return {
+        "available": cli_file.is_file(),
+        "status": status,
+        "age_seconds": round(age_seconds, 1) if age_seconds is not None else None,
+        "active_platform": native.get("active_platform"),
+        "verification_required": bool(native.get("verification_required")),
+        "busy": bool(
+            (native.get("keyword") or {}).get("is_running")
+            or (native.get("single") or {}).get("busy_or_unknown")
+        ),
+        "supports": {
+            "homepage": ["douyin"],
+            "keyword": ["douyin"],
+            "xiaohongshu_homepage": False,
+        },
+    }
+
+
+def _collection_task_payload(task):
+    allowed = {
+        "job_id", "kind", "label", "status", "stage", "created_at", "updated_at",
+        "message", "discovered_count", "download_job_id", "completion_confirmed",
+        "outcome", "native_job_id",
+    }
+    value = {key: copy.deepcopy(task[key]) for key in allowed if key in task}
+    download_job = None
+    download_id = value.get("download_job_id")
+    if download_id:
+        with JOBS_LOCK:
+            download_job = copy.deepcopy(JOBS.get(download_id))
+        if download_job is None:
+            with WEB_HISTORY_LOCK:
+                download_job = copy.deepcopy(next(
+                    (item for item in WEB_HISTORY if item.get("job_id") == download_id), None
+                ))
+        if download_job:
+            value["download_job"] = _job_summary(download_job)
+            if download_job.get("status") == "completed":
+                value["status"] = "completed"
+                value["message"] = (
+                    f"已发现 {value.get('discovered_count', 0)} 条链接；"
+                    f"下载完成，成功 {download_job.get('success', 0)} 条，"
+                    f"已存在 {download_job.get('skipped', 0)} 条，失败 {download_job.get('failed', 0)} 条"
+                )
+            elif download_job.get("status") == "error":
+                value["status"] = "error"
+                value["message"] = download_job.get("error") or "统一下载任务失败"
+    return value
+
+
+def _python_console_executable():
+    current = Path(sys.executable)
+    if current.name.lower() == "pythonw.exe":
+        console = current.with_name("python.exe")
+        if console.is_file():
+            return str(console)
+    return shutil.which("python.exe") or sys.executable
+
+
+def _last_json_object(output):
+    for line in reversed((output or "").splitlines()):
+        candidate = line.strip()
+        if not candidate.startswith("{"):
+            continue
+        try:
+            value = json.loads(candidate)
+        except ValueError:
+            continue
+        if isinstance(value, dict):
+            return value
+    return None
+
+
+def _queue_collection_links(task, links):
+    clean_links = []
+    seen = set()
+    for value in links if isinstance(links, list) else []:
+        urls = extract_urls_from_text(value) if isinstance(value, str) else []
+        if len(urls) != 1:
+            continue
+        url = urls[0]
+        parsed = urlsplit(url)
+        host = (parsed.hostname or "").lower().rstrip(".")
+        if (parsed.scheme.lower() not in {"http", "https"}
+                or not (host == "douyin.com" or host.endswith(".douyin.com")
+                        or host == "iesdouyin.com" or host.endswith(".iesdouyin.com"))
+                or "/note/" not in (parsed.path or "").lower()):
+            continue
+        if url not in seen:
+            seen.add(url)
+            clean_links.append(url)
+    clean_links = clean_links[:MAX_URLS_PER_JOB]
+    if not clean_links:
+        return None
+
+    mode = task.get("mode", "auto")
+    image_format = task.get("image_format", "keep")
+    output_dir = task.get("output_dir") or DEFAULT_OUTPUT_DIR
+    job_id = uuid.uuid4().hex
+    now = time.time()
+    with JOBS_LOCK:
+        if len(JOBS) >= 50:
+            oldest = min(JOBS, key=lambda key: JOBS[key]["created_at"])
+            JOBS.pop(oldest, None)
+        JOBS[job_id] = {
+            "job_id": job_id,
+            "status": "queued",
+            "created_at": now,
+            "total": len(clean_links),
+            "done": 0,
+            "success": 0,
+            "failed": 0,
+            "skipped": 0,
+            "items": [],
+            "error": "",
+            "output_dir": output_dir,
+            "mode": mode,
+            "image_format": image_format,
+            "source": task.get("kind", "collection"),
+            "collection_task_id": task.get("job_id"),
+        }
+    threading.Thread(
+        target=_run_job,
+        args=(job_id, clean_links, output_dir, DELAY_MODES[mode], image_format, mode == "auto"),
+        daemon=True,
+    ).start()
+    return job_id
+
+
+def _run_collection_discovery(job_id, command):
+    _update_collection_task(job_id, status="discovering", stage="browser",
+                            message="正在读取公开主页或搜索列表；遇到登录/验证会安全停止")
+    try:
+        process = subprocess.run(
+            command,
+            cwd=str(TOOLBOX_PROJECT),
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=1800,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        )
+    except subprocess.TimeoutExpired:
+        _update_collection_task(
+            job_id, status="unknown", stage="timeout",
+            message="等待超时，无法确认原生采集是否结束；先查看原生任务状态，避免重复提交",
+        )
+        return
+    except (OSError, ValueError) as exc:
+        _update_collection_task(job_id, status="error", stage="worker", message=f"无法启动采集流程：{exc}")
+        return
+
+    result = _last_json_object(process.stdout) or _last_json_object(process.stderr)
+    if not result:
+        details = (process.stderr or process.stdout or "").strip()
+        _update_collection_task(
+            job_id, status="error", stage="worker",
+            message=(details[-500:] if details else f"采集流程未返回结果（退出码 {process.returncode}）"),
+        )
+        return
+
+    links = result.get("discovered_links") or []
+    task = None
+    with COLLECTION_TASKS_LOCK:
+        task = copy.deepcopy(COLLECTION_TASKS.get(job_id))
+    if links and task:
+        download_job_id = _queue_collection_links(task, links)
+        if download_job_id:
+            _update_collection_task(
+                job_id,
+                status="download_queued",
+                stage="download",
+                discovered_count=len(links),
+                download_job_id=download_job_id,
+                message=f"已发现 {len(links)} 条公开链接，已加入万能下载器队列",
+                completion_confirmed=False,
+            )
+            return
+
+    accepted = result.get("accepted") is True or result.get("outcome") == "accepted"
+    status = "accepted" if accepted else (
+        "completed" if result.get("success") is True else str(result.get("status") or "error")
+    )
+    _update_collection_task(
+        job_id,
+        status=status,
+        stage=result.get("stage", "collection"),
+        discovered_count=len(links),
+        outcome=result.get("outcome", ""),
+        completion_confirmed=bool(result.get("completion_confirmed")),
+        native_job_id=result.get("job_id", ""),
+        message=result.get("message") or "采集流程已返回",
+    )
+
+
+def _validate_douyin_profile(value):
+    urls = extract_urls_from_text(value) if isinstance(value, str) else []
+    if len(urls) != 1:
+        raise ValueError("主页采集一次只填写一个抖音主页链接")
+    url = urls[0]
+    parsed = urlsplit(url)
+    host = (parsed.hostname or "").lower().rstrip(".")
+    allowed_host = (
+        host == "douyin.com" or host.endswith(".douyin.com")
+        or host == "iesdouyin.com" or host.endswith(".iesdouyin.com")
+    )
+    if (parsed.scheme.lower() not in {"http", "https"} or not allowed_host
+            or parsed.username is not None or parsed.password is not None
+            or "/user/" not in (parsed.path or "").lower()):
+        raise ValueError("请输入抖音作者主页链接（路径需包含 /user/）")
+    return url
+
+
+def _create_collection_task(kind, label, request, idempotency_key):
+    request = copy.deepcopy(request)
+    command = request.pop("_command")
+    fingerprint = hashlib.sha256(
+        json.dumps(request, sort_keys=True, ensure_ascii=False).encode("utf-8")
+    ).hexdigest()
+    with COLLECTION_TASKS_LOCK:
+        if idempotency_key:
+            prior = next((item for item in COLLECTION_TASKS.values()
+                          if item.get("idempotency_key") == idempotency_key), None)
+            if prior:
+                if prior.get("fingerprint") != fingerprint:
+                    return None, "幂等键已用于不同的采集请求", 409
+                return _collection_task_payload(prior), None, 200
+        active = next((item for item in COLLECTION_TASKS.values()
+                       if item.get("status") in {"queued", "discovering"}), None)
+        if active:
+            return None, "已有主页或关键词发现任务正在运行，请等当前任务返回后再提交", 409
+
+        job_id = uuid.uuid4().hex
+        now = time.time()
+        task = {
+            "job_id": job_id,
+            "kind": kind,
+            "label": label,
+            "status": "queued",
+            "stage": "queued",
+            "created_at": now,
+            "updated_at": now,
+            "message": "已排入发现任务",
+            "discovered_count": 0,
+            "download_job_id": "",
+            "completion_confirmed": False,
+            "fingerprint": fingerprint,
+            "idempotency_key": idempotency_key,
+            **request,
+        }
+        COLLECTION_TASKS[job_id] = task
+        for old_id in list(COLLECTION_TASKS)[:-100]:
+            COLLECTION_TASKS.pop(old_id, None)
+    _save_collection_tasks()
+    threading.Thread(
+        target=_run_collection_discovery,
+        args=(job_id, command),
+        daemon=True,
+        name=f"collection-{kind}-{job_id[:8]}",
+    ).start()
+    return _collection_task_payload(task), None, 202
 
 
 TEMPLATE = r"""<!DOCTYPE html>
@@ -84,7 +412,7 @@ body[data-theme="glass"]{
 }
 body{background:var(--bg);color:var(--text);padding:32px;transition:background var(--ease),color var(--ease)}
 body[data-theme="glass"]:before{content:"";position:fixed;inset:0;pointer-events:none;background:radial-gradient(circle at 14% 18%,rgba(255,255,255,.55),transparent 34%),radial-gradient(circle at 84% 76%,rgba(146,181,204,.22),transparent 36%)}
-.shell{position:relative;z-index:1;max-width:1120px;margin:0 auto}
+.shell{position:relative;z-index:1;max-width:1480px;margin:0 auto}
 .topbar{display:flex;align-items:center;justify-content:space-between;margin-bottom:24px;padding:4px 6px;gap:16px}
 .brand{display:flex;align-items:center;gap:14px}
 .mark{width:48px;height:48px;border-radius:16px;display:grid;place-items:center;background:var(--panel);box-shadow:var(--shadow-small);font-family:Georgia,serif;font-size:21px;font-weight:700;letter-spacing:-1px}
@@ -100,6 +428,22 @@ body[data-theme="glass"]:before{content:"";position:fixed;inset:0;pointer-events
 .theme-switch:active{box-shadow:var(--shadow-inset);transform:translateY(1px)}
 .settings-button:active{box-shadow:var(--shadow-inset);transform:translateY(1px)}
 .workspace{display:grid;grid-template-columns:minmax(0,1.25fr) minmax(300px,.75fr);gap:24px;align-items:start}
+.app-layout{display:grid;grid-template-columns:184px minmax(0,1fr);gap:18px;align-items:start}
+.side-nav{position:sticky;top:18px;display:grid;gap:8px;padding:16px 12px;border:1px solid var(--line);border-radius:22px;background:var(--panel);box-shadow:var(--shadow-small)}
+.nav-caption{padding:4px 9px 7px;color:var(--muted);font-size:11px;font-weight:800;letter-spacing:.08em}
+.nav-item{width:100%;display:grid;gap:4px;text-align:left;border:1px solid transparent;border-radius:14px;background:transparent;color:var(--text);padding:12px 10px;cursor:pointer;font:inherit;transition:background var(--ease),border-color var(--ease),box-shadow var(--ease)}
+.nav-item span{font-size:13px;font-weight:800}.nav-item small{color:var(--muted);font-size:10px;line-height:1.4}
+.nav-item:hover{background:var(--soft)}.nav-item[aria-selected="true"]{background:var(--active);border-color:var(--line);box-shadow:var(--shadow-small)}
+.nav-tip{margin:8px 8px 2px;padding-top:12px;border-top:1px solid var(--line);color:var(--muted);font-size:11px;line-height:1.65}
+.work-panel{display:none;min-width:0}.work-panel.active{display:block}
+.form-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px;margin-top:20px}
+.form-grid .wide{grid-column:1/-1}
+.form-help{margin:8px 0 0;color:var(--muted);font-size:11px;line-height:1.6}
+.capability-status{margin:10px 0 0;color:var(--muted);font-size:11px;line-height:1.6}
+.collection-status{margin-top:16px;padding:13px 14px;border:1px solid var(--line);border-radius:14px;background:var(--soft);color:var(--muted);font-size:12px;line-height:1.65;overflow-wrap:anywhere}
+.collection-status strong{display:block;margin-bottom:3px;color:var(--text);font-size:13px}
+.collection-status[data-state="running"]{border-color:rgba(71,123,157,.45)}.collection-status[data-state="error"],.collection-status[data-state="verification_required"],.collection-status[data-state="login_required"]{border-color:rgba(169,80,85,.45);color:var(--bad)}
+.collection-status[hidden]{display:none}
 .right-stack{display:grid;gap:18px;min-width:0}
 .surface{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius-xl);box-shadow:var(--shadow);padding:28px;transition:background var(--ease),box-shadow var(--ease)}
 body[data-theme="glass"] .surface{backdrop-filter:blur(16px) saturate(115%);-webkit-backdrop-filter:blur(16px) saturate(115%)}
@@ -166,8 +510,9 @@ button:focus-visible,textarea:focus-visible,input:focus-visible,select:focus-vis
 @keyframes pulse{0%,100%{box-shadow:0 0 0 5px rgba(71,123,157,.13)}50%{box-shadow:0 0 0 10px rgba(71,123,157,.04)}}
 @keyframes travel{0%{transform:translateX(-110%)}50%{transform:translateX(80%)}100%{transform:translateX(280%)}}
 @keyframes modal-in{from{opacity:0;transform:translateY(8px) scale(.985)}to{opacity:1;transform:translateY(0) scale(1)}}
+@media(max-width:980px){.app-layout{grid-template-columns:1fr}.side-nav{position:static;grid-template-columns:1fr}.nav-items{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:7px}.nav-tip{grid-column:1/-1;margin-top:3px}}
 @media(max-width:760px){body{padding:18px 14px}.workspace{grid-template-columns:1fr}.surface{padding:20px;border-radius:22px}.settings{grid-template-columns:1fr}.topbar{align-items:flex-start}.brand p{max-width:210px}.status-card{min-height:330px}}
-@media(max-width:480px){.topbar{gap:10px}.brand{min-width:0;gap:10px}.brand p{display:none}.mark{width:40px;height:40px;border-radius:13px;font-size:18px}.brand h1{font-size:22px;margin:9px 0 0}.theme-switch,.settings-button{padding:9px 11px;font-size:12px}.collector-switch{padding:8px 9px;font-size:11px;gap:6px}.surface{padding:18px}textarea{min-height:190px}}
+@media(max-width:480px){.topbar{gap:10px}.brand{min-width:0;gap:10px}.brand p{display:none}.mark{width:40px;height:40px;border-radius:13px;font-size:18px}.brand h1{font-size:22px;margin:9px 0 0}.theme-switch,.settings-button{padding:9px 11px;font-size:12px}.collector-switch{padding:8px 9px;font-size:11px;gap:6px}.surface{padding:18px}textarea{min-height:190px}.side-nav{padding:11px 9px}.nav-items{gap:5px}.nav-item{padding:10px 7px}.nav-item span{font-size:11px}.nav-item small{font-size:9px}.form-grid{grid-template-columns:1fr}.form-grid .wide{grid-column:auto}}
 @media(prefers-reduced-motion:reduce){*,*:before,*:after{animation:none!important;transition:none!important;scroll-behavior:auto!important}}
 @supports not ((backdrop-filter:blur(1px)) or (-webkit-backdrop-filter:blur(1px))){body[data-theme="glass"] .surface{background:#edf4f8}}
 </style>
@@ -176,18 +521,56 @@ button:focus-visible,textarea:focus-visible,input:focus-visible,select:focus-vis
 <main class="shell">
   <header class="topbar">
     <div class="brand"><div class="mark">∞</div><div><h1>__APP_NAME__</h1><p>多平台公开媒体 · 本地保存 · 无需登录</p></div></div>
-    <div class="top-actions"><button class="collector-switch" id="collectorToggle" type="button" role="switch" aria-checked="true" aria-label="剪贴板采集开关"><span class="collector-led" aria-hidden="true"></span><span id="collectorToggleText">剪贴板采集 开</span></button><button class="settings-button" id="settingsButton" type="button" aria-haspopup="dialog" aria-controls="settingsDialog">设置</button><button class="theme-switch" id="themeButton" type="button" aria-label="切换视觉主题">玻璃主题</button></div>
+    <div class="top-actions"><button class="collector-switch" id="collectorToggle" type="button" role="switch" aria-checked="true" aria-label="剪贴板单链接采集开关" title="独立后台监控剪贴板；每条复制内容只采集一条链接"><span class="collector-led" aria-hidden="true"></span><span id="collectorToggleText">剪贴板采集 开</span></button><button class="settings-button" id="settingsButton" type="button" aria-haspopup="dialog" aria-controls="settingsDialog">设置</button><button class="theme-switch" id="themeButton" type="button" aria-label="切换视觉主题">玻璃主题</button></div>
   </header>
+  <div class="app-layout">
+    <aside class="side-nav" aria-label="采集入口">
+      <div class="nav-caption">采集入口</div>
+      <div class="nav-items" role="tablist" aria-orientation="vertical">
+        <button class="nav-item" id="tabSingle" type="button" role="tab" aria-selected="true" aria-controls="singlePanel" data-view="single"><span>单作品采集</span><small>万能下载器</small></button>
+        <button class="nav-item" id="tabHomepage" type="button" role="tab" aria-selected="false" aria-controls="homepagePanel" data-view="homepage"><span>主页采集</span><small>发现主页公开图文</small></button>
+        <button class="nav-item" id="tabKeyword" type="button" role="tab" aria-selected="false" aria-controls="keywordPanel" data-view="keyword"><span>关键词采集</span><small>发现抖音公开图文</small></button>
+      </div>
+      <p class="nav-tip">剪贴板是独立后台入口，每次只处理一条链接；下载成功后与手动下载共用本机查重和历史。</p>
+    </aside>
   <section class="workspace">
-    <div class="surface">
+    <section class="surface work-panel active" id="singlePanel" role="tabpanel" aria-labelledby="tabSingle" data-panel="single">
       <div class="eyebrow">Original media</div>
       <h2>粘贴链接，保存原图。</h2>
-      <p class="lead">复制小红书或抖音分享内容到下面，点一次即可。默认保存到电脑的“下载”文件夹。</p>
+      <p class="lead">当前万能下载器入口。手动粘贴支持单条或多条公开链接；右上角剪贴板后台仍按每次一条链接采集。默认保存到电脑的“下载”文件夹。</p>
       <label for="input">分享文本或链接</label>
       <textarea id="input" placeholder="例如：复制小红书或抖音分享文本到这里，也可以一次粘贴多条链接。"></textarea>
       <button class="primary" id="go" type="button">开始下载</button>
       <div class="privacy"><span class="shield">✓</span><span>公开笔记无需账号、密码或 Cookie。链接默认只交给本机引擎，不会静默发送到在线解析网站。</span></div>
-    </div>
+    </section>
+    <section class="surface work-panel" id="homepagePanel" role="tabpanel" aria-labelledby="tabHomepage" data-panel="homepage" hidden>
+      <div class="eyebrow">Homepage collection</div>
+      <h2>从主页发现公开图文。</h2>
+      <p class="lead">填写一个抖音作者主页。发现的作品会加入右侧同一万能下载队列，沿用保存位置、原格式、查重和历史记录。</p>
+      <label for="authorUrl">抖音作者主页链接</label>
+      <textarea id="authorUrl" style="min-height:112px" placeholder="https://www.douyin.com/user/…"></textarea>
+      <p class="form-help">默认读取主页前 10 条可见图文。需要登录或遇到验证时会停止，并提示你在原生浏览器处理。</p>
+      <p class="capability-status" id="homepageCapability" role="status">正在读取江湖工具箱状态…</p>
+      <div class="collection-status" id="homepageStatus" role="status" aria-live="polite" hidden></div>
+      <button class="primary" id="startHomepage" type="button">采集主页并加入下载队列</button>
+      <div class="privacy"><span class="shield">✓</span><span>目前主页发现支持抖音公开页面；小红书主页采集未接入此入口。</span></div>
+    </section>
+    <section class="surface work-panel" id="keywordPanel" role="tabpanel" aria-labelledby="tabKeyword" data-panel="keyword" hidden>
+      <div class="eyebrow">Keyword collection</div>
+      <h2>按关键词发现图文。</h2>
+      <p class="lead">搜索列表只读取公开图文卡片，不打开详情页。发现的作品加入同一个万能下载器队列。</p>
+      <div class="form-grid">
+        <div class="wide"><label for="keywordValue">关键词</label><input id="keywordValue" type="text" maxlength="100" placeholder="例如：江浙沪团建"></div>
+        <div><label for="keywordCount">目标作品数</label><input id="keywordCount" type="number" min="1" max="30" value="20"></div>
+        <div><label for="minImages">最少图片数</label><input id="minImages" type="number" min="0" max="50" value="4"></div>
+        <div class="wide"><label for="maxImages">最多图片数</label><input id="maxImages" type="number" min="0" max="50" value="20"></div>
+      </div>
+      <p class="form-help">一次提交一个关键词，最多发现 30 条；默认只采图文，图片张数筛选为 4–20 张。</p>
+      <p class="capability-status" id="keywordCapability" role="status">正在读取江湖工具箱状态…</p>
+      <div class="collection-status" id="keywordStatus" role="status" aria-live="polite" hidden></div>
+      <button class="primary" id="startKeyword" type="button">发现图文并加入下载队列</button>
+      <div class="privacy"><span class="shield">✓</span><span>目前此面板接入抖音列表流程。遇到登录或人机验证会停下；不会绕过验证。小红书关键词仍需其原生核心，不从这里跨平台补采。</span></div>
+    </section>
     <aside class="right-stack" aria-live="polite">
       <section class="surface waiting-card">
         <div class="panel-head"><div><p class="panel-title">等待任务</p><p class="panel-sub" id="waitingSub">当前没有排队的下载</p></div><span class="count-badge" id="waitingCount">0</span></div>
@@ -209,6 +592,7 @@ button:focus-visible,textarea:focus-visible,input:focus-visible,select:focus-vis
       </section>
     </aside>
   </section>
+  </div>
   <p class="footnote">仅处理你有权保存的公开内容 · 创作者嵌入原图的署名会保留 · __APP_NAME__ V__APP_VERSION__</p>
 </main>
 <dialog class="settings-dialog" id="settingsDialog" aria-labelledby="settingsTitle">
@@ -253,6 +637,18 @@ $('historyMore').addEventListener('click',loadMoreHistory);
 function finish(){activeJob=null;$('go').disabled=false;$('go').textContent='开始下载';refreshDashboard()}
 async function poll(){if(!activeJob)return;try{const r=await fetch('/api/jobs/'+activeJob);const job=await r.json();if(!r.ok)throw new Error(job.error||'读取任务失败');if(job.status==='completed'||job.status==='error'){const wait=Math.max(0,MIN_PROGRESS_MS-(Date.now()-jobStartedAt));if(wait){pollTimer=setTimeout(()=>{render(job);finish()},wait);return}render(job);finish();return}render(job);refreshDashboard();pollTimer=setTimeout(poll,700)}catch(e){setState('error','连接中断',e.message);$('progressBar').classList.remove('active');$('go').disabled=false;$('go').textContent='重新开始';activeJob=null}}
 async function start(){if(activeJob)return;const text=$('input').value.trim();if(!text){$('input').focus();setState('error','还缺少分享文本','请先粘贴至少一条公开媒体链接');return}const output_dir=$('outdir').value.trim()||DEFAULT_OUTPUT,mode=$('mode').value,image_format=$('format').value;localStorage.setItem(OUTPUT_KEY,output_dir);localStorage.setItem(MODE_KEY,mode);localStorage.setItem(FORMAT_KEY,image_format);jobStartedAt=Date.now();$('go').disabled=true;$('go').textContent='正在准备…';$('progressBar').classList.add('active');$('progressBar').style.width='38%';$('progressText').textContent='准备中';$('successText').textContent='';$('results').innerHTML='';$('results').classList.remove('show');$('empty').style.display='block';setState('running','正在准备','连接本地无水印引擎');try{const r=await fetch('/api/jobs',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({text,output_dir,mode,image_format})});const data=await r.json();if(!r.ok)throw new Error(data.error||'创建任务失败');activeJob=data.job_id;$('go').textContent='下载进行中';poll()}catch(e){$('progressBar').classList.remove('active');setState('error','无法开始',e.message);$('go').disabled=false;$('go').textContent='重新开始'}}
+function activateView(name){document.querySelectorAll('[data-view]').forEach(tab=>{const active=tab.dataset.view===name;tab.setAttribute('aria-selected',String(active));tab.tabIndex=active?0:-1});document.querySelectorAll('[data-panel]').forEach(panel=>{const active=panel.dataset.panel===name;panel.classList.toggle('active',active);panel.hidden=!active});localStorage.setItem('xhs-dl-active-view',name)}
+document.querySelectorAll('[data-view]').forEach(tab=>{tab.addEventListener('click',()=>activateView(tab.dataset.view));tab.addEventListener('keydown',event=>{if(!['ArrowDown','ArrowUp','ArrowRight','ArrowLeft'].includes(event.key))return;event.preventDefault();const tabs=[...document.querySelectorAll('[data-view]')],index=tabs.indexOf(tab),delta=['ArrowDown','ArrowRight'].includes(event.key)?1:-1,next=tabs[(index+delta+tabs.length)%tabs.length];activateView(next.dataset.view);next.focus()})});
+activateView(['single','homepage','keyword'].includes(localStorage.getItem('xhs-dl-active-view'))?localStorage.getItem('xhs-dl-active-view'):'single');
+const collectionPollTimers={};
+function collectionSettings(){const output_dir=$('outdir').value.trim()||DEFAULT_OUTPUT,mode=$('mode').value,image_format=$('format').value;localStorage.setItem(OUTPUT_KEY,output_dir);localStorage.setItem(MODE_KEY,mode);localStorage.setItem(FORMAT_KEY,image_format);return{output_dir,mode,image_format}}
+function setCollectionStatus(kind,task,errorText=''){const box=$(kind==='homepage'?'homepageStatus':'keywordStatus');box.hidden=false;box.replaceChildren();const title=document.createElement('strong');const message=document.createElement('span');const state=errorText?'error':task?.status||'error';box.dataset.state=state;if(errorText){title.textContent='未能提交';message.textContent=errorText}else{const names={queued:'已排队',discovering:'正在发现公开作品',download_queued:'已进入下载队列',completed:'下载完成',accepted:'原生工具已接收',unknown:'状态待确认',verification_required:'需要人工验证',login_required:'需要登录',completed_zero:'没有发现作品',error:'采集失败'};title.textContent=names[state]||'采集状态';let detail=task.message||'正在读取状态';if(task.download_job){const job=task.download_job;detail+=` · 下载 ${job.done||0}/${job.total||0}，成功 ${job.success||0}，跳过 ${job.skipped||0}，失败 ${job.failed||0}`}if(task.discovered_count)detail=`发现 ${task.discovered_count} 条。${detail}`;if(state==='accepted'&&!task.discovered_count)detail+='；完成情况尚未确认，请在江湖工具箱任务里查看后再决定是否重试';message.textContent=detail}box.append(title,message);if(task?.download_job_id){const link=document.createElement('button');link.type='button';link.className='history-more';link.textContent='查看统一下载队列';link.addEventListener('click',()=>{activateView('single');$('queueList').scrollIntoView({behavior:'smooth',block:'center'})});box.append(link)}}
+async function pollCollection(kind,jobId){try{const response=await fetch('/api/v1/collections/jobs/'+encodeURIComponent(jobId)),task=await response.json();if(!response.ok)throw new Error(task.error||'读取采集状态失败');setCollectionStatus(kind,task);if(['queued','discovering','download_queued'].includes(task.status)){collectionPollTimers[kind]=setTimeout(()=>pollCollection(kind,jobId),1200);return}sessionStorage.setItem('xhs-dl-collection-last-'+kind,jobId);if(task.status!=='unknown')sessionStorage.removeItem('xhs-dl-collection-key-'+kind)}catch(error){setCollectionStatus(kind,null,error.message)}}
+async function startCollection(kind){const button=$(kind==='homepage'?'startHomepage':'startKeyword'),box=$(kind==='homepage'?'homepageStatus':'keywordStatus');if(button.disabled)return;let request;if(kind==='homepage'){const profile_url=$('authorUrl').value.trim();if(!profile_url){$('authorUrl').focus();setCollectionStatus(kind,null,'请填写一个抖音作者主页链接');return}request={profile_url,...collectionSettings()}}else{const keyword=$('keywordValue').value.trim(),count=Number($('keywordCount').value),min_images=Number($('minImages').value),max_images=Number($('maxImages').value);if(!keyword){$('keywordValue').focus();setCollectionStatus(kind,null,'请填写一个关键词');return}request={keyword,count,min_images,max_images,...collectionSettings()}}const endpoint='/api/v1/collections/'+kind,fingerprint=JSON.stringify(request),cacheKey='xhs-dl-collection-key-'+kind;let cached;try{cached=JSON.parse(sessionStorage.getItem(cacheKey)||'null')}catch(_){}if(!cached||cached.fingerprint!==fingerprint){cached={fingerprint,key:`${kind}-${crypto.randomUUID?crypto.randomUUID():Date.now()+'-'+Math.random().toString(16).slice(2)}`};sessionStorage.setItem(cacheKey,JSON.stringify(cached))}button.disabled=true;button.textContent='正在提交…';setCollectionStatus(kind,{status:'queued',message:'正在连接本地采集流程'});try{const response=await fetch(endpoint,{method:'POST',headers:{'Content-Type':'application/json','Idempotency-Key':cached.key},body:JSON.stringify(request)}),task=await response.json();if(!response.ok)throw new Error(task.error||'提交失败');sessionStorage.setItem('xhs-dl-collection-last-'+kind,task.job_id);if(collectionPollTimers[kind])clearTimeout(collectionPollTimers[kind]);await pollCollection(kind,task.job_id);refreshDashboard()}catch(error){setCollectionStatus(kind,null,error.message)}finally{button.disabled=false;button.textContent=kind==='homepage'?'采集主页并加入下载队列':'发现图文并加入下载队列'}}
+async function loadLastCollection(kind){const jobId=sessionStorage.getItem('xhs-dl-collection-last-'+kind);if(jobId){setCollectionStatus(kind,{status:'queued',message:'正在读取最近任务'});await pollCollection(kind,jobId)}}
+async function refreshCollectionCapabilities(){const targets=[$('homepageCapability'),$('keywordCapability')];try{const response=await fetch('/api/v1/collections/capabilities'),data=await response.json();let message;if(!data.available)message='未找到江湖工具箱采集接口。';else if(data.status!=='online')message=`江湖工具箱当前${data.status==='stale'?'心跳已过期':'离线'}；打开工具箱后即可使用此入口。`;else if(data.verification_required)message='原生浏览器正在等待人工验证；完成后再提交采集。';else if(data.active_platform!=='douyin')message='当前原生核心不是抖音；请先在江湖工具箱切换到抖音。';else if(data.busy)message='原生采集任务正在运行或状态待确认；请先查看现有任务。';else message='抖音原生采集在线。发现链接后会送入本页的万能下载器队列。';targets.forEach(target=>target.textContent=message)}catch(_){targets.forEach(target=>target.textContent='暂时无法读取江湖工具箱状态；提交时会再次检查。')}}
+$('startHomepage').addEventListener('click',()=>startCollection('homepage'));$('startKeyword').addEventListener('click',()=>startCollection('keyword'));
+loadLastCollection('homepage');loadLastCollection('keyword');refreshCollectionCapabilities();setInterval(refreshCollectionCapabilities,5000);
 $('go').addEventListener('click',start);$('input').addEventListener('keydown',e=>{if((e.ctrlKey||e.metaKey)&&e.key==='Enter')start()});refreshDashboard();setInterval(refreshDashboard,2500);
 </script>
 </body>
@@ -632,6 +1028,35 @@ def _openapi_document():
                     "responses": {"200": {"description": "服务健康状态", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Health"}}}}},
                 }
             },
+            "/api/v1/collections/capabilities": {
+                "get": {
+                    "summary": "读取主页和关键词采集能力及原生在线状态",
+                    "responses": {"200": {"description": "当前工具箱能力和心跳状态"}},
+                }
+            },
+            "/api/v1/collections/homepage": {
+                "post": {
+                    "summary": "发现抖音主页公开图文并加入统一下载队列",
+                    "parameters": [{"name": "Idempotency-Key", "in": "header", "required": False, "schema": {"type": "string", "maxLength": 128}}],
+                    "requestBody": {"required": True, "content": {"application/json": {"schema": {"type": "object", "required": ["profile_url"], "properties": {"profile_url": {"type": "string", "format": "uri"}, "output_dir": {"type": "string"}, "mode": {"type": "string", "enum": ["auto", "fast", "normal", "cautious", "slow", "very-slow"]}, "image_format": {"type": "string", "enum": ["keep", "jpg", "png"]}}}}}},
+                    "responses": {"202": {"description": "主页发现任务已排队；随后下载任务进入统一任务列表"}, "200": {"description": "幂等请求返回原任务"}, "400": {"description": "主页链接或保存设置无效"}, "409": {"description": "原生验证中、平台不符或另一个发现任务正在运行"}, "503": {"description": "江湖工具箱离线或未安装"}},
+                }
+            },
+            "/api/v1/collections/keyword": {
+                "post": {
+                    "summary": "发现抖音关键词公开图文并加入统一下载队列",
+                    "parameters": [{"name": "Idempotency-Key", "in": "header", "required": False, "schema": {"type": "string", "maxLength": 128}}],
+                    "requestBody": {"required": True, "content": {"application/json": {"schema": {"type": "object", "required": ["keyword"], "properties": {"keyword": {"type": "string", "maxLength": 100}, "count": {"type": "integer", "minimum": 1, "maximum": 30, "default": 20}, "min_images": {"type": "integer", "minimum": 0, "maximum": 50, "default": 4}, "max_images": {"type": "integer", "minimum": 0, "maximum": 50, "default": 20}, "output_dir": {"type": "string"}, "mode": {"type": "string", "enum": ["auto", "fast", "normal", "cautious", "slow", "very-slow"]}, "image_format": {"type": "string", "enum": ["keep", "jpg", "png"]}}}}}},
+                    "responses": {"202": {"description": "关键词发现任务已排队；随后下载任务进入统一任务列表"}, "200": {"description": "幂等请求返回原任务"}, "400": {"description": "关键词、筛选或保存设置无效"}, "409": {"description": "原生验证中、平台不符或另一个发现任务正在运行"}, "503": {"description": "江湖工具箱离线或未安装"}},
+                }
+            },
+            "/api/v1/collections/jobs/{job_id}": {
+                "get": {
+                    "summary": "读取主页或关键词发现任务，并回读对应统一下载进度",
+                    "parameters": [{"name": "job_id", "in": "path", "required": True, "schema": {"type": "string"}}],
+                    "responses": {"200": {"description": "发现阶段状态和关联下载任务摘要"}, "404": {"description": "采集任务不存在"}},
+                }
+            },
             "/api/v1/jobs": {
                 "get": {
                     "summary": "读取等待、进行中、剪贴板队列与本机成功历史",
@@ -879,10 +1304,26 @@ class Handler(BaseHTTPRequestHandler):
                         "job": "GET /api/v1/jobs/<job_id>",
                         "dashboard": "GET /api/v1/jobs",
                         "clipboard_control": "POST /api/v1/collector",
+                        "collection_capabilities": "GET /api/v1/collections/capabilities",
+                        "homepage_collection": "POST /api/v1/collections/homepage",
+                        "keyword_collection": "POST /api/v1/collections/keyword",
+                        "collection_job": "GET /api/v1/collections/jobs/<job_id>",
                         "openapi": "GET /api/openapi.json",
                     },
                 }
             )
+            return
+        if path == "/api/collections/capabilities":
+            self._json(_toolbox_capability_snapshot())
+            return
+        if path.startswith("/api/collections/jobs/"):
+            job_id = path.rsplit("/", 1)[-1]
+            with COLLECTION_TASKS_LOCK:
+                task = copy.deepcopy(COLLECTION_TASKS.get(job_id))
+            if task is None:
+                self._json({"error": "采集任务不存在"}, 404)
+            else:
+                self._json(_collection_task_payload(task))
             return
         if path == "/api/jobs":
             try:
@@ -910,6 +1351,118 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_POST(self):
         api_path = self._api_path()
+        if api_path in {"/api/collections/homepage", "/api/collections/keyword"}:
+            try:
+                length = int(self.headers.get("Content-Length", 0))
+                if length > 64 * 1024:
+                    self._json({"error": "请求内容过大"}, 413)
+                    return
+                body = json.loads(self.rfile.read(length) or b"{}")
+            except (ValueError, json.JSONDecodeError):
+                self._json({"error": "请求格式无效"}, 400)
+                return
+            if not isinstance(body, dict):
+                self._json({"error": "请求内容必须是 JSON 对象"}, 400)
+                return
+
+            capability = _toolbox_capability_snapshot()
+            if not capability["available"]:
+                self._json({"error": "没有找到江湖工具箱采集接口"}, 503)
+                return
+            if capability["status"] != "online":
+                self._json({"error": "江湖工具箱原生采集模块当前不在线；本次没有启动采集"}, 503)
+                return
+            if capability["verification_required"]:
+                self._json({"error": "原生浏览器正在等待人工验证；完成验证后再提交"}, 409)
+                return
+            if capability["active_platform"] != "douyin":
+                self._json({"error": "当前原生核心不是抖音；请先在江湖工具箱切换到抖音"}, 409)
+                return
+            if capability["busy"]:
+                self._json({"error": "原生采集任务仍在运行或状态待确认；先核对现有任务，避免重复启动"}, 409)
+                return
+
+            output_dir = body.get("output_dir") or DEFAULT_OUTPUT_DIR
+            mode = body.get("mode", "auto")
+            image_format = body.get("image_format", "keep")
+            if not isinstance(output_dir, str) or not output_dir.strip() or len(output_dir) > 4096:
+                self._json({"error": "保存位置格式无效"}, 400)
+                return
+            if not isinstance(mode, str) or mode not in DELAY_MODES:
+                self._json({"error": "下载节奏无效"}, 400)
+                return
+            if not isinstance(image_format, str) or image_format not in {"keep", "jpg", "png"}:
+                self._json({"error": "图片格式无效"}, 400)
+                return
+
+            if api_path.endswith("/homepage"):
+                try:
+                    profile_url = _validate_douyin_profile(body.get("profile_url", ""))
+                except ValueError as exc:
+                    self._json({"error": str(exc)}, 400)
+                    return
+                command = [
+                    _python_console_executable(), str(TOOLBOX_PROJECT / "jianghu_cli.py"),
+                    "--bridge-dir", str(TOOLBOX_BRIDGE_DIR), "--timeout", "60",
+                    "extract-author", "--url", profile_url, "--no-auto-download",
+                ]
+                kind = "homepage"
+                label = "抖音主页"
+                request = {
+                    "profile_url": profile_url,
+                    "output_dir": output_dir,
+                    "mode": mode,
+                    "image_format": image_format,
+                    "_command": command,
+                }
+            else:
+                keyword = body.get("keyword", "")
+                if not isinstance(keyword, str) or not keyword.strip() or len(keyword.strip()) > 100 or "\n" in keyword or "\r" in keyword:
+                    self._json({"error": "请填写一个不超过 100 个字符的关键词"}, 400)
+                    return
+                count = body.get("count", 20)
+                min_images = body.get("min_images", 4)
+                max_images = body.get("max_images", 20)
+                if (isinstance(count, bool) or not isinstance(count, int) or not 1 <= count <= 30
+                        or isinstance(min_images, bool) or not isinstance(min_images, int)
+                        or isinstance(max_images, bool) or not isinstance(max_images, int)
+                        or not 0 <= min_images <= max_images <= 50):
+                    self._json({"error": "数量需为 1–30；图片范围需满足 0 ≤ 最小张数 ≤ 最大张数 ≤ 50"}, 400)
+                    return
+                command = [
+                    _python_console_executable(), str(TOOLBOX_PROJECT / "jianghu_cli.py"),
+                    "--bridge-dir", str(TOOLBOX_BRIDGE_DIR), "--timeout", "60",
+                    "extract-keyword", "--platform", "douyin", "--keyword", keyword.strip(),
+                    "--count", str(count), "--min-images", str(min_images),
+                    "--max-images", str(max_images), "--metadata-only",
+                ]
+                kind = "keyword"
+                label = f"抖音关键词：{keyword.strip()}"
+                request = {
+                    "keyword": keyword.strip(),
+                    "count": count,
+                    "min_images": min_images,
+                    "max_images": max_images,
+                    "output_dir": output_dir,
+                    "mode": mode,
+                    "image_format": image_format,
+                    "_command": command,
+                }
+
+            idempotency_key = self.headers.get("Idempotency-Key", "").strip()
+            if len(idempotency_key) > 128:
+                self._json({"error": "Idempotency-Key 最长 128 个字符"}, 400)
+                return
+            task, error, code = _create_collection_task(kind, label, request, idempotency_key)
+            if error:
+                self._json({"error": error}, code)
+                return
+            self._json(
+                task,
+                code,
+                {"Location": f"/api/v1/collections/jobs/{task['job_id']}", "Retry-After": "2"},
+            )
+            return
         if api_path == "/api/collector":
             try:
                 length = int(self.headers.get("Content-Length", 0))

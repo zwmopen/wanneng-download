@@ -4,6 +4,32 @@
 
 接口规范可直接读取 `GET /api/openapi.json`。稳定接口使用 `/api/v1`；已有程序也可以继续使用不带版本号的 `/api` 路径。
 
+## 主页和关键词入口
+
+5678 页面侧栏的“主页采集”和“关键词采集”使用本机江湖工具箱发现抖音公开图文链接，再把发现的链接提交到同一个万能下载器任务队列。因此保存目录、节奏、图片格式、成功去重和历史都沿用下载器设置。调用前需确认江湖工具箱原生核心在线且当前为抖音；遇到登录或验证时会返回状态，不会自动绕过。
+
+剪贴板后台仍是单链接入口：每次复制只采一条链接。它和主页、关键词、手动下载最终都使用万能下载器成功账本去重。
+
+```powershell
+$body = @{
+  profile_url = 'https://www.douyin.com/user/example'
+  output_dir = "$env:USERPROFILE\Downloads"
+  mode = 'auto'
+  image_format = 'keep'
+} | ConvertTo-Json -Depth 4
+
+$task = Invoke-RestMethod `
+  -Uri 'http://127.0.0.1:5678/api/v1/collections/homepage' `
+  -Method Post `
+  -ContentType 'application/json; charset=utf-8' `
+  -Headers @{ 'Idempotency-Key' = 'homepage-run-001' } `
+  -Body ([Text.Encoding]::UTF8.GetBytes($body))
+
+Invoke-RestMethod "http://127.0.0.1:5678/api/v1/collections/jobs/$($task.job_id)"
+```
+
+关键词请求为 `POST /api/v1/collections/keyword`，字段为 `keyword`、`count`（1–30）、`min_images`、`max_images`，并可传相同的 `output_dir`、`mode` 和 `image_format`。小红书主页采集未接入此 API；小红书关键词仍需要其原生核心，不会用抖音路径替代。
+
 ## 提交任务
 
 请求可以传链接数组，也可以传整段复制的分享文本。省略格式和节奏时，格式保持来源原样，节奏使用自适应策略。
@@ -37,6 +63,8 @@ Invoke-RestMethod "http://127.0.0.1:5678/api/v1/jobs/$($job.job_id)"
 
 - `GET /api/v1/jobs?limit=50&history_offset=0`：返回等待任务、进行中任务、剪贴板队列、下载成功历史和计数；历史记录可用 `history_offset` 分页，`history_has_more` 表示是否还有更早记录。
 - `POST /api/v1/collector`：用 `{"enabled": false}` 暂停、`{"enabled": true}` 恢复剪贴板守护进程；如果原进程已退出，会启动同一个入口（仍受单实例互斥保护）。运行中的单条下载会完成后暂停，队列保留；响应 `starting` 表示正在启动。
+- `GET /api/v1/collections/capabilities`：读取主页/关键词面板能力、江湖工具箱心跳和当前平台。
+- `POST /api/v1/collections/homepage`、`POST /api/v1/collections/keyword`：发现抖音链接并送入通用下载队列；`GET /api/v1/collections/jobs/{job_id}`：回读发现阶段和关联下载状态。
 - `GET /api/v1/jobs/{job_id}`：读取单个任务进度；重启服务后仍可读到已归档的网页任务摘要。
 - `GET /api/v1/capabilities`：读取支持的平台、格式、默认节奏和接口列表。
 - `GET /api/v1/health`：检查 API 是否在线。
