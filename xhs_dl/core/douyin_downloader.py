@@ -310,7 +310,7 @@ class DouyinBrowserEngine:
                 destination = self._download_media(media, downloaded)
             saved.append(destination)
         (note_dir / "文案.txt").write_text(work.copy_text, encoding="utf-8-sig")
-        add_history(url, work.note_id, work.title)
+        add_history(url, work.note_id, work.title, str(note_dir.resolve()))
         videos = [item for item in work.media if item.kind == "video"]
         images = [item for item in work.media if item.kind != "video"]
         return NoteResult(

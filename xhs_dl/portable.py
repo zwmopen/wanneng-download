@@ -48,12 +48,14 @@ def run_headless_download():
     payload = {
         "success": result.success_count,
         "failed": result.fail_count,
+        "skipped": result.skipped_count,
         "total": result.total,
         "output_dir": result.output_dir,
         "items": [
             {
                 "url": item.url,
                 "success": item.success,
+                "deduplicated": item.deduplicated,
                 "title": item.title,
                 "save_dir": item.save_dir,
                 "error": item.error,

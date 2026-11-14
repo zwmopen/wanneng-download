@@ -41,7 +41,9 @@ Invoke-RestMethod "http://127.0.0.1:5678/api/v1/jobs/$($job.job_id)"
 - `GET /api/v1/health`：检查 API 是否在线。
 - `GET /api/openapi.json`：机器可读的 OpenAPI 3.1 接口定义。
 
-`GET /api/v1/jobs` 的 `counts.download_history` 是本机真实下载历史总数；`history` 返回最近条目。`collector` 单独报告剪贴板采集器心跳、等待数、冷却状态和失败归档数。过期心跳不会作为在线显示。
+`GET /api/v1/jobs` 的 `counts.download_history` 是本机真实下载历史总数；`history` 返回最近条目。`collector` 单独报告剪贴板采集器心跳、等待数、冷却状态和失败归档数。过期心跳不会作为在线显示。任务结果的 `skipped` 和条目级 `deduplicated` 标记用于报告共用账本命中的重复项。
+
+网页、命令行、桌面版、API 和剪贴板采集共用本机成功下载账本（`%LOCALAPPDATA%/xhs-dl/history.json`）。只有确认成功落盘的项目进入账本；再从任一入口提交相同作品时会显示为“已存在 · 跳过”，不重复下载。进行中的同一链接也会跨进程互斥，避免剪贴板与手动/API任务同时下载。剪贴板旧成功记录会在采集器启动时并入共用账本；失败项和仅登记的链接不会被当作已下载。
 
 ## 调速与重试
 

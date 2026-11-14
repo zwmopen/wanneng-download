@@ -23,6 +23,7 @@ class NoteResult:
     topics: str = ""
     engine: str = ""
     media_format: str = ""
+    deduplicated: bool = False
 
 
 @dataclass
@@ -37,7 +38,11 @@ class DownloadResult:
 
     @property
     def fail_count(self) -> int:
-        return len(self.results) - self.success_count
+        return sum(1 for r in self.results if not r.success and not r.deduplicated)
+
+    @property
+    def skipped_count(self) -> int:
+        return sum(1 for r in self.results if r.deduplicated)
 
     @property
     def total(self) -> int:

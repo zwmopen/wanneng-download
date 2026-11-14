@@ -416,7 +416,7 @@ class DesktopApp(ctk.CTk):
         lines = []
 
         def on_progress(item, index, total):
-            state = "完成" if item.success else "失败"
+            state = "已保存·跳过重复" if item.deduplicated else ("完成" if item.success else "失败")
             lines.append(f"{index}/{total}  {state}  {item.title or item.error}")
             self.after(0, lambda: self._update_progress(index, total, lines))
 
@@ -429,7 +429,7 @@ class DesktopApp(ctk.CTk):
                 adaptive=selected_mode == "auto",
             )
             result = downloader.download(urls)
-            self.after(0, lambda: self._finish_download(result.success_count, result.fail_count))
+            self.after(0, lambda: self._finish_download(result.success_count, result.skipped_count, result.fail_count))
         except EngineNotReady as exc:
             message = str(exc)
             self.after(0, lambda value=message: self._fail_download(value))
@@ -445,12 +445,12 @@ class DesktopApp(ctk.CTk):
         self.status_detail.configure(text=f"已完成 {index} / {total}")
         self._set_results("\n\n".join(lines))
 
-    def _finish_download(self, success, failed):
+    def _finish_download(self, success, skipped, failed):
         self.progress.stop()
         self.progress.configure(mode="determinate")
         self.progress.set(1)
-        self.status_title.configure(text="全部保存完成" if not failed else "任务完成")
-        self.status_detail.configure(text=f"成功 {success} 条，失败 {failed} 条")
+        self.status_title.configure(text="重复项已跳过" if skipped and not success and not failed else ("全部保存完成" if not failed else "任务完成"))
+        self.status_detail.configure(text=f"成功 {success} 条，跳过 {skipped} 条，失败 {failed} 条")
         self.download_button.configure(state="normal", text="继续采集")
         self.running = False
 

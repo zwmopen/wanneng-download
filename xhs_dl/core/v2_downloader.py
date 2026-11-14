@@ -18,7 +18,7 @@ from typing import Callable, List, Optional, Tuple
 from .downloader import DELAY_MODES, extract_urls_from_text
 from .models import DownloadResult, NoteResult
 from .media_names import convert_image_file, media_filename, media_sort_key
-from xhs_dl.storage import add_history
+from xhs_dl.storage import add_history, download_claim
 
 logger = logging.getLogger(__name__)
 
@@ -217,7 +217,7 @@ class LocalCliEngine:
             media_format=", ".join(sorted({p.suffix.lstrip(".").upper() for p in selected_files})),
         )
         self._write_copy_text(note_dir, result)
-        add_history(url, result.note_id, result.title)
+        add_history(url, result.note_id, result.title, result.save_dir)
         return result
 
     @staticmethod
@@ -364,10 +364,21 @@ class XhsV2Downloader:
         root.mkdir(parents=True, exist_ok=True)
         result = DownloadResult(output_dir=str(root.resolve()))
         for index, url in enumerate(unique, 1):
-            note_result = self.engine.download_one(url, root)
+            with download_claim(url) as existing:
+                if existing:
+                    note_result = NoteResult(
+                        url=url,
+                        note_id=str(existing.get("笔记ID") or ""),
+                        title=str(existing.get("标题") or ""),
+                        save_dir=str(existing.get("保存位置") or ""),
+                        engine="history",
+                        deduplicated=True,
+                    )
+                else:
+                    note_result = self.engine.download_one(url, root)
             result.results.append(note_result)
             if self.on_progress:
                 self.on_progress(note_result, index, len(unique))
-            if index < len(unique):
+            if index < len(unique) and not note_result.deduplicated:
                 time.sleep(random.uniform(*self.delay))
         return result

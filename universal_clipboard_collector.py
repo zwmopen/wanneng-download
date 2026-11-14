@@ -364,9 +364,32 @@ except Exception:
 # 引入万能下载器 CLI
 try:
     from xhs_dl.cli import main as xhs_dl_main
+    from xhs_dl.storage import find_downloaded, merge_download_history, same_download
 except Exception as e:
+    find_downloaded = None
+    merge_download_history = None
+    same_download = None
     if sys.stdout:
         print(f"Warning: Failed to import xhs_dl.cli directly: {e}")
+
+
+def _already_in_shared_history(url):
+    if find_downloaded is None:
+        return None
+    try:
+        return find_downloaded(download_url=url)
+    except Exception as exc:
+        log_daemon(f"[Shared History Read Error] {exc}")
+        return None
+
+
+def _same_collected_work(left, right):
+    if same_download is not None:
+        try:
+            return same_download(left, right)
+        except Exception:
+            pass
+    return str(left or "").rstrip("/").lower() == str(right or "").rstrip("/").lower()
 
 # 引入本地桌面通知模块
 NOTIFY_PY = None
@@ -1029,9 +1052,17 @@ class QueueManager:
 
     def add(self, url: str, raw_text: str, title_hint: str) -> tuple[bool, int, dict]:
         with self.lock:
+            existing = _already_in_shared_history(url)
+            if existing:
+                return False, 0, {
+                    "url": url,
+                    "title_hint": existing.get("标题") or title_hint,
+                    "status": "already_downloaded",
+                    "deduplicated": True,
+                }
             # 查重：已经在队列中则不重复入队
             for idx, item in enumerate(self.queue):
-                if item.get("url") == url:
+                if _same_collected_work(item.get("url"), url):
                     return False, idx + 1, item
             
             new_item = {
@@ -1394,6 +1425,14 @@ def execute_download_and_file(target_url: str) -> tuple[bool, str, dict]:
 
     downloaded_dirs = [d for d in TEMP_DOWNLOAD_DIR.iterdir() if d.is_dir()]
     if not downloaded_dirs:
+        existing = _already_in_shared_history(target_url)
+        if existing:
+            return True, "ALREADY_DOWNLOADED: 已在万能下载器成功记录中，跳过重复采集", {
+                "title": existing.get("标题") or "",
+                "note_id": existing.get("笔记ID") or "",
+                "target_dir": existing.get("保存位置") or "",
+                "deduplicated": True,
+            }
         return False, "UNKNOWN_NO_OUTPUT: 下载引擎未产出目录，原因未证实，保留任务并退避重试", {}
 
     work_dir = downloaded_dirs[0]
@@ -1676,7 +1715,7 @@ def queue_worker_loop(queue_mgr: QueueManager, history_set: set):
                 queue_mgr.pop_discard(item_id, "缺少有效URL")
                 continue
 
-            if url in history_set:
+            if url in history_set or _already_in_shared_history(url):
                 if sys.stdout:
                     print(f"[Worker Skip] URL already captured in history: {url}")
                 queue_mgr.pop_success(item_id)
@@ -1712,6 +1751,15 @@ def queue_worker_loop(queue_mgr: QueueManager, history_set: set):
                 # 从待下载队列中移除
                 queue_mgr.pop_success(item_id)
                 rem_count = queue_mgr.get_remaining_count()
+
+                if metadata.get("deduplicated"):
+                    update_heartbeat(status="idle", queue_len=rem_count, history_len=len(history_set), extra="已在万能下载器成功账本中，跳过重复采集")
+                    send_desktop_notification(
+                        f"ℹ️ 已在万能下载器的成功记录中：《{metadata.get('title') or title_hint}》\n无需重复下载，链接已从剪贴板队列移除。",
+                        title="重复素材已跳过",
+                        status="info",
+                    )
+                    continue
 
                 # 设置正常平缓拟人冷却
                 cooldown_sec = random.uniform(*NORMAL_COOLDOWN_RANGE)
@@ -2015,6 +2063,11 @@ def main():
         print("=" * 65)
 
     history_set = load_history()
+    if merge_download_history is not None and history_set:
+        try:
+            merge_download_history(sorted(history_set))
+        except Exception as exc:
+            log_daemon(f"[Shared History Migration Error] {exc}")
     queue_mgr = QueueManager()
 
     # 启动后台消费线程
@@ -2057,7 +2110,7 @@ def main():
                         targets = [(single_url, extract_title_hint(current_text), current_text)]
                 
                 for target_url, title_hint, raw_snippet in targets:
-                    if target_url in history_set:
+                    if target_url in history_set or _already_in_shared_history(target_url):
                         if sys.stdout:
                             print(f"[Skip] URL already captured previously: {target_url}")
                     elif is_profile_or_homepage(target_url, raw_snippet):

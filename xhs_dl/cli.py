@@ -101,7 +101,7 @@ def main():
     print("=" * 60)
 
     def on_progress(nr, i, total):
-        tag = "OK" if nr.success else "FAIL"
+        tag = "SKIP" if nr.deduplicated else ("OK" if nr.success else "FAIL")
         name = (nr.title[:35] or nr.error) if not nr.success else nr.title[:35]
         extra = f" [{nr.image_success}图]" if nr.success and nr.image_count else ""
         print(f"  [{tag}] [{i}/{total}] {name}{extra}")
@@ -124,7 +124,7 @@ def main():
     result = dl.download(all_urls)
 
     print(f"\n{'='*60}")
-    print(f"  完成  成功: {result.success_count}  失败: {result.fail_count}  总计: {result.total}")
+    print(f"  完成  成功: {result.success_count}  跳过: {result.skipped_count}  失败: {result.fail_count}  总计: {result.total}")
     if result.success_count:
         print(f"  保存至: {result.output_dir}")
     print(f"{'='*60}")

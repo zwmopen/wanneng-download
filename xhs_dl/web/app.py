@@ -228,8 +228,8 @@ $('mode').value=localStorage.getItem(MODE_KEY)||'auto';$('format').value=localSt
 $('outdir').addEventListener('change',e=>localStorage.setItem(OUTPUT_KEY,e.target.value.trim()));$('mode').addEventListener('change',e=>localStorage.setItem(MODE_KEY,e.target.value));$('format').addEventListener('change',e=>localStorage.setItem(FORMAT_KEY,e.target.value));
 function setState(status,title,sub){$('stateDot').className='state-dot '+status;$('statusTitle').textContent=title;$('statusSub').textContent=sub}
 function render(job){const total=job.total||0,done=job.done||0,success=job.success||0,running=job.status==='running'||job.status==='queued';$('progressBar').classList.toggle('active',running&&done===0);if(!(running&&done===0)){$('progressBar').style.transform='none';$('progressBar').style.width=(total?Math.round(done/total*100):0)+'%'}$('progressText').textContent=`${done} / ${total}`;$('successText').textContent=`成功 ${success}`;
-  const items=job.items||[];$('empty').style.display=items.length?'none':'block';$('results').classList.toggle('show',items.length>0);$('results').innerHTML='';items.forEach(it=>{const d=document.createElement('div');d.className='result '+(it.success?'ok':'fail');const top=document.createElement('div');top.className='result-top';const name=document.createElement('span');name.className='result-name';name.textContent=it.title||it.error||'未命名笔记';const count=document.createElement('span');count.className='result-count';count.textContent=it.success?`${it.image_success||0} 张`:'失败';top.append(name,count);d.append(top);if(!it.success&&it.error){const err=document.createElement('div');err.className='result-error';err.textContent=it.error;d.append(err)}$('results').append(d)});
-  if(job.status==='queued')setState('running','等待执行',total?`排队中，共 ${total} 条`:'等待本地引擎');else if(job.status==='running')setState('running','正在逐条提取',total?`已完成 ${done} 条，共 ${total} 条`:'正在准备本地引擎');else if(job.status==='completed')setState(job.failed?'error':'done',job.failed?'任务完成，有失败项':'全部保存完成',`成功 ${job.success||0} 条，失败 ${job.failed||0} 条`);else if(job.status==='error')setState('error','任务没有完成',job.error||'请稍后重试')}
+  const items=job.items||[];$('empty').style.display=items.length?'none':'block';$('results').classList.toggle('show',items.length>0);$('results').innerHTML='';items.forEach(it=>{const d=document.createElement('div');d.className='result '+(it.deduplicated?'ok':it.success?'ok':'fail');const top=document.createElement('div');top.className='result-top';const name=document.createElement('span');name.className='result-name';name.textContent=it.title||it.error||'未命名作品';const count=document.createElement('span');count.className='result-count';count.textContent=it.deduplicated?'已存在 · 跳过':it.success?`${it.image_success||0} 张`:'失败';top.append(name,count);d.append(top);if(!it.success&&!it.deduplicated&&it.error){const err=document.createElement('div');err.className='result-error';err.textContent=it.error;d.append(err)}$('results').append(d)});
+  const skipped=job.skipped||0;if(job.status==='queued')setState('running','等待执行',total?`排队中，共 ${total} 条`:'等待本地引擎');else if(job.status==='running')setState('running','正在逐条提取',total?`已完成 ${done} 条，共 ${total} 条`:'正在准备本地引擎');else if(job.status==='completed')setState(job.failed?'error':'done',job.failed?'任务完成，有失败项':skipped&&!(job.success||0)?'重复项已跳过':skipped?'任务完成（含重复项跳过）':'全部保存完成',`成功 ${job.success||0} 条，跳过 ${skipped} 条，失败 ${job.failed||0} 条`);else if(job.status==='error')setState('error','任务没有完成',job.error||'请稍后重试')}
 function renderRows(target,list,kind){target.innerHTML='';if(!list||!list.length){const empty=document.createElement('div');empty.className='panel-empty';empty.textContent=kind==='history'?'还没有本地成功下载记录':'当前队列为空';target.append(empty);return}list.forEach(job=>{const row=document.createElement('div');row.className='task-row';const main=document.createElement('div');main.className='task-main';const title=document.createElement('span');title.className='task-title';const first=(job.items||[])[0];title.textContent=job.title||job.title_hint||(first&&first.title)||(job.url||`任务 ${String(job.job_id||'').slice(0,8)}`);const meta=document.createElement('span');meta.className='task-meta';if(kind==='history'){const parts=[];if(job.completed_at)parts.push(job.completed_at);if(job.note_id)parts.push(`笔记 ${job.note_id}`);meta.textContent=parts.join(' · ')||job.url||'旧记录未保存时间'}else if(job.note_id)meta.textContent=`笔记 ${job.note_id}`;else if(job.retry_count)meta.textContent=`${job.url||''} · 已重试 ${job.retry_count} 次`;else if(job.url)meta.textContent=job.url;else meta.textContent=`${job.done||0} / ${job.total||0} 条 · 成功 ${job.success||0}`;main.append(title,meta);const state=document.createElement('span');const status=job.status||'';const ok=kind==='history'||status==='completed'||status==='success';const failed=status==='error'||status==='failed';state.className='task-state '+(ok?'ok':failed?'fail':'');state.textContent=kind==='history'?'已保存':status==='running'?'进行中':status==='cooling_down'?'冷却中':failed?'失败':'等待';row.append(main,state);target.append(row)})}
 async function refreshDashboard(){try{const r=await fetch('/api/v1/jobs?limit=50');if(!r.ok)return;const data=await r.json();const counts=data.counts||{},collector=data.collector||{};const waiting=data.waiting||[];const queue=data.queue||waiting;const running=data.running||[];$('waitingCount').textContent=counts.waiting??waiting.length;$('waitingSub').textContent=waiting.length?`有 ${waiting.length} 条任务等待 · 剪贴板 ${collector.pending_count||0} 条`:'当前队列为空 · 剪贴板待采集 0 条';$('queueSub').textContent=`剪贴板队列 ${collector.pending_count||0} 条 · 失败归档 ${collector.failed_archive_count||0} 条（不在等待队列）`;$('historySub').textContent=`本机下载成功 ${counts.download_history||0} 条 · 剪贴板成功 ${collector.history_count||0} 条`;renderRows($('queueList'),queue,'queue');renderRows($('historyList'),data.history||[],'history');if(activeJob)return;if(running.length){const current=running[0];if(current.source==='clipboard'){setState('running','剪贴板正在采集',current.title||current.url||'正在处理当前链接');$('progressBar').classList.add('active');$('progressText').textContent='采集进行中';$('successText').textContent='';$('empty').style.display='none';$('results').classList.remove('show')}else setState('running','正在逐条提取',`任务进行中，共 ${current.total||0} 条`);return}if(collector.status==='offline'){setState('error','剪贴板采集器离线',collector.last_heartbeat?`最近心跳：${collector.last_heartbeat}`:'没有可用心跳');$('progressBar').classList.remove('active')}else if(collector.status==='paused'){setState('','剪贴板采集已暂停',collector.pending_count?`仍有 ${collector.pending_count} 条等待恢复`:'当前没有等待任务');$('progressBar').classList.remove('active')}else if(collector.status==='cooling'){setState('running','采集器冷却中',collector.cooldown_remaining_seconds?`约 ${collector.cooldown_remaining_seconds} 秒后继续 · ${collector.cooldown_reason||'按限速策略等待'}`:'按限速策略等待');$('progressBar').classList.add('active')}else{setState('done','当前没有进行中的下载',collector.status==='idle'?'下载器已就绪，采集器空闲':'等待任务启动');$('progressBar').classList.remove('active')}}catch(_){}}
 function finish(){activeJob=null;$('go').disabled=false;$('go').textContent='开始下载';refreshDashboard()}
@@ -244,6 +244,7 @@ $('go').addEventListener('click',start);$('input').addEventListener('keydown',e=
 def _item_payload(item):
     return {
         "success": item.success,
+        "deduplicated": item.deduplicated,
         "title": item.title,
         "error": item.error,
         "image_count": item.image_count,
@@ -264,11 +265,13 @@ def _job_summary(job):
         "done": job.get("done", 0),
         "success": job.get("success", 0),
         "failed": job.get("failed", 0),
+        "skipped": job.get("skipped", 0),
         "output_dir": job.get("output_dir", ""),
         "error": job.get("error", ""),
         "items": [
             {
                 "success": item.get("success", False),
+                "deduplicated": item.get("deduplicated", False),
                 "title": item.get("title", ""),
                 "error": item.get("error", ""),
                 "image_success": item.get("image_success", 0),
@@ -534,8 +537,8 @@ def _openapi_document():
                     "properties": {
                         "job_id": {"type": "string"}, "status": {"type": "string", "enum": ["queued", "running", "completed", "error"]},
                         "created_at": {"type": "number"}, "finished_at": {"type": "number"}, "total": {"type": "integer", "minimum": 0},
-                        "done": {"type": "integer", "minimum": 0}, "success": {"type": "integer", "minimum": 0}, "failed": {"type": "integer", "minimum": 0},
-                        "items": {"type": "array", "items": {"type": "object", "additionalProperties": True}}, "error": {"type": "string"}, "output_dir": {"type": "string"},
+                        "done": {"type": "integer", "minimum": 0}, "success": {"type": "integer", "minimum": 0}, "failed": {"type": "integer", "minimum": 0}, "skipped": {"type": "integer", "minimum": 0},
+                        "items": {"type": "array", "items": {"type": "object", "properties": {"success": {"type": "boolean"}, "deduplicated": {"type": "boolean"}, "note_id": {"type": "string"}, "title": {"type": "string"}, "error": {"type": "string"}, "save_dir": {"type": "string"}, "image_success": {"type": "integer"}}, "additionalProperties": True}}, "error": {"type": "string"}, "output_dir": {"type": "string"},
                     },
                 },
                 "TaskSummary": {
@@ -628,7 +631,8 @@ def _run_job(job_id, urls, output_dir, delay, image_format, adaptive=False):
             job["items"].append(_item_payload(item))
             job["done"] = index
             job["success"] = sum(1 for value in job["items"] if value["success"])
-            job["failed"] = index - job["success"]
+            job["skipped"] = sum(1 for value in job["items"] if value.get("deduplicated"))
+            job["failed"] = index - job["success"] - job["skipped"]
 
     try:
         downloader = UnifiedDownloader(
@@ -646,6 +650,7 @@ def _run_job(job_id, urls, output_dir, delay, image_format, adaptive=False):
             done=result.total,
             success=result.success_count,
             failed=result.fail_count,
+            skipped=result.skipped_count,
             output_dir=result.output_dir,
         )
     except Exception as exc:
@@ -820,6 +825,7 @@ class Handler(BaseHTTPRequestHandler):
                     "done": 0,
                     "success": 0,
                     "failed": 0,
+                    "skipped": 0,
                     "items": [],
                     "error": "",
                     "output_dir": output_dir,

@@ -152,7 +152,7 @@ class YtDlpEngine:
                 self._copy_text(info, url), encoding="utf-8-sig"
             )
             note_id = str(info.get("id") or "")
-            add_history(url, note_id, str(title))
+            add_history(url, note_id, str(title), str(folder.resolve()))
             return NoteResult(
                 url=url,
                 success=True,

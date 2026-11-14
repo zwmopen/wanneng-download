@@ -24,6 +24,7 @@ if TYPE_CHECKING:
 import requests
 
 from .models import NoteResult
+from xhs_dl.storage import add_history, download_claim
 
 logger = logging.getLogger(__name__)
 
@@ -110,11 +111,33 @@ class XhsDownloader:
 
         result = DownloadResult(output_dir=self.output_dir)
         for i, url in enumerate(unique, 1):
-            nr = self._process_one(url, i, len(unique))
+            with download_claim(url) as existing:
+                if existing:
+                    nr = NoteResult(
+                        url=url,
+                        note_id=str(existing.get("笔记ID") or ""),
+                        title=str(existing.get("标题") or "已下载素材"),
+                        save_dir=str(existing.get("保存位置") or ""),
+                        engine="history",
+                        deduplicated=True,
+                    )
+                else:
+                    nr = self._process_one(url, i, len(unique))
+                    media_found = False
+                    if nr.success and nr.save_dir:
+                        try:
+                            media_found = any(
+                                path.is_file() and path.suffix.lower() in {".jpg", ".jpeg", ".png", ".webp", ".mp4", ".mov"}
+                                for path in Path(nr.save_dir).iterdir()
+                            )
+                        except OSError:
+                            media_found = False
+                    if media_found:
+                        add_history(url, nr.note_id, nr.title, nr.save_dir)
             result.results.append(nr)
             if self.on_progress:
                 self.on_progress(nr, i, len(unique))
-            if i < len(unique):
+            if i < len(unique) and not nr.deduplicated:
                 time.sleep(random.uniform(*self.delay))
 
         return result
