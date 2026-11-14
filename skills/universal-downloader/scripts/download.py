@@ -25,7 +25,49 @@ def parse_args():
     )
     parser.add_argument("--engine-home")
     parser.add_argument("--timeout", type=int, default=300)
+    parser.add_argument(
+        "--progress-file",
+        help="append one UTF-8 JSONL event after each URL; final JSON remains on stdout",
+    )
     return parser.parse_args()
+
+
+def _progress_callback(progress_file, output_directory=None):
+    if not progress_file:
+        return None
+    path = Path(progress_file)
+    output_root = Path(output_directory).expanduser().resolve() if output_directory else None
+
+    def emit(item, index, total):
+        relative_save_dir = ""
+        if output_root is not None:
+            try:
+                save_dir = Path(str(getattr(item, "save_dir", "") or "")).expanduser().resolve()
+                relative_save_dir = save_dir.relative_to(output_root).as_posix()
+            except (OSError, ValueError):
+                pass
+        event = {
+            "type": "item_complete",
+            "index": int(index),
+            "total": int(total),
+            "success": bool(getattr(item, "success", False)),
+            "title": str(getattr(item, "title", "") or "")[:300],
+            "note_id": str(getattr(item, "note_id", "") or "")[:100],
+            "image_count": int(getattr(item, "image_count", 0) or 0),
+            "engine": str(getattr(item, "engine", "") or "")[:60],
+            "save_dir": relative_save_dir[:500],
+        }
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            with path.open("a", encoding="utf-8", newline="\n") as stream:
+                stream.write(json.dumps(event, ensure_ascii=False) + "\n")
+                stream.flush()
+        except OSError:
+            # Progress is advisory; a progress file failure must not interrupt
+            # an otherwise valid public-media download.
+            return
+
+    return emit
 
 
 def extract_urls(text):
@@ -65,6 +107,7 @@ def main() -> int:
         downloader = UnifiedDownloader(
             output_dir=args.output,
             delay=DELAY_MODES[args.mode],
+            on_progress=_progress_callback(args.progress_file, args.output),
             engine_home=args.engine_home,
             timeout=args.timeout,
         )
