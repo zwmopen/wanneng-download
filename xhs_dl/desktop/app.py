@@ -50,19 +50,14 @@ THEME_PALETTES = {
 
 
 def automatic_mode(count):
-    if count <= 1:
-        return "cautious"
-    if count <= 20:
-        return "cautious"
-    if count <= 50:
-        return "slow"
-    return "very-slow"
+    return "auto"
 
 
 def mode_description(mode, count=0):
     if count <= 1:
         return "单条直接采集"
     descriptions = {
+        "auto": "智能节奏 8–15 秒起步，按结果调整",
         "fast": "快速 3–8 秒",
         "normal": "标准 8–15 秒",
         "cautious": "稳妥 35–55 秒",
@@ -431,6 +426,7 @@ class DesktopApp(ctk.CTk):
                 delay=DELAY_MODES[selected_mode],
                 on_progress=on_progress,
                 image_format=self.settings.get("image_format", "jpg"),
+                adaptive=selected_mode == "auto",
             )
             result = downloader.download(urls)
             self.after(0, lambda: self._finish_download(result.success_count, result.fail_count))

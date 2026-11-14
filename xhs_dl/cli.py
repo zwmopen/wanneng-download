@@ -22,13 +22,15 @@ def main():
   xhs-dl -f links.txt
   xhs-dl -f links.txt -o ./我的笔记
   xhs-dl -f links.txt --mode fast          # 快速模式(3-8秒)
-  xhs-dl -f links.txt --mode cautious      # 保守模式(25-45秒,默认)
+  xhs-dl -f links.txt --mode auto          # 自适应节奏(默认)
+  xhs-dl -f links.txt --mode cautious      # 稳妥模式(35-55秒)
   xhs-dl -f links.txt --mode slow          # 慢速模式(55-85秒)
 
 延迟模式:
+  auto        8-15秒起步  遇到临时网络/限流错误自动退避 (默认)
   fast        3-8秒      测试少量用，风险高
   normal      8-15秒     日常 10 条以内
-  cautious    35-55秒    稳定优先，20 条左右推荐 (默认)
+  cautious    35-55秒    稳定优先
   slow        55-85秒    50 条以上
   very-slow   110-160秒  已被风控过才用
 
@@ -41,17 +43,17 @@ def main():
     parser.add_argument("-f", "--file", help="从文件读取链接")
     parser.add_argument("-o", "--output", default="./xhs_downloads",
                         help="保存目录 (默认: ./xhs_downloads)")
-    parser.add_argument("--mode", default="cautious",
-                        choices=["fast", "normal", "cautious", "slow", "very-slow"],
-                        help="延迟模式 (默认: cautious)")
+    parser.add_argument("--mode", default="auto",
+                        choices=["auto", "fast", "normal", "cautious", "slow", "very-slow"],
+                        help="延迟模式 (默认: auto)")
     parser.add_argument("--engine", choices=["v2", "v1"], default="v2",
                         help="下载引擎：v2 无水印（默认），v1 旧版水印图")
     parser.add_argument("--engine-home",
                         help="XHS_Downloader 本地目录（通常无需填写）")
     parser.add_argument("--timeout", type=int, default=300,
                         help="每条笔记最大等待秒数（默认: 300）")
-    parser.add_argument("--image-format", choices=["jpg", "png", "keep"], default="jpg",
-                        help="图片输出格式（默认: jpg）")
+    parser.add_argument("--image-format", choices=["jpg", "png", "keep"], default="keep",
+                        help="图片输出格式（默认: 保持原格式）")
     parser.add_argument("--max-images", type=int, default=15,
                         help="单篇笔记最大图片数上限（默认: 15，超过则前置熔断拒绝下载）")
     args = parser.parse_args()
@@ -117,6 +119,7 @@ def main():
             timeout=args.timeout,
             image_format=args.image_format,
             max_images=args.max_images,
+            adaptive=args.mode == "auto",
         )
     result = dl.download(all_urls)
 

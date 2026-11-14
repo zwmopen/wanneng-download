@@ -7,6 +7,7 @@ from pathlib import Path
 from .douyin_downloader import DouyinBrowserEngine
 from .generic_downloader import YtDlpEngine
 from .models import DownloadResult, NoteResult
+from .pacing import AdaptiveRetryPolicy
 from .platforms import detect_platform
 from .v2_downloader import LocalCliEngine
 
@@ -15,13 +16,14 @@ class UnifiedDownloader:
     def __init__(
         self,
         output_dir="./downloads",
-        delay=(35, 55),
+        delay=(8, 15),
         on_progress=None,
         engine_home=None,
         timeout=300,
-        image_format="jpg",
+        image_format="keep",
         max_images=15,
         engines=None,
+        adaptive=False,
     ):
         self.output_dir = output_dir
         self.delay = delay
@@ -31,6 +33,8 @@ class UnifiedDownloader:
         self.image_format = image_format
         self.max_images = max_images
         self.engines = dict(engines or {})
+        self.adaptive = bool(adaptive)
+        self.retry_policy = AdaptiveRetryPolicy()
 
     def _engine(self, platform):
         if platform not in self.engines:
@@ -66,13 +70,34 @@ class UnifiedDownloader:
             if engine is None:
                 item = NoteResult(url=url, error="暂不支持这个链接来源")
             else:
-                try:
-                    item = engine.download_one(url, root)
-                except Exception as exc:
-                    item = NoteResult(url=url, error=str(exc), engine=platform)
+                retries_done = 0
+                while True:
+                    try:
+                        item = engine.download_one(url, root)
+                    except Exception as exc:
+                        item = NoteResult(url=url, error=str(exc), engine=platform)
+                    if (
+                        not self.adaptive
+                        or item.success
+                        or not self.retry_policy.should_retry(
+                            item.error, retries_done=retries_done
+                        )
+                    ):
+                        break
+                    retries_done += 1
+                    time.sleep(
+                        self.retry_policy.retry_delay(item.error, retries_done)
+                    )
             result.results.append(item)
             if self.on_progress:
                 self.on_progress(item, index, len(unique))
             if index < len(unique):
-                time.sleep(random.uniform(*self.delay))
+                if self.adaptive:
+                    time.sleep(
+                        self.retry_policy.next_item_delay(
+                            item.success, item.error
+                        )
+                    )
+                else:
+                    time.sleep(random.uniform(*self.delay))
         return result

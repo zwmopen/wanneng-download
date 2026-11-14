@@ -30,6 +30,11 @@ from pathlib import Path
 import ctypes
 from ctypes import wintypes
 
+try:
+    from xhs_dl.core.pacing import AdaptiveRetryPolicy
+except ImportError:
+    AdaptiveRetryPolicy = None
+
 # ==================== 动态配置与解耦加载器 (MaterialHub Config Loader) ====================
 SCRIPT_DIR = Path(__file__).resolve().parent
 SKILL_ROOT = SCRIPT_DIR.parent
@@ -1638,6 +1643,21 @@ def queue_worker_loop(queue_mgr: QueueManager, history_set: set):
             # 1. 检查是否处于风控或拟人冷却状态
             is_cooling, remain_sec, reason = queue_mgr.is_cooling_down()
             if is_cooling:
+                current_item = queue_mgr.peek() or {}
+                update_heartbeat(
+                    status="cooling",
+                    queue_len=queue_mgr.get_remaining_count(),
+                    history_len=len(history_set),
+                    extra=json.dumps(
+                        {
+                            "cooldown_remaining_seconds": int(remain_sec),
+                            "cooldown_reason": reason,
+                            "current_url": current_item.get("url", ""),
+                            "current_title": current_item.get("title_hint", ""),
+                        },
+                        ensure_ascii=False,
+                    ),
+                )
                 time.sleep(min(remain_sec, 2.0))
                 continue
 
@@ -1666,7 +1686,15 @@ def queue_worker_loop(queue_mgr: QueueManager, history_set: set):
             retry_count = item.get("retry_count", 0)
 
             rem_count = queue_mgr.get_remaining_count()
-            update_heartbeat(status="downloading", queue_len=rem_count, history_len=len(history_set), extra=f"正在采集: {title_hint}")
+            update_heartbeat(
+                status="downloading",
+                queue_len=rem_count,
+                history_len=len(history_set),
+                extra=json.dumps(
+                    {"current_url": url, "current_title": title_hint, "retry_count": retry_count},
+                    ensure_ascii=False,
+                ),
+            )
 
             if sys.stdout:
                 print(f"\n[Worker] Start downloading: {url} (Retry: {retry_count})")
@@ -1823,7 +1851,19 @@ def queue_worker_loop(queue_mgr: QueueManager, history_set: set):
             else:
                 # 真正的网络中断或频次告警处理：进入阶梯式风控退避冷却
                 curr_retries = retry_count + 1
-                backoff_sec = DEEP_COOLDOWN_BASE * curr_retries
+                if AdaptiveRetryPolicy:
+                    backoff_sec = AdaptiveRetryPolicy.retry_delay(
+                        result_msg,
+                        curr_retries,
+                        throttle_base=float(DEEP_COOLDOWN_BASE),
+                        network_base=15.0,
+                        unknown_base=float(DEEP_COOLDOWN_BASE),
+                    )
+                else:
+                    backoff_sec = min(
+                        float(DEEP_COOLDOWN_BASE) * (2 ** max(0, curr_retries - 1)),
+                        900.0,
+                    )
                 queue_mgr.mark_retry(item_id, result_msg, backoff_sec)
                 rem_count = queue_mgr.get_remaining_count()
 

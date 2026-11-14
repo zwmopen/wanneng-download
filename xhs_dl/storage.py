@@ -73,6 +73,7 @@ def add_history(download_url, note_id, title):
         "下载网址": download_url,
         "笔记ID": note_id,
         "标题": title,
+        "下载时间": time.strftime("%Y-%m-%d %H:%M:%S"),
     }
     with _LOCK:
         path = history_path()
@@ -100,7 +101,7 @@ def load_settings():
         "mode": "auto",
         "auto_update": True,
         "theme": "neo",
-        "image_format": "jpg",
+        "image_format": "keep",
     }
     with _LOCK:
         value = _read_json(settings_path(), {})
@@ -122,7 +123,7 @@ def _normalize_settings(value):
         if isinstance(value.get("auto_update"), bool)
         else True,
         "theme": "glass" if value.get("theme") == "glass" else "neo",
-        "image_format": image_format if image_format in _FORMATS else "jpg",
+        "image_format": image_format if image_format in _FORMATS else "keep",
     }
 
 
