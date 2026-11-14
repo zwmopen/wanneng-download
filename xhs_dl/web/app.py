@@ -104,10 +104,19 @@ textarea{min-height:218px;padding:17px;resize:vertical;line-height:1.72}
 input,select{height:46px;padding:0 13px}
 textarea:focus,input:focus,select:focus{border-color:#6f9ab8;box-shadow:var(--shadow-inset),0 0 0 3px rgba(75,129,168,.15)}
 textarea::placeholder,input::placeholder{color:#8092a2}
-.advanced{margin-top:15px;border:1px solid var(--line);border-radius:14px;background:var(--soft);overflow:hidden}
-.advanced summary{padding:12px 14px;color:var(--muted);font-size:12px;font-weight:700;cursor:pointer;list-style:none;user-select:none}
-.advanced summary::-webkit-details-marker{display:none}.advanced summary:after{content:"＋";float:right;font-size:15px;line-height:1}.advanced[open] summary:after{content:"－"}
 .settings{display:grid;grid-template-columns:minmax(220px,1fr) 160px 190px;gap:14px;padding:2px 14px 14px}
+.settings-dialog{width:min(460px,calc(100vw - 32px));max-width:none;max-height:min(88vh,640px);overflow:auto;border:1px solid var(--line);border-radius:24px;background:var(--panel);color:var(--text);padding:24px;box-shadow:var(--shadow-hover)}
+.settings-dialog::backdrop{background:rgba(22,34,46,.30);backdrop-filter:blur(3px)}
+.settings-dialog[open]{animation:modal-in 150ms ease-out}
+.dialog-heading{display:flex;align-items:flex-start;justify-content:space-between;gap:16px;margin-bottom:22px}
+.dialog-heading h2{font-size:23px;margin:0}
+.dialog-heading p{margin:0 0 7px;color:var(--muted);font-size:12px}
+.settings-dialog .settings{grid-template-columns:1fr;gap:16px;padding:0}
+.settings-dialog .settings-note{margin:18px 0 0;padding:0;color:var(--muted);font-size:12px;line-height:1.7}
+.dialog-actions{display:flex;justify-content:flex-end;margin-top:22px}
+.dialog-close,.dialog-done{border:1px solid var(--line);border-radius:12px;background:var(--panel);color:var(--text);padding:9px 15px;cursor:pointer;box-shadow:var(--shadow-small);font:inherit}
+.dialog-close{width:36px;height:36px;padding:0;font-size:20px;line-height:1}
+.dialog-done{min-width:92px;font-weight:700}
 .primary{width:100%;height:52px;margin-top:20px;border:0;border-radius:16px;background:var(--primary);color:#f7fafc;font-size:15px;font-weight:800;letter-spacing:.04em;cursor:pointer;box-shadow:0 10px 22px rgba(38,52,66,.2);transition:background var(--ease),transform var(--ease),box-shadow var(--ease)}
 .primary:hover{background:var(--primary-hover);transform:translateY(-1px);box-shadow:0 12px 26px rgba(38,52,66,.25)}
 .primary:active{transform:translateY(1px);box-shadow:0 5px 12px rgba(38,52,66,.22)}
@@ -146,6 +155,7 @@ textarea::placeholder,input::placeholder{color:#8092a2}
 button:focus-visible,textarea:focus-visible,input:focus-visible,select:focus-visible{outline:3px solid rgba(47,111,159,.32);outline-offset:3px}
 @keyframes pulse{0%,100%{box-shadow:0 0 0 5px rgba(71,123,157,.13)}50%{box-shadow:0 0 0 10px rgba(71,123,157,.04)}}
 @keyframes travel{0%{transform:translateX(-110%)}50%{transform:translateX(80%)}100%{transform:translateX(280%)}}
+@keyframes modal-in{from{opacity:0;transform:translateY(8px) scale(.985)}to{opacity:1;transform:translateY(0) scale(1)}}
 @media(max-width:760px){body{padding:18px 14px}.workspace{grid-template-columns:1fr}.surface{padding:20px;border-radius:22px}.settings{grid-template-columns:1fr}.topbar{align-items:flex-start}.brand p{max-width:210px}.status-card{min-height:330px}}
 @media(max-width:480px){.topbar{gap:10px}.brand{min-width:0;gap:10px}.brand p{display:none}.mark{width:40px;height:40px;border-radius:13px;font-size:18px}.brand h1{font-size:22px;margin:9px 0 0}.theme-switch,.settings-button{padding:9px 11px;font-size:12px}.surface{padding:18px}textarea{min-height:190px}}
 @media(prefers-reduced-motion:reduce){*,*:before,*:after{animation:none!important;transition:none!important;scroll-behavior:auto!important}}
@@ -156,7 +166,7 @@ button:focus-visible,textarea:focus-visible,input:focus-visible,select:focus-vis
 <main class="shell">
   <header class="topbar">
     <div class="brand"><div class="mark">∞</div><div><h1>__APP_NAME__</h1><p>多平台公开媒体 · 本地保存 · 无需登录</p></div></div>
-    <div class="top-actions"><button class="settings-button" id="settingsButton" type="button">设置</button><button class="theme-switch" id="themeButton" type="button" aria-label="切换视觉主题">克制玻璃</button></div>
+    <div class="top-actions"><button class="settings-button" id="settingsButton" type="button" aria-haspopup="dialog" aria-controls="settingsDialog">设置</button><button class="theme-switch" id="themeButton" type="button" aria-label="切换视觉主题">玻璃主题</button></div>
   </header>
   <section class="workspace">
     <div class="surface">
@@ -165,11 +175,6 @@ button:focus-visible,textarea:focus-visible,input:focus-visible,select:focus-vis
       <p class="lead">复制小红书或抖音分享内容到下面，点一次即可。默认保存到电脑的“下载”文件夹。</p>
       <label for="input">分享文本或链接</label>
       <textarea id="input" placeholder="例如：复制小红书或抖音分享文本到这里，也可以一次粘贴多条链接。"></textarea>
-      <details class="advanced"><summary>保存位置和速度</summary><div class="settings">
-        <div><label for="outdir">保存位置</label><input id="outdir" type="text"></div>
-        <div><label for="mode">下载节奏</label><select id="mode"><option value="auto" selected>智能 · 随结果调节</option><option value="fast">快速 · 3–8 秒</option><option value="normal">标准 · 8–15 秒</option><option value="cautious">稳妥 · 35–55 秒</option><option value="slow">慢速 · 55–85 秒</option><option value="very-slow">极慢 · 110–160 秒</option></select></div>
-        <div><label for="format">图片格式</label><select id="format"><option value="keep" selected>保持原格式（推荐）</option><option value="jpg">JPG</option><option value="png">PNG（无损）</option></select></div>
-      </div><p class="settings-note">设置会保存在本机。任何本机软件都可调用 <code>POST /api/v1/jobs</code>；<a href="/api/openapi.json" target="_blank" rel="noreferrer">查看 OpenAPI 接口规范</a>。</p></details>
       <button class="primary" id="go" type="button">开始下载</button>
       <div class="privacy"><span class="shield">✓</span><span>公开笔记无需账号、密码或 Cookie。链接默认只交给本机引擎，不会静默发送到在线解析网站。</span></div>
     </div>
@@ -195,13 +200,27 @@ button:focus-visible,textarea:focus-visible,input:focus-visible,select:focus-vis
   </section>
   <p class="footnote">仅处理你有权保存的公开内容 · 创作者嵌入原图的署名会保留 · __APP_NAME__ V__APP_VERSION__</p>
 </main>
+<dialog class="settings-dialog" id="settingsDialog" aria-labelledby="settingsTitle">
+  <div class="dialog-heading"><div><p>本机下载偏好</p><h2 id="settingsTitle">下载设置</h2></div><button class="dialog-close" id="settingsClose" type="button" aria-label="关闭设置">×</button></div>
+  <div class="settings">
+    <div><label for="outdir">保存位置</label><input id="outdir" type="text" autocomplete="off"></div>
+    <div><label for="mode">下载节奏</label><select id="mode"><option value="auto" selected>智能 · 随结果调节</option><option value="fast">快速 · 3–8 秒</option><option value="normal">标准 · 8–15 秒</option><option value="cautious">稳妥 · 35–55 秒</option><option value="slow">慢速 · 55–85 秒</option><option value="very-slow">极慢 · 110–160 秒</option></select></div>
+    <div><label for="format">图片格式</label><select id="format"><option value="keep" selected>保持原格式（推荐）</option><option value="jpg">JPG</option><option value="png">PNG（无损）</option></select></div>
+  </div>
+  <p class="settings-note">修改后会自动保存在本机。其他本机软件也可调用 <code>POST /api/v1/jobs</code>；<a href="/api/openapi.json" target="_blank" rel="noreferrer">查看接口规范</a>。</p>
+  <div class="dialog-actions"><button class="dialog-done" id="settingsDone" type="button">完成</button></div>
+</dialog>
 <script>
 const THEME_KEY='xhs-dl-theme',OUTPUT_KEY='xhs-dl-output',MODE_KEY='xhs-dl-mode',FORMAT_KEY='xhs-dl-format',DEFAULT_OUTPUT=__DEFAULT_OUTPUT_JSON__,MIN_PROGRESS_MS=1100;
 const $=id=>document.getElementById(id);let activeJob=null,pollTimer=null,jobStartedAt=0;
-function applyTheme(theme){const next=theme==='glass'?'glass':'neo';document.body.dataset.theme=next;localStorage.setItem(THEME_KEY,next);$('themeButton').textContent=next==='neo'?'克制玻璃':'拟态悬浮'}
+function applyTheme(theme){const next=theme==='glass'?'glass':'neo';document.body.dataset.theme=next;localStorage.setItem(THEME_KEY,next);$('themeButton').textContent=next==='neo'?'玻璃主题':'拟态主题'}
 applyTheme(localStorage.getItem(THEME_KEY)||'neo');
 $('themeButton').addEventListener('click',()=>applyTheme(document.body.dataset.theme==='neo'?'glass':'neo'));
-$('settingsButton').addEventListener('click',()=>{const panel=document.querySelector('.advanced');panel.open=true;panel.scrollIntoView({behavior:'smooth',block:'center'});});
+const settingsDialog=$('settingsDialog');
+$('settingsButton').addEventListener('click',()=>settingsDialog.showModal());
+$('settingsClose').addEventListener('click',()=>settingsDialog.close());
+$('settingsDone').addEventListener('click',()=>settingsDialog.close());
+settingsDialog.addEventListener('click',event=>{if(event.target===settingsDialog)settingsDialog.close()});
 $('outdir').value=localStorage.getItem(OUTPUT_KEY)||DEFAULT_OUTPUT;
 if(localStorage.getItem(MODE_KEY)==='cautious')localStorage.setItem(MODE_KEY,'auto');
 if(localStorage.getItem(FORMAT_KEY)==='jpg')localStorage.setItem(FORMAT_KEY,'keep');
