@@ -276,6 +276,7 @@ def update_heartbeat(status: str = "idle", queue_len: int = 0, history_len: int 
             "timestamp": time.time(),
             "queue_len": queue_len,
             "history_len": history_len,
+            "pause_file": str(PAUSE_FILE),
             "extra": extra,
             "version": "3.8.4-local"
         }
@@ -364,11 +365,17 @@ except Exception:
 # 引入万能下载器 CLI
 try:
     from xhs_dl.cli import main as xhs_dl_main
-    from xhs_dl.storage import find_downloaded, merge_download_history, same_download
+    from xhs_dl.storage import (
+        find_downloaded,
+        merge_download_history,
+        same_download,
+        update_history_location,
+    )
 except Exception as e:
     find_downloaded = None
     merge_download_history = None
     same_download = None
+    update_history_location = None
     if sys.stdout:
         print(f"Warning: Failed to import xhs_dl.cli directly: {e}")
 
@@ -1664,6 +1671,20 @@ def execute_download_and_file(target_url: str) -> tuple[bool, str, dict]:
                 log_daemon(f"❌ 建立四季归档异常 ({s_tag}): {ex_link}")
                 if sys.stdout:
                     print(f"[Hardlink Error {s_tag}]: {ex_link}")
+
+    # The downloader first records its staging directory. Replace it with the
+    # final organized folder so the shared history points at the files users see.
+    if update_history_location is not None:
+        try:
+            existing = find_downloaded(download_url=target_url) if find_downloaded else None
+            update_history_location(
+                target_url,
+                (existing or {}).get("笔记ID", ""),
+                (existing or {}).get("标题") or title_text,
+                str(final_target_dir),
+            )
+        except Exception as exc:
+            log_daemon(f"⚠️ 下载历史保存位置更新失败: {exc}")
 
     return True, folder_name, metadata
 

@@ -36,14 +36,15 @@ Invoke-RestMethod "http://127.0.0.1:5678/api/v1/jobs/$($job.job_id)"
 ## 查询和能力
 
 - `GET /api/v1/jobs?limit=50`：返回等待任务、进行中任务、剪贴板队列、下载成功历史和计数。
+- `POST /api/v1/collector`：用 `{"enabled": false}` 暂停、`{"enabled": true}` 恢复已经运行的剪贴板守护进程；不启动第二个采集器。运行中的单条下载会完成后暂停，队列保留。
 - `GET /api/v1/jobs/{job_id}`：读取单个任务进度；重启服务后仍可读到已归档的网页任务摘要。
 - `GET /api/v1/capabilities`：读取支持的平台、格式、默认节奏和接口列表。
 - `GET /api/v1/health`：检查 API 是否在线。
 - `GET /api/openapi.json`：机器可读的 OpenAPI 3.1 接口定义。
 
-`GET /api/v1/jobs` 的 `counts.download_history` 是本机真实下载历史总数；`history` 返回最近条目。`collector` 单独报告剪贴板采集器心跳、等待数、冷却状态和失败归档数。过期心跳不会作为在线显示。任务结果的 `skipped` 和条目级 `deduplicated` 标记用于报告共用账本命中的重复项。
+`GET /api/v1/jobs` 的 `counts.download_history` 是本机真实下载历史总数；`history` 返回最近条目，含 `save_dir` 最终保存目录。旧记录若无法唯一匹配素材库路径，`save_dir` 为空。`collector` 单独报告剪贴板采集器心跳、开关状态、等待数、冷却状态和失败归档数。过期心跳不会作为在线显示。任务结果的 `skipped` 和条目级 `deduplicated` 标记用于报告共用账本命中的重复项。
 
-网页、命令行、桌面版、API 和剪贴板采集共用本机成功下载账本（`%LOCALAPPDATA%/xhs-dl/history.json`）。只有确认成功落盘的项目进入账本；再从任一入口提交相同作品时会显示为“已存在 · 跳过”，不重复下载。进行中的同一链接也会跨进程互斥，避免剪贴板与手动/API任务同时下载。剪贴板旧成功记录会在采集器启动时并入共用账本；失败项和仅登记的链接不会被当作已下载。
+网页、命令行、桌面版、API 和剪贴板采集共用本机成功下载账本（`%LOCALAPPDATA%/xhs-dl/history.json`）。只有确认成功落盘的项目进入账本；再从任一入口提交相同作品时会显示为“已存在 · 跳过”，不重复下载。进行中的同一链接也会跨进程互斥，避免剪贴板与手动/API任务同时下载。剪贴板旧成功记录会在采集器启动时并入共用账本；失败项和仅登记的链接不会被当作已下载。新剪贴板采集记录会在整理完成后写入素材库最终目录。
 
 ## 调速与重试
 

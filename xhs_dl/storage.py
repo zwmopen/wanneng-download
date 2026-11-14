@@ -269,6 +269,47 @@ def add_history(download_url, note_id, title, save_dir=""):
     return path
 
 
+def update_history_location(download_url, note_id, title, save_dir):
+    """Record the final organized folder after an importer moves downloaded files."""
+    if not save_dir:
+        return False
+    item = {
+        "下载网址": str(download_url or ""),
+        "笔记ID": str(note_id or ""),
+        "标题": str(title or ""),
+        "保存位置": str(save_dir),
+    }
+    path = history_path()
+    changed = False
+    with _LOCK, _cross_process_lock(path.with_suffix(".lock")):
+        items = _read_json(path, [])
+        if not isinstance(items, list):
+            items = []
+        matches = [
+            index for index, old in enumerate(items)
+            if isinstance(old, dict)
+            and _record_keys(item).intersection(_record_keys(old))
+        ]
+        if not matches:
+            item["下载时间"] = time.strftime("%Y-%m-%d %H:%M:%S")
+            items.append(item)
+            changed = True
+        else:
+            for index in matches:
+                merged = dict(items[index])
+                for key in ("下载网址", "笔记ID", "标题"):
+                    if item[key] and not merged.get(key):
+                        merged[key] = item[key]
+                if merged.get("保存位置") != item["保存位置"]:
+                    merged["保存位置"] = item["保存位置"]
+                if merged != items[index]:
+                    items[index] = merged
+                    changed = True
+        if changed:
+            _write_json(path, items)
+    return changed
+
+
 def load_settings():
     defaults = {
         "output_dir": str(Path.home() / "Downloads"),
