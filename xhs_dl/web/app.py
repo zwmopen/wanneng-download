@@ -1,16 +1,21 @@
 """xhs-dl V2 浏览器可视化界面。"""
 
 import copy
+import ctypes
 import hashlib
 import json
 import os
+import re
+import subprocess
+import sys
 import threading
 import time
 import uuid
 import webbrowser
-from http.server import HTTPServer, BaseHTTPRequestHandler
+from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 from pathlib import Path
-from urllib.parse import urlsplit
+from urllib.parse import parse_qs, urlsplit
+from ctypes import wintypes
 
 from xhs_dl.core.downloader import DELAY_MODES, extract_urls_from_text
 from xhs_dl import __version__
@@ -133,6 +138,7 @@ textarea::placeholder,input::placeholder{color:#8092a2}
 .panel-title{font-size:16px;font-weight:800;margin:0}.panel-sub{font-size:12px;color:var(--muted);margin:6px 0 0;line-height:1.55}
 .count-badge{min-width:42px;height:34px;padding:0 10px;display:grid;place-items:center;border-radius:12px;background:var(--active);color:var(--text);font-size:18px;font-weight:800;box-shadow:var(--shadow-small)}
 .queue-list,.history-list{display:flex;flex-direction:column;gap:9px;margin-top:15px;max-height:220px;overflow:auto;padding:2px 4px 2px 1px}
+.history-more{margin-top:12px;border:1px solid var(--line);border-radius:12px;background:var(--panel);color:var(--text);padding:9px 13px;cursor:pointer;box-shadow:var(--shadow-small);font:inherit;font-size:12px}.history-more:hover{box-shadow:var(--shadow-hover)}.history-more:disabled{cursor:wait;opacity:.65}
 .task-row{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:11px 12px;border:1px solid var(--line);border-radius:13px;background:var(--soft);font-size:12px;line-height:1.45}
 .task-main{min-width:0;flex:1}.task-title{display:block;font-weight:700;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.task-meta{display:block;color:var(--muted);margin-top:3px;font-size:11px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.task-location{display:block;color:var(--muted);margin-top:4px;font-size:11px;line-height:1.45;white-space:normal;overflow-wrap:anywhere}.history-row{align-items:flex-start}.history-row .task-state{padding-top:2px}.task-state{flex:0 0 auto;color:var(--muted);font-size:11px}.task-state.ok{color:var(--ok)}.task-state.fail{color:var(--bad)}
 .panel-empty{padding:13px 4px 2px;color:var(--muted);font-size:12px}
@@ -199,6 +205,7 @@ button:focus-visible,textarea:focus-visible,input:focus-visible,select:focus-vis
       <section class="surface history-card">
         <div class="panel-head"><div><p class="panel-title">历史下载记录</p><p class="panel-sub" id="historySub">正在读取本机下载档案</p></div></div>
         <div class="history-list" id="historyList"><div class="panel-empty">暂无历史记录</div></div>
+        <button class="history-more" id="historyMore" type="button" hidden>加载更多历史记录</button>
       </section>
     </aside>
   </section>
@@ -216,7 +223,7 @@ button:focus-visible,textarea:focus-visible,input:focus-visible,select:focus-vis
 </dialog>
 <script>
 const THEME_KEY='xhs-dl-theme',OUTPUT_KEY='xhs-dl-output',MODE_KEY='xhs-dl-mode',FORMAT_KEY='xhs-dl-format',DEFAULT_OUTPUT=__DEFAULT_OUTPUT_JSON__,MIN_PROGRESS_MS=1100;
-const $=id=>document.getElementById(id);let activeJob=null,pollTimer=null,jobStartedAt=0,collectorEnabled=true;
+const $=id=>document.getElementById(id);let activeJob=null,pollTimer=null,jobStartedAt=0,collectorEnabled=true,collectorOnline=false,collectorStartingUntil=0,historyItems=[],historyOffset=0,historyTotal=0;
 function applyTheme(theme){const next=theme==='glass'?'glass':'neo';document.body.dataset.theme=next;localStorage.setItem(THEME_KEY,next);$('themeButton').textContent=next==='neo'?'玻璃主题':'拟态主题'}
 applyTheme(localStorage.getItem(THEME_KEY)||'neo');
 $('themeButton').addEventListener('click',()=>applyTheme(document.body.dataset.theme==='neo'?'glass':'neo'));
@@ -235,10 +242,14 @@ function render(job){const total=job.total||0,done=job.done||0,success=job.succe
   const items=job.items||[];$('empty').style.display=items.length?'none':'block';$('results').classList.toggle('show',items.length>0);$('results').innerHTML='';items.forEach(it=>{const d=document.createElement('div');d.className='result '+(it.deduplicated?'ok':it.success?'ok':'fail');const top=document.createElement('div');top.className='result-top';const name=document.createElement('span');name.className='result-name';name.textContent=it.title||it.error||'未命名作品';const count=document.createElement('span');count.className='result-count';count.textContent=it.deduplicated?'已存在 · 跳过':it.success?`${it.image_success||0} 张`:'失败';top.append(name,count);d.append(top);if(!it.success&&!it.deduplicated&&it.error){const err=document.createElement('div');err.className='result-error';err.textContent=it.error;d.append(err)}$('results').append(d)});
   const skipped=job.skipped||0;if(job.status==='queued')setState('running','等待执行',total?`排队中，共 ${total} 条`:'等待本地引擎');else if(job.status==='running')setState('running','正在逐条提取',total?`已完成 ${done} 条，共 ${total} 条`:'正在准备本地引擎');else if(job.status==='completed')setState(job.failed?'error':'done',job.failed?'任务完成，有失败项':skipped&&!(job.success||0)?'重复项已跳过':skipped?'任务完成（含重复项跳过）':'全部保存完成',`成功 ${job.success||0} 条，跳过 ${skipped} 条，失败 ${job.failed||0} 条`);else if(job.status==='error')setState('error','任务没有完成',job.error||'请稍后重试')}
 function renderRows(target,list,kind){target.innerHTML='';if(!list||!list.length){const empty=document.createElement('div');empty.className='panel-empty';empty.textContent=kind==='history'?'还没有本地成功下载记录':'当前队列为空';target.append(empty);return}list.forEach(job=>{const row=document.createElement('div');row.className='task-row'+(kind==='history'?' history-row':'');const main=document.createElement('div');main.className='task-main';const title=document.createElement('span');title.className='task-title';const first=(job.items||[])[0];title.textContent=job.title||job.title_hint||(first&&first.title)||(job.url||`任务 ${String(job.job_id||'').slice(0,8)}`);const meta=document.createElement('span');meta.className='task-meta';if(kind==='history'){const parts=[];if(job.completed_at)parts.push(job.completed_at);if(job.note_id)parts.push(`笔记 ${job.note_id}`);meta.textContent=parts.join(' · ')||job.url||'旧记录未保存时间'}else if(job.note_id)meta.textContent=`笔记 ${job.note_id}`;else if(job.retry_count)meta.textContent=`${job.url||''} · 已重试 ${job.retry_count} 次`;else if(job.url)meta.textContent=job.url;else meta.textContent=`${job.done||0} / ${job.total||0} 条 · 成功 ${job.success||0}`;main.append(title,meta);if(kind==='history'){const location=document.createElement('span');location.className='task-location';location.textContent=job.save_dir?`保存位置：${job.save_dir}`:'旧记录位置未登记（未找到可确认的素材目录）';if(job.save_dir)location.title=job.save_dir;main.append(location)}const state=document.createElement('span');const status=job.status||'';const ok=kind==='history'||status==='completed'||status==='success';const failed=status==='error'||status==='failed';state.className='task-state '+(ok?'ok':failed?'fail':'');state.textContent=kind==='history'?'已保存':status==='running'?'进行中':status==='cooling_down'?'冷却中':failed?'失败':'等待';row.append(main,state);target.append(row)})}
-function updateCollectorSwitch(collector){collectorEnabled=collector.enabled!==false;const control=$('collectorToggle');control.setAttribute('aria-checked',String(collectorEnabled));control.disabled=collector.control_available===false;const label=collectorEnabled?'剪贴板采集 开':'剪贴板采集 关';$('collectorToggleText').textContent=label;const state=collector.online?'在线':collector.status==='offline'?'离线':'';control.title=`${label}${state?` · 守护进程${state}`:''}${collector.pause_reason?` · ${collector.pause_reason}`:''}`}
-async function toggleCollector(){const control=$('collectorToggle');control.disabled=true;try{const r=await fetch('/api/v1/collector',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({enabled:!collectorEnabled})});const data=await r.json();if(!r.ok)throw new Error(data.error||'剪贴板采集设置失败');collectorEnabled=Boolean(data.enabled);updateCollectorSwitch({...data,control_available:true});refreshDashboard()}catch(e){setState('error','剪贴板开关未生效',e.message);control.disabled=false}}
-async function refreshDashboard(){try{const r=await fetch('/api/v1/jobs?limit=50');if(!r.ok)return;const data=await r.json();const counts=data.counts||{},collector=data.collector||{};updateCollectorSwitch(collector);const waiting=data.waiting||[];const queue=data.queue||waiting;const running=data.running||[];$('waitingCount').textContent=counts.waiting??waiting.length;$('waitingSub').textContent=waiting.length?`有 ${waiting.length} 条任务等待 · 剪贴板 ${collector.pending_count||0} 条`:'当前队列为空 · 剪贴板待采集 0 条';$('queueSub').textContent=`剪贴板队列 ${collector.pending_count||0} 条 · 失败归档 ${collector.failed_archive_count||0} 条（不在等待队列）`;$('historySub').textContent=`共享成功记录 ${counts.download_history||0} 条 · 剪贴板历史 ${collector.history_count||0} 条；新记录显示保存目录`;renderRows($('queueList'),queue,'queue');renderRows($('historyList'),data.history||[],'history');if(activeJob)return;if(running.length){const current=running[0];if(current.source==='clipboard'){setState('running','剪贴板正在采集',current.title||current.url||'正在处理当前链接');$('progressBar').classList.add('active');$('progressText').textContent='采集进行中';$('successText').textContent='';$('empty').style.display='none';$('results').classList.remove('show')}else setState('running','正在逐条提取',`任务进行中，共 ${current.total||0} 条`);return}if(collector.status==='offline'){setState('error','剪贴板采集器离线',collector.last_heartbeat?`最近心跳：${collector.last_heartbeat}`:'没有可用心跳');$('progressBar').classList.remove('active')}else if(collector.status==='paused'){setState('','剪贴板采集已暂停',collector.pending_count?`仍有 ${collector.pending_count} 条等待恢复`:'当前没有等待任务');$('progressBar').classList.remove('active')}else if(collector.status==='cooling'){setState('running','采集器冷却中',collector.cooldown_remaining_seconds?`约 ${collector.cooldown_remaining_seconds} 秒后继续 · ${collector.cooldown_reason||'按限速策略等待'}`:'按限速策略等待');$('progressBar').classList.add('active')}else{setState('done','当前没有进行中的下载',collector.status==='idle'?'下载器已就绪，采集器空闲':'等待任务启动');$('progressBar').classList.remove('active')}}catch(_){}}
+function updateCollectorSwitch(collector){collectorEnabled=collector.enabled!==false;collectorOnline=collector.online===true;if(collectorOnline)collectorStartingUntil=0;const control=$('collectorToggle');control.setAttribute('aria-checked',String(collectorEnabled));control.disabled=collector.control_available===false;const starting=!collectorOnline&&collectorStartingUntil>Date.now();const label=starting?'剪贴板采集 启动中':collectorOnline?(collectorEnabled?'剪贴板采集 开':'剪贴板采集 关'):'剪贴板采集 离线';$('collectorToggleText').textContent=label;const state=collectorOnline?'在线':collector.status==='offline'?'离线':'';control.title=`${label}${state?` · 守护进程${state}`:''}${!collectorOnline?' · 点击启动': ''}${collector.pause_reason?` · ${collector.pause_reason}`:''}`}
+function historyKey(item){return String(item.job_id||item.url||item.note_id||'')}
+function updateHistoryFromDashboard(data){const incoming=data.history||[],counts=data.counts||{},collector=data.collector||{};let changed=false;if(!historyItems.length){historyItems=incoming;historyOffset=incoming.length;changed=true}else{const seen=new Set(historyItems.map(historyKey));const added=incoming.filter(item=>!seen.has(historyKey(item)));if(added.length){historyItems=[...added,...historyItems];historyOffset+=added.length;changed=true}}historyTotal=counts.download_history||0;if(changed){const list=$('historyList'),oldHeight=list.scrollHeight,oldTop=list.scrollTop;renderRows(list,historyItems,'history');if(oldHeight&&oldTop)list.scrollTop=Math.min(list.scrollHeight-list.clientHeight,oldTop+Math.max(0,list.scrollHeight-oldHeight))}$('historySub').textContent=`显示 ${Math.min(historyOffset,historyTotal)} / ${historyTotal} 条共享成功记录 · 剪贴板历史 ${collector.history_count||0} 条`;$('historyMore').hidden=historyOffset>=historyTotal;$('historyMore').textContent=`加载更多（剩余 ${Math.max(0,historyTotal-historyOffset)} 条）`}
+async function loadMoreHistory(){const button=$('historyMore');if(button.disabled||historyOffset>=historyTotal)return;button.disabled=true;const oldText=button.textContent;button.textContent='正在读取…';try{const requestOffset=historyOffset;const r=await fetch(`/api/v1/jobs?limit=50&history_offset=${requestOffset}`);const data=await r.json();if(!r.ok)throw new Error(data.error||'读取历史失败');const page=data.history||[],seen=new Set(historyItems.map(historyKey)),added=page.filter(item=>!seen.has(historyKey(item)));historyItems=historyItems.concat(added);historyOffset=requestOffset+page.length;historyTotal=data.counts?.download_history??historyTotal;renderRows($('historyList'),historyItems,'history');$('historySub').textContent=`显示 ${Math.min(historyOffset,historyTotal)} / ${historyTotal} 条共享成功记录 · 剪贴板历史 ${data.collector?.history_count||0} 条`;button.hidden=historyOffset>=historyTotal;button.textContent=`加载更多（剩余 ${Math.max(0,historyTotal-historyOffset)} 条）`}catch(e){button.textContent='读取失败，点击重试';button.title=e.message}finally{button.disabled=false;if(!button.hidden&&button.textContent==='正在读取…')button.textContent=oldText}}
+async function toggleCollector(){const control=$('collectorToggle'),enable=!collectorEnabled||!collectorOnline;control.disabled=true;try{const r=await fetch('/api/v1/collector',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({enabled:enable})});const data=await r.json();if(!r.ok)throw new Error(data.error||'剪贴板采集设置失败');collectorEnabled=Boolean(data.enabled);if(data.starting)collectorStartingUntil=Date.now()+15000;updateCollectorSwitch({...data,control_available:true});refreshDashboard()}catch(e){setState('error','剪贴板开关未生效',e.message);control.disabled=false}}
+async function refreshDashboard(){try{const r=await fetch('/api/v1/jobs?limit=50&history_offset=0');if(!r.ok)return;const data=await r.json();const counts=data.counts||{},collector=data.collector||{};updateCollectorSwitch(collector);updateHistoryFromDashboard(data);const waiting=data.waiting||[];const queue=data.queue||waiting;const running=data.running||[];$('waitingCount').textContent=counts.waiting??waiting.length;$('waitingSub').textContent=waiting.length?`有 ${waiting.length} 条任务等待 · 剪贴板 ${collector.pending_count||0} 条`:'当前队列为空 · 剪贴板待采集 0 条';$('queueSub').textContent=`剪贴板队列 ${collector.pending_count||0} 条 · 失败归档 ${collector.failed_archive_count||0} 条（不在等待队列）`;renderRows($('queueList'),queue,'queue');if(activeJob)return;if(running.length){const current=running[0];if(current.source==='clipboard'){setState('running','剪贴板正在采集',current.title||current.url||'正在处理当前链接');$('progressBar').classList.add('active');$('progressText').textContent='采集进行中';$('successText').textContent='';$('empty').style.display='none';$('results').classList.remove('show')}else setState('running','正在逐条提取',`任务进行中，共 ${current.total||0} 条`);return}if(collector.status==='offline'){setState('error','剪贴板采集器离线',collector.last_heartbeat?`最近心跳：${collector.last_heartbeat}`:'没有可用心跳');$('progressBar').classList.remove('active')}else if(collector.status==='paused'){setState('','剪贴板采集已暂停',collector.pending_count?`仍有 ${collector.pending_count} 条等待恢复`:'当前没有等待任务');$('progressBar').classList.remove('active')}else if(collector.status==='cooling'){setState('running','采集器冷却中',collector.cooldown_remaining_seconds?`约 ${collector.cooldown_remaining_seconds} 秒后继续 · ${collector.cooldown_reason||'按限速策略等待'}`:'按限速策略等待');$('progressBar').classList.add('active')}else{setState('done','当前没有进行中的下载',collector.status==='idle'?'下载器已就绪，采集器空闲':'等待任务启动');$('progressBar').classList.remove('active')}}catch(_){}}
 $('collectorToggle').addEventListener('click',toggleCollector);
+$('historyMore').addEventListener('click',loadMoreHistory);
 function finish(){activeJob=null;$('go').disabled=false;$('go').textContent='开始下载';refreshDashboard()}
 async function poll(){if(!activeJob)return;try{const r=await fetch('/api/jobs/'+activeJob);const job=await r.json();if(!r.ok)throw new Error(job.error||'读取任务失败');if(job.status==='completed'||job.status==='error'){const wait=Math.max(0,MIN_PROGRESS_MS-(Date.now()-jobStartedAt));if(wait){pollTimer=setTimeout(()=>{render(job);finish()},wait);return}render(job);finish();return}render(job);refreshDashboard();pollTimer=setTimeout(poll,700)}catch(e){setState('error','连接中断',e.message);$('progressBar').classList.remove('active');$('go').disabled=false;$('go').textContent='重新开始';activeJob=null}}
 async function start(){if(activeJob)return;const text=$('input').value.trim();if(!text){$('input').focus();setState('error','还缺少分享文本','请先粘贴至少一条公开媒体链接');return}const output_dir=$('outdir').value.trim()||DEFAULT_OUTPUT,mode=$('mode').value,image_format=$('format').value;localStorage.setItem(OUTPUT_KEY,output_dir);localStorage.setItem(MODE_KEY,mode);localStorage.setItem(FORMAT_KEY,image_format);jobStartedAt=Date.now();$('go').disabled=true;$('go').textContent='正在准备…';$('progressBar').classList.add('active');$('progressBar').style.width='38%';$('progressText').textContent='准备中';$('successText').textContent='';$('results').innerHTML='';$('results').classList.remove('show');$('empty').style.display='block';setState('running','正在准备','连接本地无水印引擎');try{const r=await fetch('/api/jobs',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({text,output_dir,mode,image_format})});const data=await r.json();if(!r.ok)throw new Error(data.error||'创建任务失败');activeJob=data.job_id;$('go').textContent='下载进行中';poll()}catch(e){$('progressBar').classList.remove('active');setState('error','无法开始',e.message);$('go').disabled=false;$('go').textContent='重新开始'}}
@@ -319,11 +330,94 @@ def _collector_pause_state(heartbeat=None):
     return pause_file, pause_file.exists(), str(content.get("reason") or "") if isinstance(content, dict) else ""
 
 
+def _collector_pid_alive(pid):
+    try:
+        pid = int(pid)
+    except (TypeError, ValueError):
+        return False
+    if pid <= 0:
+        return False
+    if os.name != "nt":
+        try:
+            os.kill(pid, 0)
+            return True
+        except OSError:
+            return False
+
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel32.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
+    kernel32.OpenProcess.restype = wintypes.HANDLE
+    kernel32.GetExitCodeProcess.argtypes = [wintypes.HANDLE, ctypes.POINTER(wintypes.DWORD)]
+    kernel32.GetExitCodeProcess.restype = wintypes.BOOL
+    kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
+    kernel32.CloseHandle.restype = wintypes.BOOL
+    handle = kernel32.OpenProcess(0x1000, False, pid)  # PROCESS_QUERY_LIMITED_INFORMATION
+    if not handle:
+        return ctypes.get_last_error() == 5  # Access denied: conservatively assume it still exists.
+    try:
+        exit_code = wintypes.DWORD()
+        return bool(kernel32.GetExitCodeProcess(handle, ctypes.byref(exit_code))) and exit_code.value == 259
+    finally:
+        kernel32.CloseHandle(handle)
+
+
+def _start_collector_if_stopped():
+    heartbeat = _read_json(COLLECTOR_HEARTBEAT_FILE, {})
+    pid = heartbeat.get("pid") if isinstance(heartbeat, dict) else None
+    try:
+        age = time.time() - float(heartbeat.get("timestamp"))
+    except (TypeError, ValueError):
+        age = None
+    if age is not None and 0 <= age <= 45 and _collector_pid_alive(pid):
+        return False
+    if _collector_pid_alive(pid):
+        raise OSError("采集器心跳已过期，但原进程仍在；为避免重复启动，先保留该进程")
+
+    script = PROJECT_ROOT / "clipboard_xhs_auto_collector.py"
+    if not script.is_file():
+        raise FileNotFoundError(f"找不到剪贴板采集器入口：{script}")
+    env = os.environ.copy()
+    config_path = env.get("MATERIAL_HUB_CONFIG", "")
+    if not config_path:
+        launcher = PROJECT_ROOT / "XHS-Clipboard-Collector.vbs"
+        try:
+            launcher_text = launcher.read_text(encoding="utf-8-sig")
+            match = re.search(
+                r'ProcessEnvironment\("MATERIAL_HUB_CONFIG"\)\s*=\s*"([^"]+)"',
+                launcher_text,
+                flags=re.IGNORECASE,
+            )
+            config_path = match.group(1) if match else ""
+        except OSError:
+            config_path = ""
+    if config_path:
+        if not Path(config_path).is_file():
+            raise FileNotFoundError(f"剪贴板采集配置不存在：{config_path}")
+        env["MATERIAL_HUB_CONFIG"] = config_path
+
+    flags = 0
+    if os.name == "nt":
+        flags = getattr(subprocess, "DETACHED_PROCESS", 0) | getattr(subprocess, "CREATE_NO_WINDOW", 0)
+    subprocess.Popen(
+        [sys.executable, str(script)],
+        cwd=str(PROJECT_ROOT),
+        env=env,
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        close_fds=True,
+        creationflags=flags,
+    )
+    return True
+
+
 def _set_collector_enabled(enabled):
     pause_file, paused, _reason = _collector_pause_state()
+    started = False
     if enabled:
         if paused:
             pause_file.unlink()
+        started = _start_collector_if_stopped()
     else:
         pause_file.parent.mkdir(parents=True, exist_ok=True)
         if not paused:
@@ -341,7 +435,7 @@ def _set_collector_enabled(enabled):
                 ),
                 encoding="utf-8",
             )
-    return not pause_file.exists()
+    return not pause_file.exists(), started
 
 
 def _collector_snapshot():
@@ -448,7 +542,7 @@ def _collector_snapshot():
     }
 
 
-def _download_history(limit=MAX_DASHBOARD_ROWS):
+def _download_history(limit=MAX_DASHBOARD_ROWS, offset=0):
     entries = _read_json(history_path(), [])
     if not isinstance(entries, list):
         return [], 0
@@ -469,10 +563,10 @@ def _download_history(limit=MAX_DASHBOARD_ROWS):
                 "source": "downloader-history",
             }
         )
-    return rows[:limit], len(rows)
+    return rows[offset : offset + limit], len(rows)
 
 
-def _dashboard_payload(limit=50):
+def _dashboard_payload(limit=50, history_offset=0):
     with JOBS_LOCK:
         current_jobs = [copy.deepcopy(value) for value in JOBS.values()]
     current_jobs.sort(key=lambda item: item.get("created_at", 0))
@@ -490,7 +584,7 @@ def _dashboard_payload(limit=50):
         web_history = copy.deepcopy(list(reversed(WEB_HISTORY[-limit:])))
 
     collector = _collector_snapshot()
-    downloads, download_count = _download_history(limit)
+    downloads, download_count = _download_history(limit, history_offset)
     clipboard_waiting = collector["pending"]
     waiting = web_waiting + clipboard_waiting
     running = web_running + ([collector["current"]] if collector["current"] else [])
@@ -499,6 +593,8 @@ def _dashboard_payload(limit=50):
         "running": running,
         "queue": waiting,
         "history": downloads,
+        "history_offset": history_offset,
+        "history_has_more": history_offset + len(downloads) < download_count,
         "web_history": web_history,
         "collector": collector,
         "counts": {
@@ -539,7 +635,10 @@ def _openapi_document():
             "/api/v1/jobs": {
                 "get": {
                     "summary": "读取等待、进行中、剪贴板队列与本机成功历史",
-                    "parameters": [{"name": "limit", "in": "query", "schema": {"type": "integer", "minimum": 1, "maximum": 100, "default": 50}}],
+                    "parameters": [
+                        {"name": "limit", "in": "query", "schema": {"type": "integer", "minimum": 1, "maximum": 100, "default": 50}},
+                        {"name": "history_offset", "in": "query", "schema": {"type": "integer", "minimum": 0, "default": 0}, "description": "下载历史偏移量，用于逐页查看全部共享历史。"},
+                    ],
                     "responses": {"200": {"description": "合并后的本机任务看板", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Dashboard"}}}}},
                 },
                 "post": {
@@ -575,13 +674,13 @@ def _openapi_document():
             },
             "/api/v1/collector": {
                 "post": {
-                    "summary": "暂停或恢复现有的剪贴板守护进程",
-                    "description": "只设置剪贴板守护进程共用的暂停标记，不启动第二个采集器；正在执行的单条下载会先完成，待采集队列会保留。",
+                    "summary": "暂停、恢复或启动剪贴板守护进程",
+                    "description": "通过守护进程共用的暂停标记控制采集；若恢复时原进程已退出，则启动同一个采集器入口并保留单实例互斥；正在执行的单条下载会先完成，待采集队列会保留。",
                     "requestBody": {
                         "required": True,
                         "content": {"application/json": {"schema": {"type": "object", "required": ["enabled"], "properties": {"enabled": {"type": "boolean"}}}}},
                     },
-                    "responses": {"200": {"description": "开关状态已更新"}, "400": {"description": "enabled 必须是布尔值"}, "503": {"description": "本机暂停标记无法写入"}},
+                    "responses": {"200": {"description": "开关状态已更新；starting 表示正在启动离线采集器"}, "400": {"description": "enabled 必须是布尔值"}, "503": {"description": "本机暂停标记或采集器启动失败"}},
                 }
             },
         },
@@ -629,6 +728,8 @@ def _openapi_document():
                         "collector": {"type": "object", "additionalProperties": True},
                         "counts": {"type": "object", "properties": {"waiting": {"type": "integer"}, "running": {"type": "integer"}, "history": {"type": "integer"}, "download_history": {"type": "integer"}, "web_history": {"type": "integer"}, "clipboard_history": {"type": "integer"}, "clipboard_failed_archive": {"type": "integer"}}, "additionalProperties": True},
                         "history_limit": {"type": "integer"},
+                        "history_offset": {"type": "integer", "minimum": 0},
+                        "history_has_more": {"type": "boolean"},
                     },
                 },
                 "Capabilities": {
@@ -784,13 +885,14 @@ class Handler(BaseHTTPRequestHandler):
             )
             return
         if path == "/api/jobs":
-            query = {}
             try:
-                query = dict(part.split("=", 1) if "=" in part else (part, "") for part in parsed.query.split("&") if part)
-                limit = max(1, min(int(query.get("limit", 50)), MAX_DASHBOARD_ROWS))
+                query = parse_qs(parsed.query)
+                limit = max(1, min(int(query.get("limit", ["50"])[0]), MAX_DASHBOARD_ROWS))
+                history_offset = max(0, int(query.get("history_offset", ["0"])[0]))
             except (TypeError, ValueError):
                 limit = 50
-            self._json(_dashboard_payload(limit))
+                history_offset = 0
+            self._json(_dashboard_payload(limit, history_offset))
             return
         if path.startswith("/api/jobs/"):
             job_id = path.rsplit("/", 1)[-1]
@@ -822,7 +924,7 @@ class Handler(BaseHTTPRequestHandler):
                 self._json({"error": "enabled 必须是布尔值"}, 400)
                 return
             try:
-                enabled = _set_collector_enabled(body["enabled"])
+                enabled, starting = _set_collector_enabled(body["enabled"])
             except OSError as exc:
                 self._json({"error": f"无法更新本机剪贴板开关：{exc}"}, 503)
                 return
@@ -831,6 +933,7 @@ class Handler(BaseHTTPRequestHandler):
                 {
                     "enabled": enabled,
                     "paused": not enabled,
+                    "starting": starting,
                     "online": snapshot["online"],
                     "status": snapshot["status"],
                     "pending_count": snapshot["pending_count"],
@@ -1018,7 +1121,7 @@ class Handler(BaseHTTPRequestHandler):
 def main():
     host = "127.0.0.1"
     port = 5678
-    server = HTTPServer((host, port), Handler)
+    server = ThreadingHTTPServer((host, port), Handler)
     url = "http://{}:{}".format(host, port)
     print("{} V{} Web: {}".format(APP_NAME, __version__, url))
     print("Press Ctrl+C to stop")
