@@ -36,7 +36,60 @@ COLLECTION_TASKS_FILE = Path.home() / ".xhs-dl" / "collection_tasks.json"
 COLLECTION_TASKS_LOCK = threading.RLock()
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 TOOLBOX_PROJECT = Path(os.environ.get("JIANGHU_TOOLBOX_ROOT", r"D:\AICode\工具开发\projects\jianghu-collector-gui"))
-TOOLBOX_BRIDGE_DIR = Path(os.environ.get("JIANGHU_BRIDGE_DIR", r"D:\Program Files\江湖工具箱\MinApp"))
+
+
+def _resolve_toolbox_bridge_dir():
+    configured = os.environ.get("JIANGHU_BRIDGE_DIR", "").strip()
+    if configured:
+        return Path(configured).expanduser()
+
+    # The Jianghu MCP client and native host must use the same isolated bridge.
+    # On this workstation that value is already configured for Codex; reading
+    # only this non-secret path avoids treating an old install heartbeat as live.
+    config_path = Path.home() / ".codex" / "config.toml"
+    try:
+        config_text = config_path.read_text(encoding="utf-8-sig")
+    except OSError:
+        config_text = ""
+
+    value = ""
+    if config_text:
+        try:
+            import tomllib
+        except ImportError:
+            tomllib = None
+        if tomllib is not None:
+            try:
+                config = tomllib.loads(config_text)
+                value = str(
+                    config.get("mcp_servers", {})
+                    .get("jianghu_toolbox", {})
+                    .get("env", {})
+                    .get("JIANGHU_BRIDGE_DIR", "")
+                ).strip()
+            except (TypeError, ValueError):
+                value = ""
+        else:
+            in_env_section = False
+            for line in config_text.splitlines():
+                section = line.strip()
+                if section.startswith("[") and section.endswith("]"):
+                    in_env_section = section == "[mcp_servers.jianghu_toolbox.env]"
+                    continue
+                if in_env_section:
+                    match = re.match(r"\s*JIANGHU_BRIDGE_DIR\s*=\s*(.+?)\s*(?:#.*)?$", line)
+                    if not match:
+                        continue
+                    raw_value = match.group(1).strip()
+                    if len(raw_value) >= 2 and raw_value[0] == raw_value[-1] and raw_value[0] in {"'", '"'}:
+                        raw_value = raw_value[1:-1]
+                    value = raw_value.strip()
+                    break
+
+    return Path(value).expanduser() if value else Path(r"D:\Program Files\江湖工具箱\MinApp")
+
+
+TOOLBOX_BRIDGE_DIR = _resolve_toolbox_bridge_dir()
 CLIPBOARD_QUEUE_FILE = PROJECT_ROOT / "clipboard_pending_queue.json"
 CLIPBOARD_HISTORY_FILE = PROJECT_ROOT / "clipboard_history.json"
 COLLECTOR_HEARTBEAT_FILE = PROJECT_ROOT / "collector_heartbeat.json"
@@ -167,6 +220,16 @@ def _collection_task_payload(task):
 
 
 def _python_console_executable():
+    configured = os.environ.get("JIANGHU_PYTHON", "").strip()
+    if configured:
+        candidate = Path(configured).expanduser()
+        if candidate.is_file():
+            return str(candidate)
+
+    toolbox_python = TOOLBOX_PROJECT / ".venv-agent" / "Scripts" / "python.exe"
+    if toolbox_python.is_file():
+        return str(toolbox_python)
+
     current = Path(sys.executable)
     if current.name.lower() == "pythonw.exe":
         console = current.with_name("python.exe")
