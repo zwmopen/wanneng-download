@@ -1,9 +1,10 @@
 # -*- coding: utf-8 -*-
 """本地万能采集器桥接 API。
 
-这个服务给其他 AI 一个可验证的本机入口：提交公开链接，拿到 ``job_id``，
-轮询真实状态，再读取已经落盘的媒体文件和元数据。它不接收或读取 Cookie，
-也不会把“已入队”伪报成“已解析”。默认只监听 127.0.0.1。
+这个服务给其他 AI 一个可验证的本机入口：提交链接，拿到 ``job_id``，
+轮询真实状态，再读取已经落盘的媒体文件和元数据。XHS 模板任务只读取
+XHS-Downloader 本地设置中已保存的 Cookie，不读取浏览器 Cookie；不会把
+“已入队”伪报成“已解析”。默认只监听 127.0.0.1。
 
 协议的最小约定：
 
@@ -40,7 +41,7 @@ UI_FILE = PROJECT_ROOT / "collector_bridge_ui.html"
 DOC_FILE = PROJECT_ROOT / "docs" / "collector-bridge-api.md"
 PROTOCOL = "collector-bridge/1"
 DEFAULT_HOST = "127.0.0.1"
-DEFAULT_PORT = 8765
+DEFAULT_PORT = 8766
 MAX_BODY_BYTES = 2 * 1024 * 1024
 MAX_LINKS = 100
 MAX_PERSISTED_JOBS = 200
@@ -351,7 +352,7 @@ def _update_link(job_id: str, index: int, **values: Any) -> None:
 
 
 def _direct_unified_download(job_id: str, index: int, url: str, image_format: str, max_images: int) -> tuple[bool, str, dict[str, Any], list[dict[str, Any]], bool]:
-    """Download non-XHS/Douyin public media with the existing unified engine."""
+    """Download media into isolated bridge staging without general-material routing."""
     if UnifiedDownloader is None:
         return False, _ENGINE_IMPORT_ERROR or "万能下载器核心未加载", {}, [], True
     output_dir = BRIDGE_STAGING_DIR / job_id / f"link-{index + 1:03d}"
@@ -362,7 +363,7 @@ def _direct_unified_download(job_id: str, index: int, url: str, image_format: st
         )
         result = downloader.download([url])
         item = result.results[0] if result.results else None
-        if item is None or not item.success:
+        if item is None or (not item.success and not item.deduplicated):
             error = getattr(item, "error", "万能引擎未产出媒体") if item is not None else "万能引擎未产出媒体"
             return False, _redact_text(error), {}, [], True
         target_dir = Path(item.save_dir or output_dir)
@@ -370,17 +371,24 @@ def _direct_unified_download(job_id: str, index: int, url: str, image_format: st
             "title": item.title,
             "author": item.author,
             "note_id": item.note_id,
-            "platform": "generic",
+            "platform": detect_platform(url) if detect_platform else "generic",
             "note_type": item.note_type,
             "url": url,
             "target_dir": str(target_dir),
             "images_count": item.image_success,
             "engine": item.engine,
+            "stats": {
+                "likes": str(getattr(item, "likes", "") or ""),
+                "collections": str(getattr(item, "collections", "") or ""),
+                "comments": str(getattr(item, "comments", "") or ""),
+            },
             "status": "success",
         }
         assets = _enumerate_assets(metadata)
         if not assets:
             return False, "下载引擎返回成功，但未核实到非空媒体文件", metadata, [], True
+        metadata["images_count"] = sum(1 for asset in assets if asset.get("kind") == "image")
+        metadata["deduplicated"] = bool(item.deduplicated)
         return True, "", metadata, assets, False
     except Exception as exc:
         return False, _redact_text(exc), {}, [], True
@@ -432,7 +440,7 @@ def _collect_one(job_id: str, index: int, target: dict[str, str], options: dict[
 
     try:
         with EXECUTION_LOCK:
-            if platform in {"xhs", "douyin"}:
+            if platform in {"xhs", "douyin"} and not options.get("template_library"):
                 if _collector is None:
                     ok, message, metadata = False, _COLLECTOR_IMPORT_ERROR or "剪切板采集器模块未加载", {}
                 else:
@@ -604,6 +612,7 @@ def _queue_job(targets: list[dict[str, str]], client: dict[str, Any], conversati
             "image_format": options.get("image_format", "keep"),
             "max_images": options.get("max_images", 30),
             "manual_override": bool(options.get("manual_override")),
+            "template_library": bool(options.get("template_library")),
         },
         "result": {"dry_run": bool(options.get("dry_run")), "total": len(links), "succeeded": 0, "failed": 0, "blocked": 0, "validated": 0, "assets": []},
         "error": "",
@@ -658,6 +667,9 @@ def _job_list() -> dict[str, Any]:
 def _capabilities() -> dict[str, Any]:
     pause = _pause_info()
     xhs_state = "blocked" if pause.get("paused") and re.search(r"小红书|xhs|登录", str(pause.get("reason", "")), re.I) else "unverified"
+    engine_home = Path(os.environ.get("XHS_DOWNLOADER_HOME") or PROJECT_ROOT.parent / "XHS_Downloader")
+    xhs_settings = _read_json_file(engine_home / "Volume" / "settings.json", {})
+    xhs_cookie_configured = bool(str(xhs_settings.get("cookie") or "").strip()) if isinstance(xhs_settings, dict) else False
     return {
         "protocol": PROTOCOL,
         "service": "universal-collector-bridge",
@@ -666,21 +678,22 @@ def _capabilities() -> dict[str, Any]:
         "related_web_ui": {
             "url": "http://127.0.0.1:5678/",
             "port": 5678,
-            "role": "原版万能下载器 Web 界面；8765 控制台调用同一套本地引擎",
+            "role": "原版万能下载器 Web 界面；8766 控制台调用同一套本地引擎",
         },
         "operations": ["capabilities", "status", "collect_and_parse", "fetch_asset"],
         "authentication": {
-            "cookies_used": False,
+            "cookies_used": xhs_cookie_configured,
             "browser_login_used": False,
-            "public_only": True,
-            "note": "只调用本机公开链接引擎；没有 Cookie 或账号注入接口。",
+            "public_only": not xhs_cookie_configured,
+            "note": "只读取 XHS-Downloader 本机设置中已保存的 Cookie（只回报是否配置）；不读取浏览器 Cookie。" if xhs_cookie_configured else "当前只尝试公开链接；不会读取浏览器 Cookie。",
         },
         "platforms": {
             "xhs": {
                 "state": xhs_state,
-                "mode": "local_cli_no_cookie",
+                "mode": "local_cli_saved_cookie" if xhs_cookie_configured else "local_cli_public_only",
+                "cookie_configured": xhs_cookie_configured,
                 "blocked_reason": pause.get("reason", "") if xhs_state == "blocked" else "",
-                "manual_public_link": "仅带 xsec_token 的明确手动链接可单次尝试；ID 或无鉴权链接仍会阻断",
+                "manual_public_link": "24 位 ID 会转成公开笔记地址尝试；分享链接保留 xsec_token。能否下载取决于笔记公开状态及本机下载器登录配置。",
             },
             "douyin": {
                 "state": "available",
@@ -985,6 +998,7 @@ class BridgeHandler(BaseHTTPRequestHandler):
             "image_format": str(options.get("image_format") or "keep"),
             "max_images": options.get("max_images", 30),
             "manual_override": bool(options.get("manual_override", False)),
+            "template_library": bool(options.get("template_library", False)),
         }
         response = _queue_job(targets, client, conversation_id, safe_options)
         self._json(response, 202)
@@ -1001,7 +1015,7 @@ def create_server(host: str = DEFAULT_HOST, port: int = DEFAULT_PORT) -> Threadi
 def main() -> int:
     parser = argparse.ArgumentParser(description="万能采集器本地桥接 API")
     parser.add_argument("--host", default=DEFAULT_HOST, help="监听地址，默认仅本机")
-    parser.add_argument("--port", type=int, default=DEFAULT_PORT, help="监听端口，默认 8765")
+    parser.add_argument("--port", type=int, default=DEFAULT_PORT, help="监听端口，默认 8766")
     args = parser.parse_args()
     server = create_server(args.host, args.port)
     print(f"万能采集器桥接 API 已启动: http://{args.host}:{args.port}")

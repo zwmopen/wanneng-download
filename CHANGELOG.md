@@ -1,5 +1,17 @@
 # 变更记录
 
+## [Unreleased downloader collection workspace] - 2026-11-15
+
+- Added sidebar tabs for single-work downloading, Douyin homepage discovery, and Douyin keyword discovery in the existing 5678 UI.
+- Homepage and keyword results enter the same downloader queue, preserving local deduplication, saved output settings, original media formats, and shared download history.
+- Kept the clipboard collector as a separate single-link background entry and documented the supported platform and verification limits.
+- Added local collection capability/status APIs and collection task polling on the existing port; no additional UI port is introduced.
+
+## [Unreleased template gallery bridge port] - 2026-11-14
+
+- Moved the optional collector bridge default from port 8765 to 8766 because 8765 is reserved by the Jianghu conversion assistant.
+- Kept the bridge loopback-only; the template gallery can start and health-check it without replacing the conversion service.
+
 ## [Unreleased Universal collector recovery] - 2026-11-13
 
 - Short-link extraction failures now remain retryable queue work instead of being classified as terminal unsupported content.
@@ -22,7 +34,7 @@
 - Added a local visual console at `/` for submitting jobs, viewing queue/heartbeat status, polling recent tasks, and opening verified on-disk assets.
 - The console now presents the product as “万能下载器 · 万能采集器”, keeps source image formats by default, makes the four status cards clickable, and wraps long pause messages without horizontal overflow.
 - Queue detail URLs are now real links backed by a local queue-id redirect endpoint, so clicking a displayed URL opens the recorded source instead of doing nothing.
-- Added an idempotent service launcher for the original downloader Web UI (`5678`) and the collector bridge console (`8765`); the dashboard links directly to the original downloader page.
+- Added an idempotent service launcher for the original downloader Web UI (`5678`) and the collector bridge console (`8766`); the dashboard links directly to the original downloader page.
 
 ## 3.6.0 剪贴板极速无感守护、待下载防风控队列、双平台解析与原生硬链接归档 — 2026-10-01
 

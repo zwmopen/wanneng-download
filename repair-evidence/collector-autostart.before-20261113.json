@@ -1,0 +1,21 @@
+{
+  "saved_at": "2026-11-13 11:58:26 +08:00",
+  "registry_value": "\"C:\\Users\\z\\AppData\\Local\\Programs\\Python\\Python311\\pythonw.exe\" \"D:\\AICode\\AI\\skills\\技能包\\技能\\universal-clipboard-collector\\scripts\\universal_clipboard_collector.py\"",
+  "startup_shortcut": {
+    "Path": "C:\\Users\\z\\AppData\\Roaming\\Microsoft\\Windows\\Start Menu\\Programs\\Startup\\Universal-Clipboard-Collector.lnk",
+    "TargetPath": "C:\\Users\\z\\AppData\\Local\\Programs\\Python\\Python311\\pythonw.exe",
+    "Arguments": "\"D:\\AICode\\AI\\skills\\技能包\\技能\\universal-clipboard-collector\\scripts\\universal_clipboard_collector.py\"",
+    "WorkingDirectory": "D:\\AICode\\AI\\skills\\技能包\\技能\\universal-clipboard-collector\\scripts",
+    "Description": "万能素材剪贴板智能采集守护神 (小红书/抖音图文)",
+    "WindowStyle": 7
+  },
+  "desktop_shortcut": {
+    "Path": "C:\\Users\\z\\Desktop\\启动万能素材剪贴板采集.lnk",
+    "TargetPath": "C:\\Users\\z\\AppData\\Local\\Programs\\Python\\Python311\\pythonw.exe",
+    "Arguments": "\"D:\\AICode\\AI\\skills\\技能包\\技能\\universal-clipboard-collector\\scripts\\universal_clipboard_collector.py\"",
+    "WorkingDirectory": "D:\\AICode\\AI\\skills\\技能包\\技能\\universal-clipboard-collector\\scripts",
+    "Description": "万能素材剪贴板智能采集守护神 (小红书/抖音图文)",
+    "WindowStyle": 7
+  },
+  "task_xml_file": "collector-autostart.before-20261113.xml"
+}

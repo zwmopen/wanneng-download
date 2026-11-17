@@ -34,6 +34,14 @@ def settings_path():
     return app_data_dir() / "settings.json"
 
 
+def download_claims_dir():
+    """Return the shared same-note lock directory, with a writable-root override."""
+    override = os.environ.get("XHS_DL_CLAIM_DIR")
+    path = Path(override).expanduser() if override else app_data_dir() / "download_claims"
+    path.mkdir(parents=True, exist_ok=True)
+    return path
+
+
 def _read_json(path, default):
     try:
         return json.loads(path.read_text(encoding="utf-8"))
@@ -150,7 +158,24 @@ def _record_keys(item):
     identity = _url_identity(url)
     if identity:
         keys.add(identity)
+        if identity.startswith("xhs-id:"):
+            keys.add("id:" + identity.split(":", 1)[1])
     return keys
+
+
+def _record_has_media(item):
+    if not isinstance(item, dict):
+        return False
+    location = Path(str(item.get("保存位置") or item.get("save_dir") or "").strip())
+    if not location.is_dir():
+        return False
+    try:
+        return any(
+            file.is_file() and file.suffix.lower() in {".jpg", ".jpeg", ".png", ".webp", ".heic", ".avif", ".mp4", ".mov", ".webm"} and file.stat().st_size > 0
+            for file in location.iterdir()
+        )
+    except OSError:
+        return False
 
 
 def find_downloaded(download_url="", note_id=""):
@@ -236,12 +261,17 @@ def download_claim(download_url):
     """Hold a per-work claim while downloading to prevent cross-app duplicates."""
     identity = _url_identity(download_url) or str(download_url)
     claim_name = hashlib.sha256(identity.encode("utf-8")).hexdigest() + ".lock"
-    claim_path = app_data_dir() / "download_claims" / claim_name
+    claim_path = download_claims_dir() / claim_name
     with _CLAIM_LOCKS_GUARD:
         thread_lock = _CLAIM_LOCKS.setdefault(identity, threading.Lock())
     with thread_lock:
         with _cross_process_lock(claim_path):
-            yield find_downloaded(download_url=download_url)
+            existing = find_downloaded(download_url=download_url)
+            # Older history entries sometimes have no saved path. They cannot
+            # supply assets to a new caller, so let the downloader fetch again.
+            if existing and not _record_has_media(existing):
+                existing = None
+            yield existing
 
 
 def add_history(download_url, note_id, title, save_dir=""):

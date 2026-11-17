@@ -1,7 +1,7 @@
 param(
     [int]$DownloaderPort = 5678,
     [switch]$StartBridge,
-    [int]$BridgePort = 8765
+    [int]$BridgePort = 8766
 )
 
 $ErrorActionPreference = "Stop"

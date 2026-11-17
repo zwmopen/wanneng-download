@@ -1,0 +1,9 @@
+{
+  "paused": true,
+  "paused_at": "2026-11-13T10:53:37+0800",
+  "paused_by": "auto-fail-guard",
+  "consecutive_failures": 4,
+  "last_url": "https://xhslink.cn/o/7CbZPGBvjH7",
+  "reason": "连续 4 次下载失败，自动熔断暂停，防止持续触发平台风控：UNKNOWN_NO_OUTPUT: 下载引擎未产出目录，原因未证实，保留任务并退避重试",
+  "resume": "排查通道后删除本文件即可恢复采集"
+}

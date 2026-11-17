@@ -114,6 +114,8 @@ class LocalCliEngine:
         output_dir = output_dir.resolve()
         output_dir.mkdir(parents=True, exist_ok=True)
         before = self._media_files(output_dir)
+        parent_dir = output_dir.parent
+        before_parent = self._media_files(parent_dir)
         bridge = Path(__file__).resolve().parents[1] / "engine_bridge.py"
         command = [
             str(self.python), str(bridge),
@@ -184,6 +186,20 @@ class LocalCliEngine:
             )
 
         if not selected_files:
+            # 上游 2.9 会清洗 folder_name（例如吞掉前导下划线）并把媒体写到同级目录，
+            # 导致 output_dir 里空空如也、被误判为"未生成素材目录"。
+            # 兜底：按"本次运行期间新增/变化"扫父目录，定位真实落盘目录。
+            after_parent = self._media_files(parent_dir)
+            fresh = [
+                path for path, signature in after_parent.items()
+                if before_parent.get(path) != signature
+            ]
+            if fresh:
+                candidate_dirs = [p.parent for p in fresh]
+                note_dir_guess = max(set(candidate_dirs), key=candidate_dirs.count)
+                selected_files = sorted(p for p in fresh if p.parent == note_dir_guess)
+
+        if not selected_files:
             detail = self._last_useful_line(clean_stdout)
             return NoteResult(
                 url=url,
@@ -207,6 +223,9 @@ class LocalCliEngine:
             note_id=note_id,
             title=title,
             author=author,
+            likes=str(metadata.get("点赞数量") or ""),
+            collections=str(metadata.get("收藏数量") or ""),
+            comments=str(metadata.get("评论数量") or ""),
             note_type="video" if any(p.suffix.lower() in VIDEO_EXTENSIONS for p in selected_files) else "normal",
             save_dir=str(note_dir),
             image_count=len(image_files),
@@ -314,6 +333,16 @@ class LocalCliEngine:
             for line in text.splitlines()
             if line.strip() and not line.strip().startswith(METADATA_MARKER)
         ]
+        # The CLI prints a generic aggregate summary after its per-item error.
+        # Prefer the actual failed item so the bridge/UI can explain the cause.
+        for line in reversed(lines):
+            match = re.search(r"\[(?:FAIL|ERROR)\]\s*\[\d+/\d+\]\s*(.+)$", line, re.I)
+            if match:
+                return match.group(1).strip()[:300]
+        summary = re.compile(r"(?:完成\s*)?(?:成功\s*[:：]?\s*\d+.*失败\s*[:：]?\s*\d+|共处理\s*\d+\s*个作品)", re.I)
+        for line in reversed(lines):
+            if not summary.search(line):
+                return line[:300]
         return lines[-1][:300] if lines else ""
 
     @staticmethod
@@ -323,16 +352,18 @@ class LocalCliEngine:
 
     @staticmethod
     def _write_copy_text(note_dir: Path, result: NoteResult) -> None:
-        topics = " ".join(
-            topic if topic.startswith("#") else "#" + topic
-            for topic in result.topics.split()
-        )
-        content = (
-            f"标题：{result.title}\n\n"
-            f"正文：\n{result.desc or '（正文为空）'}\n\n"
-            f"话题：{topics or '（无话题）'}\n"
-        )
-        (note_dir / "文案.txt").write_text(content, encoding="utf-8-sig")
+        # 严格遵守三大解耦铁律：文案.txt 仅保留纯正文+话题，零人工标签
+        parts = []
+        if result.title:
+            parts.append(result.title.strip())
+        if result.desc and result.desc.strip() != (result.title or '').strip():
+            parts.append(result.desc.strip())
+        if result.topics:
+            t_str = ' '.join(t if t.startswith('#') else '#' + t for t in result.topics.split() if t)
+            if t_str:
+                parts.append(t_str)
+        content = '\n\n'.join(parts) + '\n' if parts else '（正文为空）\n'
+        (note_dir / '文案.txt').write_text(content, encoding='utf-8-sig')
 
 
 class XhsV2Downloader:

@@ -312,20 +312,33 @@ def _resolve_dir(cfg_path: str, default_name: str) -> Path:
         if not p.is_absolute():
             p = (SKILL_ROOT / p).resolve()
         return p
-    native_cand = Path(r"D:\AICode\项目推进\projects\江湖有旅人\主项目\01-素材库")
+    native_cand = Path(r"D:\江湖有旅人\03-生产车间\01-原料库\02-图文原料\团建图文")
     if native_cand.exists():
         return native_cand if not default_name else (native_cand / default_name)
     fallback_cand = Path.home() / "Downloads" / "MaterialHub" / "素材库"
     return fallback_cand if not default_name else (fallback_cand / default_name)
 
+def _find_shelf_dir(base: Path, standard_name: str, legacy_name: str) -> Path:
+    for cand in [base / standard_name, base / legacy_name]:
+        if cand.exists():
+            return cand
+    prefix = standard_name.split("（")[0]
+    if base.exists():
+        for child in base.iterdir():
+            if child.is_dir() and prefix in child.name:
+                return child
+    return base / standard_name
+
 BASE_MATERIAL_DIR = _resolve_dir(storage_cfg.get("material_root_dir"), "")
 PRECISION_DIR = _resolve_dir(storage_cfg.get("precision_dir"), "精准流量") if storage_cfg.get("precision_dir") else (BASE_MATERIAL_DIR / "精准流量")
 PAN_TRAFFIC_DIR = _resolve_dir(storage_cfg.get("pan_traffic_dir"), "泛流量") if storage_cfg.get("pan_traffic_dir") else (BASE_MATERIAL_DIR / "泛流量")
-SPRING_DIR = BASE_MATERIAL_DIR / "春季（3—5月·智能分类）"
-SUMMER_DIR = BASE_MATERIAL_DIR / "夏季（6—8月·智能分类）"
-AUTUMN_DIR = _resolve_dir(storage_cfg.get("autumn_dir"), "秋季（9—11月·智能分类）") if storage_cfg.get("autumn_dir") else (BASE_MATERIAL_DIR / "秋季（9—11月·智能分类）")
-WINTER_DIR = BASE_MATERIAL_DIR / "冬季（12—2月·智能分类）"
-ALL_SEASON_DIR = _resolve_dir(storage_cfg.get("all_season_dir"), "四季通用（全年·无季节限制）") if storage_cfg.get("all_season_dir") else (BASE_MATERIAL_DIR / "四季通用（全年·无季节限制）")
+AUTUMN_DIR = Path(storage_cfg.get("autumn_dir")) if storage_cfg.get("autumn_dir") else _find_shelf_dir(BASE_MATERIAL_DIR, "01-秋季专区（9—11月·时令团建）", "秋季（9—11月·智能分类）")
+WINTER_DIR = Path(storage_cfg.get("winter_dir")) if storage_cfg.get("winter_dir") else _find_shelf_dir(BASE_MATERIAL_DIR, "02-冬季专区（12—2月·温泉滑雪年会）", "冬季（12—2月·智能分类）")
+SPRING_DIR = Path(storage_cfg.get("spring_dir")) if storage_cfg.get("spring_dir") else _find_shelf_dir(BASE_MATERIAL_DIR, "03-春季专区（3—5月·踏青赏花）", "春季（3—5月·智能分类）")
+SUMMER_DIR = Path(storage_cfg.get("summer_dir")) if storage_cfg.get("summer_dir") else _find_shelf_dir(BASE_MATERIAL_DIR, "04-夏季专区（6—8月·溯溪漂流避暑）", "夏季（6—8月·智能分类）")
+ALL_SEASON_DIR = Path(storage_cfg.get("all_season_dir")) if storage_cfg.get("all_season_dir") else _find_shelf_dir(BASE_MATERIAL_DIR, "05-四季通用（全年·常规轰趴团建）", "四季通用（全年·无季节限制）")
+THEME_DIR = Path(storage_cfg.get("theme_dir")) if storage_cfg.get("theme_dir") else _find_shelf_dir(BASE_MATERIAL_DIR, "06-主题合集（特色玩法·垂直专题）", "主题合集")
+STAGING_CHANNEL_DIR = Path(storage_cfg.get("collection_staging_dir")) if storage_cfg.get("collection_staging_dir") else (BASE_MATERIAL_DIR / "_采集仓库" / "03-小红书采集器")
 
 temp_cfg = storage_cfg.get("temp_download_dir")
 if temp_cfg:
@@ -336,7 +349,7 @@ elif Path(r"D:\AICode\运行数据\临时文件\xhs_clipboard_staging").parent.e
 else:
     TEMP_DOWNLOAD_DIR = DATA_DIR / "temp_staging"
 
-C_DOWNLOADS_DIR = Path(storage_cfg.get("unclassified_downloads_dir", str(Path.home() / "Downloads")))
+C_DOWNLOADS_DIR = Path(storage_cfg.get("unclassified_downloads_dir", r"D:\江湖有旅人\03-生产车间\01-原料库\00-待识别"))
 
 # 项目级关键词路由 (优先级高于城市/季节分流；关键词与落点均可在 config.json 的 project_routing 中随时增删)
 _doubao_route = project_routing_cfg.get("doubao_pullnew", {})
@@ -348,7 +361,7 @@ NOTIFY_UNCLASSIFIED_FEISHU = bool(project_routing_cfg.get("notify_unclassified_f
 
 # 对标账号清单
 SECOND_BRAIN_BENCHMARK_FILE = Path(bm_cfg.get("second_brain_benchmark_file", r"D:\SecondBrain\zwm-second-brain\03-项目\01-团建项目—江湖有旅人\对标账号与样板观察清单.md"))
-PROJECT_BENCHMARK_FILE = Path(bm_cfg.get("project_benchmark_file", r"D:\AICode\项目推进\projects\江湖有旅人\主项目\05-知识库\06-数据与复盘\复盘文件\素材库归档文档\对标账号完整清单.md"))
+PROJECT_BENCHMARK_FILE = Path(bm_cfg.get("project_benchmark_file", r"D:\江湖有旅人\02-知识库\业务知识与产品说明\项目知识\06-数据与复盘\复盘文件\素材库归档文档\对标账号完整清单.md"))
 BENCHMARK_FILE = PROJECT_BENCHMARK_FILE if PROJECT_BENCHMARK_FILE.exists() else SECOND_BRAIN_BENCHMARK_FILE
 
 # 风控与冷却配置
@@ -781,25 +794,25 @@ def detect_traffic_and_category(title: str, content: str) -> tuple[str, str]:
 
 SEASON_RULES = {
     '春季': {
-        'folder': '春季（3—5月·智能分类）',
+        'folder': SPRING_DIR.name,
         'dir_obj': SPRING_DIR,
         'words': ['春季', '春天', '春日', '春游', '踏青', '赏花', '采茶', '新茶', '明前茶', '春茶', '挖笋', '采笋', '春笋', '青团', '放风筝', '清明', '五一', '早春', '海棠', '杜鹃', '郁金香', '油菜花', '樱花', '桃花', '梨花'],
         'months': ['3月', '4月', '5月', '三月', '四月', '五月']
     },
     '夏季': {
-        'folder': '夏季（6—8月·智能分类）',
+        'folder': SUMMER_DIR.name,
         'dir_obj': SUMMER_DIR,
         'words': ['夏季', '夏天', '夏日', '夏游', '避暑', '漂流', '溯溪', '玩水', '水上乐园', '杨梅', '采杨梅', '西瓜', '桨板', '皮划艇', '赶海', '海岛', '瀑布', '纳凉', '夜市', '夜游', '萤火虫', '端午', '暑假', '梅雨', '入梅', '出梅'],
         'months': ['6月', '7月', '8月', '六月', '七月', '八月']
     },
     '秋季': {
-        'folder': '秋季（9—11月·智能分类）',
+        'folder': AUTUMN_DIR.name,
         'dir_obj': AUTUMN_DIR,
         'words': ['秋季', '秋天', '秋日', '秋游', '赏秋', '大闸蟹', '吃蟹', '品蟹', '太湖蟹', '开捕', '开渔', '桂花', '桂花龙井', '板栗', '柿子', '枫叶', '红枫', '银杏', '稻田', '割稻', '秋收', '丰收', '晒秋', '芦苇', '粉黛乱子草', '重阳', '登高', '赏菊', '菊花', '秋意', '秋色', '中秋', '国庆'],
         'months': ['9月', '10月', '11月', '九月', '十月', '十一月']
     },
     '冬季': {
-        'folder': '冬季（12—2月·智能分类）',
+        'folder': WINTER_DIR.name,
         'dir_obj': WINTER_DIR,
         'words': ['冬季', '冬天', '冬日', '冬游', '滑雪', '赏雪', '冰雪', '圣诞', '春节', '过年', '年会', '温泉', '泡汤', '私汤', '围炉煮茶', '杀年猪', '刨猪汤', '烤全羊', '跨年', '元旦', '尾牙', '雾凇', '年终总结'],
         'months': ['12月', '1月', '2月', '十二月', '一月', '二月']
@@ -820,6 +833,71 @@ def detect_season_matches(title: str, content: str) -> list[str]:
     max_score = max(scores.values())
     matched = [s for s, sc in scores.items() if not (max_score > sc * 2)]
     return matched if matched else ["四季通用"]
+
+
+# ---- 主题合集智能识别规则 (直通 06-主题合集，NTFS 0 空间硬链接) ----
+THEME_RULES = [
+    {
+        "name": "01-♨️全域精选·秋冬私汤与真温泉专区",
+        "keywords": ["温泉", "私汤", "泡汤", "汤池", "温泉民宿", "温泉酒店", "真温泉", "私汤温泉", "私汤民宿"]
+    },
+    {
+        "name": "02-🏡江浙沪包栋轰趴与山野小院专区",
+        "keywords": ["包栋", "小院", "独栋", "包栋小院", "轰趴馆", "独栋轰趴", "包院", "农庄包栋", "独栋小院"]
+    },
+    {
+        "name": "03-🏊夏日泳池·溯溪玩水度假美宿",
+        "keywords": ["泳池", "无边泳池", "恒温泳池", "玩水", "溯溪", "漂流", "溯溪玩水", "夏日避暑"]
+    },
+    {
+        "name": "04-🍁秋日银杏·红枫徒步与品蟹专区",
+        "keywords": ["银杏", "红枫", "赏秋", "品蟹", "大闸蟹", "阳澄湖蟹", "蟹宴", "秋日银杏", "赏枫"]
+    },
+    {
+        "name": "05-📸个人精选攻略与C端种草专区",
+        "keywords": ["个人精选", "拍照出片", "打卡机位", "机位分享", "C端种草", "拍照打卡"]
+    },
+    {
+        "name": "06-🎉节假日与特色节庆专区",
+        "keywords": ["中秋", "国庆", "五一", "元旦", "跨年", "端午", "清明", "春节", "节庆", "节日团建"]
+    },
+    {
+        "name": "07-🎮破冰互动与团建小游戏专区",
+        "keywords": ["破冰", "小游戏", "团建游戏", "互动游戏", "桌游", "热身游戏", "室内游戏", "户外游戏", "破冰小游戏"]
+    },
+    {
+        "name": "08-🏨核心目的地精品民宿专辑",
+        "keywords": ["精品民宿", "宝藏民宿", "设计师民宿", "野奢民宿", "高端民宿", "美宿专辑"]
+    },
+    {
+        "name": "09-🗺️全景大盘地图与跨城合集攻略",
+        "keywords": ["路线地图", "全景攻略", "地图攻略", "路线图", "出行大盘", "攻略地图"]
+    },
+    {
+        "name": "10-🗺️江浙沪大合集",
+        "keywords": [
+            "江浙沪大合集", "江浙沪合集", "江浙沪方案", "团建方案", "两天一夜方案", "2天1夜方案",
+            "方案合集", "HR抄作业", "大厂同款", "短途游大合集", "神仙目的地合集", "徒步路线合集",
+            "场地合集", "团建大合集"
+        ]
+    },
+    {
+        "name": "11-🍳胡闹厨房趣味烹饪主题专区",
+        "keywords": ["胡闹厨房", "现实版胡闹厨房", "真人胡闹厨房", "烹饪团建", "做饭团建", "厨房团建", "全员厨神"]
+    }
+]
+
+def detect_theme_matches(title: str, content: str) -> list:
+    """返回匹配的主题专区列表（若命中多个则全部返回）"""
+    text = f"{title} {content}".lower()
+    matched = []
+    for rule in THEME_RULES:
+        for kw in rule["keywords"]:
+            if kw.lower() in text:
+                matched.append(rule["name"])
+                break
+    return matched
+
 
 def extract_title_hint(raw_text: str) -> str:
     """从分享口令文本中提取有意义的笔记标题提示（兼容小红书与抖音图文）"""
@@ -1525,16 +1603,18 @@ def execute_download_and_file(target_url: str) -> tuple[bool, str, dict]:
             is_unclassified = (traffic_type == "未分类")
 
             if is_unclassified:
-                # 用户明确要求：无法判断分类时，下载到 C 盘下载文件夹 (C:\Users\z\Downloads) 并飞书通知待人工定夺
                 city_dest_dir = C_DOWNLOADS_DIR
                 target_city = "未分类(暂存C盘下载)"
                 final_target_dir = city_dest_dir / folder_name
             else:
                 target_city = target_category
-                if traffic_type == "泛流量":
-                    city_dest_dir = PAN_TRAFFIC_DIR / target_category
+                # 优先直落新版标准专区城市货架 (如 ALL_SEASON_DIR / target_category)
+                if (ALL_SEASON_DIR / target_category).exists() or not (ALL_SEASON_DIR / "精准流量").exists():
+                    city_dest_dir = ALL_SEASON_DIR / target_category
+                elif traffic_type == "泛流量":
+                    city_dest_dir = (ALL_SEASON_DIR / "泛流量" / target_category) if (ALL_SEASON_DIR / "泛流量").exists() else (PAN_TRAFFIC_DIR / target_category)
                 else:
-                    city_dest_dir = PRECISION_DIR / target_category
+                    city_dest_dir = (ALL_SEASON_DIR / "精准流量" / target_category) if (ALL_SEASON_DIR / "精准流量").exists() else (PRECISION_DIR / target_category)
                 final_target_dir = city_dest_dir / folder_name
 
     city_dest_dir.mkdir(parents=True, exist_ok=True)
@@ -1571,8 +1651,13 @@ def execute_download_and_file(target_url: str) -> tuple[bool, str, dict]:
                     s_base = SEASON_RULES[s]['dir_obj']
                 else:
                     s_base = ALL_SEASON_DIR
-                # 严格按照 [季节]/[流量类型]/[城市或大盘]/[帖子包] 规范层级构建硬链接
-                s_target_dir = s_base / traffic_type / target_category / folder_name
+                # 优先构建新版扁平标准层级 [季节专区]/[城市或大盘]/[帖子包]
+                if (s_base / target_category).exists() or not (s_base / "精准流量").exists():
+                    s_target_dir = s_base / target_category / folder_name
+                elif traffic_type == "泛流量":
+                    s_target_dir = s_base / "泛流量" / target_category / folder_name
+                else:
+                    s_target_dir = s_base / "精准流量" / target_category / folder_name
                 season_work_dirs.append((s, s_target_dir))
     elif project_routed:
         matched_seasons = ["项目路由"]
@@ -1674,6 +1759,47 @@ def execute_download_and_file(target_url: str) -> tuple[bool, str, dict]:
 
     # The downloader first records its staging directory. Replace it with the
     # final organized folder so the shared history points at the files users see.
+    
+    # 主题合集智能识别与 NTFS 原生硬链接分发 (特色玩法直通 06-主题合集，0 空间占用)
+    matched_themes = detect_theme_matches(title_text, content_text)
+    theme_work_dirs = []
+    if not is_unclassified and matched_themes and THEME_DIR.exists():
+        for t_name in matched_themes:
+            t_base = THEME_DIR / t_name
+            if not t_base.exists():
+                continue
+            if (t_base / target_category).exists() and (t_base / target_category).is_dir():
+                t_dest_dir = t_base / target_category / folder_name
+            else:
+                t_dest_dir = t_base / folder_name
+            
+            try:
+                t_dest_dir.mkdir(parents=True, exist_ok=True)
+                for src_file in final_target_dir.iterdir():
+                    if src_file.is_file():
+                        dest_file = t_dest_dir / src_file.name
+                        if not dest_file.exists():
+                            try:
+                                os.link(src_file, dest_file)
+                            except Exception:
+                                try:
+                                    shutil.copy2(src_file, dest_file)
+                                except Exception:
+                                    pass
+                theme_work_dirs.append(str(t_dest_dir))
+                log_daemon(f"🔗 主题专区硬链接建立成功 ({t_name}): {t_dest_dir}")
+            except Exception as ex_t:
+                log_daemon(f"❌ 建立主题专区硬链接异常 ({t_name}): {ex_t}")
+        
+        # 实时回写元数据
+        if theme_work_dirs:
+            try:
+                metadata["theme_hardlink_dirs"] = theme_work_dirs
+                metadata["matched_themes"] = matched_themes
+                (final_target_dir / "metadata.json").write_text(json.dumps(metadata, ensure_ascii=False, indent=2), encoding="utf-8")
+            except Exception:
+                pass
+
     if update_history_location is not None:
         try:
             existing = find_downloaded(download_url=target_url) if find_downloaded else None
@@ -1938,9 +2064,12 @@ def queue_worker_loop(queue_mgr: QueueManager, history_set: set):
 
                 if curr_retries >= MAX_RETRIES:
                     short_hint = title_hint[:20] + ("..." if len(title_hint) > 20 else "")
-                    err_notify = f"❌ 连续多次网络异常，已移入异常待查：《{short_hint}》\n⚠️ 原因: {result_msg[:40]}"
-                    send_desktop_notification(err_notify, title="采集异常挂起", status="error")
-                    send_feishu_error_sync(title_hint, url, f"连续多次重试失败（网络或限制）: {result_msg[:40]}")
+                    err_notify = f"❌ 连续多次重试失败，已移入异常待查：《{short_hint}》\n⚠️ 原因: {result_msg[:40]}"
+                    send_desktop_notification(err_notify, title="已移入异常队列", status="error")
+                    send_feishu_error_sync(title_hint, url, f"重试耗尽移入异常: {result_msg[:40]}")
+                    # 该单篇任务已彻底移入 failed 队列，重置连续失败计数，避免单篇死锁阻断后续队列
+                    reset_download_failure_streak()
+                    continue
                 else:
                     short_hint = title_hint[:20] + ("..." if len(title_hint) > 20 else "")
                     cd_notify = (

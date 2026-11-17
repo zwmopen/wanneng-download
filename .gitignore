@@ -15,7 +15,14 @@ clipboard_pending_queue.json
 collector_heartbeat.json
 collector_bridge_jobs.json
 bridge_staging/
+runtime/download_claims/
 WebDriverAgentRunner*
 *.ipa
 *.tmp
 *.vbs
+
+collector_*.json
+*.bak*
+
+config/
+config.json

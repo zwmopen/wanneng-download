@@ -1,0 +1,9 @@
+{
+  "paused": true,
+  "paused_at": "2026-11-12T15:23:36+0800",
+  "paused_by": "auto-fail-guard",
+  "consecutive_failures": 3,
+  "last_url": "https://xhslink.cn/o/7CiRSCJlTSj",
+  "reason": "连续 3 次下载失败，自动熔断暂停，防止持续触发平台风控：未生成素材目录 (可能触发超过 15 张前置熔断拦截或页面验证受限)",
+  "resume": "排查通道后删除本文件即可恢复采集"
+}

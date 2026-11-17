@@ -12,7 +12,14 @@ MARKER = "__XHS_DL_METADATA__"
 
 async def run(url, work_path, folder_name, max_images=15):
     sys.path.insert(0, os.getcwd())
-    from source import XHS
+    from source import Settings, XHS
+
+    # 仅使用 XHS-Downloader 自己的本地设置；不读取浏览器配置，也不回显 Cookie。
+    saved_settings = Settings()
+    try:
+        cookie = str(saved_settings.read().get("cookie") or "") if saved_settings.path.is_file() else ""
+    except Exception:
+        cookie = ""
 
     async with XHS(
         work_path=work_path,
@@ -23,10 +30,11 @@ async def run(url, work_path, folder_name, max_images=15):
         download_record=False,
         author_archive=False,
         language="zh_CN",
+        cookie=cookie,
     ) as client:
         # 前置熔断预检：若配置了 max_images，先仅提取元数据 (download=False) 校验图片总数
         if max_images and max_images > 0:
-            preview_items = await client.extract(url, download=False, data=True)
+            preview_items = await client.extract(url, download=False)
             if preview_items:
                 preview = preview_items[0]
                 img_urls = preview.get("下载地址", [])
@@ -43,7 +51,7 @@ async def run(url, work_path, folder_name, max_images=15):
                     print(MARKER + json.dumps(preview, ensure_ascii=False, default=str))
                     return
 
-        items = await client.extract(url, download=True, data=True)
+        items = await client.extract(url, download=True)
     payload = items[0] if items else {}
     print(MARKER + json.dumps(payload, ensure_ascii=False, default=str))
 

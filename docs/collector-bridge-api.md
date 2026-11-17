@@ -1,6 +1,6 @@
 # 万能采集器桥接 API
 
-`collector_bridge_api.py` 是兼容层，给需要采集队列和回执的本机其他 AI 使用。它调用现有万能下载器和剪切板采集归档逻辑，不读取 Cookie，不上传远端解析站。默认只绑定 `127.0.0.1`；日常下载不需要启动它。
+`collector_bridge_api.py` 是兼容层，给需要采集队列和回执的本机其他 AI 使用。普通任务调用剪切板采集归档逻辑；模板库任务用隔离下载引擎落盘到桥接器暂存区，绕过通用素材分流。XHS 引擎只读取 XHS-Downloader 本地设置中已保存的 Cookie，不读取浏览器 Cookie，也不上传远端解析站。默认只绑定 `127.0.0.1`；日常下载不需要启动它。
 
 ## 启动
 
@@ -10,11 +10,11 @@
 python .\collector_bridge_api.py
 ```
 
-默认地址为 `http://127.0.0.1:8765`。如需让同一局域网内的另一个进程访问，必须明确传入 `--host`；默认不暴露到局域网。
+默认地址为 `http://127.0.0.1:8766`。如需让同一局域网内的另一个进程访问，必须明确传入 `--host`；默认不暴露到局域网。8765 由江湖团建转化助手使用，采集桥使用独立的 8766，避免互相抢占端口。
 
-启动后可打开 `http://127.0.0.1:8765/`，在兼容控制台里提交任务、查看队列/暂停原因、轮询任务进度，并点击已落盘的图片或视频。
+启动后可打开 `http://127.0.0.1:8766/`，在兼容控制台里提交任务、查看队列/暂停原因、轮询任务进度，并点击已落盘的图片或视频。
 
-日常使用的原版万能下载器 Web 和 API 在 `http://127.0.0.1:5678/`。5678 页面已经包含等待任务、正在进行、排队任务、历史下载和“保持原格式”设置。统一启动脚本默认只启动 5678；只有显式传入 `-StartBridge` 才会额外启动 8765。
+日常使用的原版万能下载器 Web 和 API 在 `http://127.0.0.1:5678/`。5678 页面已经包含等待任务、正在进行、排队任务、历史下载和“保持原格式”设置。统一启动脚本默认只启动 5678；只有显式传入 `-StartBridge` 才会额外启动 8766。
 
 ## 入口关系
 
@@ -22,10 +22,10 @@ python .\collector_bridge_api.py
 5678 原版 Web + API ──> xhs_dl 统一下载引擎 ─> 本地文件
 
 剪切板守护（可选） ────┘
-8765 兼容桥（可选） ────┘
+8766 兼容桥（可选） ────┘
 ```
 
-因此“万能采集器”不是日常必需品。用户只需要 5678；剪切板守护和 8765 只是需要时调用同一个下载引擎的可选入口。
+因此“万能采集器”不是日常必需品。用户只需要 5678；剪切板守护和 8766 只是需要时调用同一个下载引擎的可选入口。
 
 控制台的图片格式默认是“保持原格式”；顶部四个指标卡可以点击，分别展开队列、历史记录、任务表和运行状态。
 
@@ -34,9 +34,9 @@ python .\collector_bridge_api.py
 ## 能力与状态
 
 ```powershell
-curl.exe http://127.0.0.1:8765/api/v1/capabilities
-curl.exe http://127.0.0.1:8765/api/v1/status
-curl.exe http://127.0.0.1:8765/api/v1/jobs
+curl.exe http://127.0.0.1:8766/api/v1/capabilities
+curl.exe http://127.0.0.1:8766/api/v1/status
+curl.exe http://127.0.0.1:8766/api/v1/jobs
 ```
 
 能力声明会标明：
@@ -59,20 +59,20 @@ $body = @{
   options = @{ dry_run = $false; image_format = 'keep' }
 } | ConvertTo-Json -Depth 5
 
-curl.exe -X POST http://127.0.0.1:8765/api/v1/jobs `
+curl.exe -X POST http://127.0.0.1:8766/api/v1/jobs `
   -H 'Content-Type: application/json; charset=utf-8' -d $body
 ```
 
 响应会带 `message_id`、`conversation_id`、`task_id` 和 `job_id`。`202` 只表示已经接收并入队，必须继续轮询：
 
 ```powershell
-curl.exe http://127.0.0.1:8765/api/v1/jobs/<job_id>
+curl.exe http://127.0.0.1:8766/api/v1/jobs/<job_id>
 ```
 
 最终任务会报告每条链接的 `status`、`success`、`error`、`retryable`、`metadata` 和 `assets`。`assets` 里的 `download_url` 指向已核实存在的本地文件：
 
 ```powershell
-curl.exe -o .\result.jpg http://127.0.0.1:8765/api/v1/jobs/<job_id>/files/0
+curl.exe -o .\result.jpg http://127.0.0.1:8766/api/v1/jobs/<job_id>/files/0
 ```
 
 也可以使用 `POST /api/v1/parse`，它与 `/api/v1/jobs` 相同。
