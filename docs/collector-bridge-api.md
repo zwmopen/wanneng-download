@@ -4,9 +4,10 @@
 
 ## 启动
 
-在仓库目录运行：
+在仓库目录运行。先显式指定项目共享配置，避免直接从仓库启动时回落到旧的本地 jobs/staging 根：
 
 ```powershell
+$env:MATERIAL_HUB_CONFIG = 'D:\AICode\AI\skills\技能包\技能\universal-clipboard-collector\config\config.json'
 python .\collector_bridge_api.py
 ```
 
