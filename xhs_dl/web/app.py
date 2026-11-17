@@ -889,6 +889,14 @@ def _set_collector_enabled(enabled):
     started = False
     if enabled:
         if paused:
+            try:
+                pause_state = json.loads(pause_file.read_text(encoding="utf-8"))
+            except (OSError, ValueError, TypeError) as exc:
+                raise OSError(f"暂停锁无法读取，拒绝恢复采集：{exc}") from exc
+            if not isinstance(pause_state, dict):
+                raise OSError("暂停锁格式无效，拒绝恢复采集")
+            if pause_state.get("paused") is True and pause_state.get("paused_by") == "codex-migration-gate":
+                raise PermissionError("项目迁移维护暂停期间，不能从界面恢复剪贴板采集")
             pause_file.unlink()
         started = _start_collector_if_stopped()
     else:

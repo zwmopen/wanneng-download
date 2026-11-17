@@ -9,14 +9,22 @@ echo =======================================================
 import os, sys, time, subprocess, psutil, json
 from pathlib import Path
 
-print('1. 正在清理旧采集器、旧看门狗并拔除残留暂停锁...')
+print('1. 正在检查暂停锁并准备采集器重启...')
 pause_file = Path(r'D:\AICode\运行数据\应用状态\后台服务控制\clipboard-collector.paused')
 if pause_file.exists():
     try:
-        pause_file.unlink()
-        print('   ✔ 已拔除安全暂停锁')
+        pause_state = json.loads(pause_file.read_text(encoding='utf-8'))
     except Exception as e:
-        print(f'   ⚠️ 拔除暂停锁提示: {e}')
+        print(f'   ⛔ 无法读取暂停锁，为避免误启动，本次不重启: {e}')
+        sys.exit(2)
+    if pause_state.get('paused') is True and pause_state.get('paused_by') == 'codex-migration-gate':
+        print('   ⛔ 检测到项目迁移维护暂停锁；本次拒绝解除暂停或启动采集器。')
+        sys.exit(3)
+    try:
+        pause_file.unlink()
+        print('   ✔ 已清除普通暂停锁')
+    except Exception as e:
+        print(f'   ⚠️ 清除暂停锁提示: {e}')
 
 for p in psutil.process_iter(['pid', 'name', 'cmdline']):
     try:

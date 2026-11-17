@@ -1,5 +1,9 @@
 # 变更记录
 
+## [Unreleased collector pause safety] - 2026-11-18
+
+- The manual clipboard restart script and downloader UI now refuse to clear the exact `codex-migration-gate` pause marker; both fail closed if the marker cannot be read. Ordinary pause markers retain the existing recovery flow.
+
 ## [Unreleased downloader collection workspace] - 2026-11-15
 
 - Added sidebar tabs for single-work downloading, Douyin homepage discovery, and Douyin keyword discovery in the existing 5678 UI.
