@@ -27,6 +27,14 @@ import subprocess
 import traceback
 import importlib.util
 from pathlib import Path
+
+try:
+    from collector_paths import resolve_paths
+except ImportError:  # pragma: no cover - launcher may import from another cwd
+    _collector_code_root = Path(__file__).resolve().parent
+    if str(_collector_code_root) not in sys.path:
+        sys.path.insert(0, str(_collector_code_root))
+    from collector_paths import resolve_paths
 import ctypes
 from ctypes import wintypes
 
@@ -90,26 +98,20 @@ filter_cfg = LOADED_CONFIG.get("filter_rules", {})
 project_routing_cfg = LOADED_CONFIG.get("project_routing", {})
 MAX_IMAGE_ALLOWED = int(filter_cfg.get("max_images_allowed", 15))
 
-# 运行时数据与日志目录 (自适应解耦：优先 config -> 宿主历史兼容路径 -> 本地 data 目录)
-configured_data_dir = storage_cfg.get("data_dir")
-if configured_data_dir:
-    DATA_DIR = Path(configured_data_dir)
-elif Path(r"D:\AICode\工具开发\projects\xhs-dl").exists() and (Path(r"D:\AICode\工具开发\projects\xhs-dl") / "clipboard_history.json").exists():
-    DATA_DIR = Path(r"D:\AICode\工具开发\projects\xhs-dl")
-else:
-    DATA_DIR = SKILL_ROOT / "data"
-
+# 运行时数据与日志目录（预演：代码仓库与运行数据分离；不自动搬移旧数据）
+PATHS = resolve_paths(
+    config=LOADED_CONFIG,
+    code_root=SCRIPT_DIR,
+    config_dir=CONFIG_FILE.parent if CONFIG_FILE else None,
+)
+DATA_DIR = PATHS.data_dir
 try:
     DATA_DIR.mkdir(parents=True, exist_ok=True)
 except Exception:
     DATA_DIR = Path.home() / ".material_hub"
     DATA_DIR.mkdir(parents=True, exist_ok=True)
-
 PROJECT_ROOT = DATA_DIR
-_workspace_root = next((p for p in SKILL_ROOT.parents if (p / 'routes.json').is_file()), None)
-PAUSE_FILE = Path(os.environ.get('COLLECTOR_PAUSE_FILE') or
-                  ((_workspace_root / '运行数据' / '应用状态' / '后台服务控制' / 'clipboard-collector.paused')
-                   if _workspace_root else (DATA_DIR / 'clipboard-collector.paused')))
+PAUSE_FILE = PATHS.pause_file
 
 def collection_paused():
     """Fail closed; startup paths and both producer/consumer honor user intent."""
@@ -329,7 +331,7 @@ def _find_shelf_dir(base: Path, standard_name: str, legacy_name: str) -> Path:
                 return child
     return base / standard_name
 
-BASE_MATERIAL_DIR = _resolve_dir(storage_cfg.get("material_root_dir"), "")
+BASE_MATERIAL_DIR = PATHS.material_root_dir
 PRECISION_DIR = _resolve_dir(storage_cfg.get("precision_dir"), "精准流量") if storage_cfg.get("precision_dir") else (BASE_MATERIAL_DIR / "精准流量")
 PAN_TRAFFIC_DIR = _resolve_dir(storage_cfg.get("pan_traffic_dir"), "泛流量") if storage_cfg.get("pan_traffic_dir") else (BASE_MATERIAL_DIR / "泛流量")
 AUTUMN_DIR = Path(storage_cfg.get("autumn_dir")) if storage_cfg.get("autumn_dir") else _find_shelf_dir(BASE_MATERIAL_DIR, "01-秋季专区（9—11月·时令团建）", "秋季（9—11月·智能分类）")
@@ -340,16 +342,9 @@ ALL_SEASON_DIR = Path(storage_cfg.get("all_season_dir")) if storage_cfg.get("all
 THEME_DIR = Path(storage_cfg.get("theme_dir")) if storage_cfg.get("theme_dir") else _find_shelf_dir(BASE_MATERIAL_DIR, "06-主题合集（特色玩法·垂直专题）", "主题合集")
 STAGING_CHANNEL_DIR = Path(storage_cfg.get("collection_staging_dir")) if storage_cfg.get("collection_staging_dir") else (BASE_MATERIAL_DIR / "_采集仓库" / "03-小红书采集器")
 
-temp_cfg = storage_cfg.get("temp_download_dir")
-if temp_cfg:
-    p = Path(temp_cfg)
-    TEMP_DOWNLOAD_DIR = (SKILL_ROOT / p).resolve() if not p.is_absolute() else p
-elif Path(r"D:\AICode\运行数据\临时文件\xhs_clipboard_staging").parent.exists():
-    TEMP_DOWNLOAD_DIR = Path(r"D:\AICode\运行数据\临时文件\xhs_clipboard_staging")
-else:
-    TEMP_DOWNLOAD_DIR = DATA_DIR / "temp_staging"
-
-C_DOWNLOADS_DIR = Path(storage_cfg.get("unclassified_downloads_dir", r"D:\江湖有旅人\03-生产车间\01-原料库\00-待识别"))
+# 下载器临时目录仍由配置控制；预演默认指向项目运行数据，不触碰旧暂存目录。
+TEMP_DOWNLOAD_DIR = PATHS.temp_download_dir
+C_DOWNLOADS_DIR = PATHS.unclassified_dir
 
 # 项目级关键词路由 (优先级高于城市/季节分流；关键词与落点均可在 config.json 的 project_routing 中随时增删)
 _doubao_route = project_routing_cfg.get("doubao_pullnew", {})

@@ -25,6 +25,7 @@ import mimetypes
 import os
 import queue
 import re
+import sys
 import threading
 import uuid
 from datetime import datetime, timezone
@@ -33,10 +34,16 @@ from pathlib import Path
 from typing import Any, Iterable
 from urllib.parse import parse_qsl, quote, urlencode, urlsplit, urlunsplit
 
+try:
+    from collector_paths import resolve_paths
+except ImportError:  # pragma: no cover - launcher may import from another cwd
+    _collector_code_root = Path(__file__).resolve().parent
+    if str(_collector_code_root) not in sys.path:
+        sys.path.insert(0, str(_collector_code_root))
+    from collector_paths import resolve_paths
+
 
 PROJECT_ROOT = Path(__file__).resolve().parent
-JOBS_FILE = PROJECT_ROOT / "collector_bridge_jobs.json"
-BRIDGE_STAGING_DIR = PROJECT_ROOT / "bridge_staging"
 UI_FILE = PROJECT_ROOT / "collector_bridge_ui.html"
 DOC_FILE = PROJECT_ROOT / "docs" / "collector-bridge-api.md"
 PROTOCOL = "collector-bridge/1"
@@ -61,6 +68,18 @@ except Exception as exc:  # pragma: no cover - reported through capabilities/sta
     _COLLECTOR_IMPORT_ERROR = str(exc)
 else:
     _COLLECTOR_IMPORT_ERROR = ""
+
+_bridge_config = getattr(_collector, "LOADED_CONFIG", {}) if _collector is not None else {}
+_bridge_config_file = getattr(_collector, "CONFIG_FILE", None) if _collector is not None else None
+BRIDGE_PATHS = resolve_paths(
+    config=_bridge_config,
+    code_root=PROJECT_ROOT,
+    config_dir=_bridge_config_file.parent if _bridge_config_file else None,
+)
+JOBS_FILE = BRIDGE_PATHS.bridge_jobs_file
+BRIDGE_STAGING_DIR = BRIDGE_PATHS.bridge_staging_dir
+LEGACY_JOBS_FILE = BRIDGE_PATHS.legacy_bridge_jobs_file
+LEGACY_BRIDGE_STAGING_DIR = BRIDGE_PATHS.legacy_bridge_staging_dir
 
 try:
     from xhs_dl.core.downloader import extract_urls_from_text
@@ -140,7 +159,10 @@ def _persist_jobs_locked() -> None:
 
 
 def _load_jobs() -> None:
-    data = _read_json_file(JOBS_FILE, {})
+    # Read the active ledger first; while a cutover is pending, read the old
+    # ledger only as a compatibility source. New writes always use JOBS_FILE.
+    source = JOBS_FILE if JOBS_FILE.exists() else LEGACY_JOBS_FILE
+    data = _read_json_file(source, {})
     loaded = data.get("jobs", []) if isinstance(data, dict) else []
     if not isinstance(loaded, list):
         return
@@ -162,6 +184,8 @@ def _collector_paths() -> list[Path]:
     # configured material/download roots and this bridge's staging directory
     # are eligible for file reads.
     paths: list[Path] = [BRIDGE_STAGING_DIR]
+    if LEGACY_BRIDGE_STAGING_DIR != BRIDGE_STAGING_DIR:
+        paths.append(LEGACY_BRIDGE_STAGING_DIR)
     if _collector is not None:
         for name in ("BASE_MATERIAL_DIR", "DATA_DIR", "C_DOWNLOADS_DIR", "TEMP_DOWNLOAD_DIR"):
             value = getattr(_collector, name, None)

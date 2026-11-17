@@ -102,3 +102,7 @@ XHS 和抖音路径都不注入 Cookie。公开链接能被当前平台匿名返
 - 文件读取只允许读取采集器配置的素材库、下载目录和桥接暂存目录中的已存在文件。
 - 任务使用单一工作线程，避免全局暂存目录并发覆盖。
 - 服务重启不会自动重放未完成任务；旧任务会标记为可重试的 `failed`，避免重复下载。
+
+## 运行数据与桥接暂存路径
+
+桥接服务的代码、UI 和说明仍位于 `xhs-dl` 仓库；任务账本和桥接暂存不应写回代码仓库。正式切换时用 `MATERIAL_HUB_DATA_DIR`、`MATERIAL_HUB_BRIDGE_DIR`、`MATERIAL_HUB_BRIDGE_JOBS_FILE` 或配置 `storage.data_dir`、`storage.bridge_staging_dir`、`storage.bridge_jobs_file` 指定运行数据位置。`bridge_staging` 只是桥接任务暂存区，不是团建成品库；桥接 API 不自动清理其中已有文件。切换前必须暂停采集、对旧账本和暂存文件做哈希回读；旧路径只保留兼容读取，新的任务写入新路径。

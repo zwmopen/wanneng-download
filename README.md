@@ -91,7 +91,7 @@ V2 通过独立的 [XHS-Downloader](https://github.com/JoeanAmier/XHS-Downloader
 2. **可选剪贴板后台守护**：需要复制即入队时再运行项目根目录的 `XHS-Clipboard-Collector.vbs`；
 3. 通用平台组件与本地解析引擎已经随包完整提供，电脑端采集抖音需要系统已安装 Microsoft Edge（不会读取 Edge 的个人资料或登录态）。
 
-直接运行源码时，先设置 `MATERIAL_HUB_CONFIG` 指向本机的 `config.json`；正式自启入口通过 `XHS-Clipboard-Collector.vbs` 设置该变量。配置、素材、队列和日志不进入 Git。
+直接运行源码时，先设置 `MATERIAL_HUB_CONFIG` 指向本机的 `config.json`；正式自启入口通过 `XHS-Clipboard-Collector.vbs` 设置该变量。配置、素材、队列和日志不进入 Git。剪贴板队列/历史/心跳/日志与桥接暂存可由 `MATERIAL_HUB_DATA_DIR`、`MATERIAL_HUB_BRIDGE_DIR`、`MATERIAL_HUB_BRIDGE_JOBS_FILE` 或对应 `storage.*` 配置指定到项目运行数据目录；代码仓库只保留入口和源码。
 
 在 PowerShell 中运行：
 

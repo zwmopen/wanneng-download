@@ -18,6 +18,14 @@ from pathlib import Path
 from urllib.parse import parse_qs, urlsplit
 from ctypes import wintypes
 
+try:
+    from collector_paths import load_json_config, resolve_paths
+except ImportError:  # pragma: no cover - package launch from an alternate cwd
+    _app_code_root = Path(__file__).resolve().parents[2]
+    if str(_app_code_root) not in sys.path:
+        sys.path.insert(0, str(_app_code_root))
+    from collector_paths import load_json_config, resolve_paths
+
 from xhs_dl.core.downloader import DELAY_MODES, extract_urls_from_text
 from xhs_dl import __version__
 from xhs_dl.branding import APP_NAME
@@ -35,6 +43,12 @@ WEB_HISTORY_LOCK = threading.Lock()
 COLLECTION_TASKS_FILE = Path.home() / ".xhs-dl" / "collection_tasks.json"
 COLLECTION_TASKS_LOCK = threading.RLock()
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
+_APP_CONFIG_PATH = os.environ.get("MATERIAL_HUB_CONFIG", "").strip()
+APP_PATHS = resolve_paths(
+    config=load_json_config(_APP_CONFIG_PATH),
+    code_root=PROJECT_ROOT,
+    config_dir=Path(_APP_CONFIG_PATH).parent if _APP_CONFIG_PATH else None,
+)
 TOOLBOX_PROJECT = Path(os.environ.get("JIANGHU_TOOLBOX_ROOT", r"D:\AICode\工具开发\projects\jianghu-collector-gui"))
 
 
@@ -90,9 +104,9 @@ def _resolve_toolbox_bridge_dir():
 
 
 TOOLBOX_BRIDGE_DIR = _resolve_toolbox_bridge_dir()
-CLIPBOARD_QUEUE_FILE = PROJECT_ROOT / "clipboard_pending_queue.json"
-CLIPBOARD_HISTORY_FILE = PROJECT_ROOT / "clipboard_history.json"
-COLLECTOR_HEARTBEAT_FILE = PROJECT_ROOT / "collector_heartbeat.json"
+CLIPBOARD_QUEUE_FILE = APP_PATHS.queue_file
+CLIPBOARD_HISTORY_FILE = APP_PATHS.history_file
+COLLECTOR_HEARTBEAT_FILE = APP_PATHS.heartbeat_file
 MAX_URLS_PER_JOB = 100
 MAX_DASHBOARD_ROWS = 100
 
@@ -777,7 +791,7 @@ def _collector_pause_file(heartbeat=None):
     )
     if workspace_root:
         return workspace_root / "运行数据" / "应用状态" / "后台服务控制" / "clipboard-collector.paused"
-    return PROJECT_ROOT / "clipboard-collector.paused"
+    return APP_PATHS.pause_file
 
 
 def _collector_pause_state(heartbeat=None):
