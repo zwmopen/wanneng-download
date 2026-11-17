@@ -166,7 +166,10 @@ def _record_keys(item):
 def _record_has_media(item):
     if not isinstance(item, dict):
         return False
-    location = Path(str(item.get("保存位置") or item.get("save_dir") or "").strip())
+    location_text = str(item.get("保存位置") or item.get("save_dir") or "").strip()
+    if not location_text:
+        return False
+    location = Path(location_text)
     if not location.is_dir():
         return False
     try:
