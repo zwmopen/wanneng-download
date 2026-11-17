@@ -12,6 +12,16 @@ if (-not $pythonw) {
     $pythonw = (Get-Command python.exe -ErrorAction Stop).Source
 }
 
+# Keep the web/bridge services on the same project configuration as the
+# formal clipboard collector entry. Without this explicit environment value,
+# running this script from the repository falls back to the repository-local
+# legacy config and therefore reads the old jobs/staging roots.
+$configPath = 'D:\AICode\AI\skills\技能包\技能\universal-clipboard-collector\config\config.json'
+if (-not (Test-Path -LiteralPath $configPath -PathType Leaf)) {
+    throw "MATERIAL_HUB_CONFIG not found: $configPath"
+}
+$env:MATERIAL_HUB_CONFIG = $configPath
+
 function Get-ListeningPid([int]$Port) {
     $connection = Get-NetTCPConnection -LocalAddress 127.0.0.1 -LocalPort $Port -State Listen -ErrorAction SilentlyContinue | Select-Object -First 1
     if ($connection) { return [int]$connection.OwningProcess }
