@@ -22,12 +22,28 @@ WATCHDOG_DIR = Path(__file__).resolve().parent
 PROJECT_ROOT = WATCHDOG_DIR
 LOG_FILE = PROJECT_ROOT / "collector_watchdog.log"
 COLLECTOR_SCRIPT = PROJECT_ROOT / "universal_clipboard_collector.py"
-HEARTBEAT_FILE = PROJECT_ROOT / "collector_heartbeat.json"
+CONFIG_FILE = Path(os.environ.get(
+    "MATERIAL_HUB_CONFIG",
+    r"D:\AICode\AI\skills\技能包\技能\universal-clipboard-collector\config\config.json",
+))
+try:
+    from collector_paths import load_json_config, resolve_paths
+    _paths = resolve_paths(
+        config=load_json_config(CONFIG_FILE),
+        code_root=WATCHDOG_DIR,
+        config_dir=CONFIG_FILE.parent,
+    )
+    HEARTBEAT_FILE = _paths.heartbeat_file
+    FAILURE_STREAK_FILE = _paths.failure_streak_file
+    PAUSE_FILE = _paths.pause_file
+except Exception:
+    # Fail closed to legacy paths if the resolver/config cannot be loaded.
+    HEARTBEAT_FILE = PROJECT_ROOT / "collector_heartbeat.json"
+    FAILURE_STREAK_FILE = PROJECT_ROOT / "collector_failure_streak.json"
+    PAUSE_FILE = Path(r"D:\AICode\运行数据\应用状态\后台服务控制\clipboard-collector.paused")
 PYTHONW = r"C:\Users\z\AppData\Local\Programs\Python\Python311\pythonw.exe"
 if not os.path.exists(PYTHONW):
     PYTHONW = sys.executable.replace("python.exe", "pythonw.exe")
-
-PAUSE_FILE = Path(r"D:\AICode\运行数据\应用状态\后台服务控制\clipboard-collector.paused")
 
 
 def log(msg: str):
@@ -60,7 +76,7 @@ def is_collector_paused() -> bool:
             paused_at = data.get("paused_at", "")
             if data.get("paused_by") == "auto-fail-guard":
                 # 检查连续失败记录是否已被清理
-                streak_file = PROJECT_ROOT / "collector_failure_streak.json"
+                streak_file = FAILURE_STREAK_FILE
                 if streak_file.exists():
                     try:
                         s_data = json.loads(streak_file.read_text(encoding="utf-8"))
@@ -116,7 +132,7 @@ def spawn_collector():
     log("正在拉起 universal_clipboard_collector.py 守护进程...")
     CREATE_NO_WINDOW = 0x08000000
     env = os.environ.copy()
-    config_path = r"D:\AICode\AI\skills\技能包\技能\universal-clipboard-collector\config\config.json"
+    config_path = str(CONFIG_FILE)
     if os.path.exists(config_path):
         env["MATERIAL_HUB_CONFIG"] = config_path
 
