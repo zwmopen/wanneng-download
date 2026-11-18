@@ -53,9 +53,23 @@ def test_douyin_edge_proxy_is_scoped_to_jianghu_child_process(monkeypatch):
     from xhs_dl.core.douyin_downloader import DouyinBrowserEngine
 
     monkeypatch.delenv("JIANGHU_PROXY_URL", raising=False)
+    # The downloader intentionally inherits an already configured process
+    # proxy.  Keep this child-proxy test deterministic across developer shells
+    # and CI runners that export HTTP(S)_PROXY globally.
+    for env_name in ("HTTPS_PROXY", "https_proxy", "HTTP_PROXY", "http_proxy"):
+        monkeypatch.delenv(env_name, raising=False)
     assert DouyinBrowserEngine._browser_launch_options() == {
         "channel": "msedge", "headless": True,
     }
+
+    # A standalone process may still rely on its configured HTTP(S) proxy;
+    # this fallback is part of the current production behavior.
+    monkeypatch.setenv("HTTPS_PROXY", "http://127.0.0.1:17897")
+    assert DouyinBrowserEngine._browser_launch_options() == {
+        "channel": "msedge", "headless": True,
+        "proxy": {"server": "http://127.0.0.1:17897"},
+    }
+    monkeypatch.delenv("HTTPS_PROXY", raising=False)
 
     monkeypatch.setenv("JIANGHU_PROXY_URL", "http://127.0.0.1:7896")
     assert DouyinBrowserEngine._browser_launch_options() == {
@@ -226,9 +240,15 @@ def test_unified_downloader_routes_mixed_links_in_input_order(tmp_path):
     assert progress == [("douyin", 1, 2), ("xhs", 2, 2)]
 
 
-def test_unified_downloader_routes_generic_platform_without_changing_order(tmp_path):
+def test_unified_downloader_routes_generic_platform_without_changing_order(tmp_path, monkeypatch):
     from xhs_dl.core.models import NoteResult
     from xhs_dl.core.unified_downloader import UnifiedDownloader
+
+    # UnifiedDownloader shares the local success ledger by design.  Isolate
+    # this routing test so a prior test or a developer's real history cannot
+    # turn the fake success into a deduplicated result.
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path / "appdata"))
+    monkeypatch.setenv("XHS_DL_CLAIM_DIR", str(tmp_path / "claims"))
 
     calls = []
 
