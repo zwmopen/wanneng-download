@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Any, Mapping
 
 DEFAULT_RUNTIME_ROOT = Path(r"D:\江湖有旅人\04-经营运营\本地运行数据\剪贴板采集器")
-DEFAULT_MATERIAL_ROOT = Path(r"D:\江湖有旅人\03-生产车间\01-原料库\02-图文原料\团建图文")
+DEFAULT_MATERIAL_ROOT = Path(r"D:\江湖有旅人\03-生产车间\01-原料库\02-图文原料")
 DEFAULT_UNCLASSIFIED_ROOT = Path(r"D:\江湖有旅人\03-生产车间\01-原料库\00-待识别")
 DEFAULT_PAUSE_FILE = Path(r"D:\AICode\运行数据\应用状态\后台服务控制\clipboard-collector.paused")
 DEFAULT_DOUBAO_ROOT = Path(r"D:\AICode\项目推进\projects\豆包拉新\素材库\参考爆款")

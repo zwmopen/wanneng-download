@@ -314,7 +314,7 @@ def _resolve_dir(cfg_path: str, default_name: str) -> Path:
         if not p.is_absolute():
             p = (SKILL_ROOT / p).resolve()
         return p
-    native_cand = Path(r"D:\江湖有旅人\03-生产车间\01-原料库\02-图文原料\团建图文")
+    native_cand = Path(r"D:\江湖有旅人\03-生产车间\01-原料库\02-图文原料")
     if native_cand.exists():
         return native_cand if not default_name else (native_cand / default_name)
     fallback_cand = Path.home() / "Downloads" / "MaterialHub" / "素材库"
