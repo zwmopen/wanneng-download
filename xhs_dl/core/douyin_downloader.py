@@ -110,6 +110,8 @@ class DouyinBrowserEngine:
   const current = location.href;
   const isNote = /\/note\//.test(current);
   const main = document.querySelector("main") || document.body;
+  const player = document.querySelector('[data-e2e="video-detail"] [data-e2e="player-container"]')
+    || document.querySelector("main");
   const text = main.innerText || "";
   const meta = document.querySelector('meta[name="description"]')?.content || "";
   let title = (document.title || "").replace(/\s*-\s*抖音\s*$/, "").trim();
@@ -143,9 +145,9 @@ class DouyinBrowserEngine:
       });
     }
   } else {
-    for (const node of main.querySelectorAll("video, video source")) {
+    for (const node of player?.querySelectorAll("video, video source") || []) {
       const src = node.currentSrc || node.src || "";
-      if (!/^https?:/.test(src) || unique.has(src)) continue;
+      if (!/^https?:/.test(src) || unique.has(src) || (node.closest("video")?.mediaKeys)) continue;
       unique.set(src, {url: src, kind: "video", extension: "mp4"});
     }
   }
@@ -210,20 +212,12 @@ class DouyinBrowserEngine:
                 )
                 page = context.new_page()
                 page.goto(url, wait_until="domcontentloaded", timeout=self.timeout * 1000)
-                page.wait_for_function(
-                    r"""() => {
-                      const main = document.querySelector("main");
-                      if (!main) return false;
-                      if (/\/note\//.test(location.pathname)) {
-                        return Array.from(main.querySelectorAll("img"))
-                          .some(x => (x.currentSrc || x.src || "").includes("aweme-images"));
-                      }
-                      return Array.from(main.querySelectorAll("video, video source"))
-                        .some(x => /^https?:/.test(x.currentSrc || x.src || ""));
-                    }""",
+                result = page.wait_for_function(
+                    f"() => {{ const work = ({self.PAGE_SCRIPT})(); "
+                    "return work.media.length ? work : false; }",
                     timeout=min(self.timeout, 40) * 1000,
                 )
-                payload = page.evaluate(self.PAGE_SCRIPT)
+                payload = result.json_value()
                 context.close()
                 browser.close()
         except Exception as exc:
