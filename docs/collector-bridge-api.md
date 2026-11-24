@@ -4,10 +4,10 @@
 
 ## 启动
 
-在仓库目录运行。先显式指定项目共享配置，避免直接从仓库启动时回落到旧的本地 jobs/staging 根：
+在仓库目录运行，使用 `xhs-dl/config/config.json` 作为本项目唯一的本机配置真源（该文件含本机设置，不提交到 Git）：
 
 ```powershell
-$env:MATERIAL_HUB_CONFIG = 'D:\AICode\AI\skills\技能包\技能\universal-clipboard-collector\config\config.json'
+$env:MATERIAL_HUB_CONFIG = (Resolve-Path .\config\config.json).Path
 python .\collector_bridge_api.py
 ```
 
@@ -106,4 +106,4 @@ XHS 和抖音路径都不注入 Cookie。公开链接能被当前平台匿名返
 
 ## 运行数据与桥接暂存路径
 
-桥接服务的代码、UI 和说明仍位于 `xhs-dl` 仓库；任务账本和桥接暂存不应写回代码仓库。正式切换时用 `MATERIAL_HUB_DATA_DIR`、`MATERIAL_HUB_BRIDGE_DIR`、`MATERIAL_HUB_BRIDGE_JOBS_FILE` 或配置 `storage.data_dir`、`storage.bridge_staging_dir`、`storage.bridge_jobs_file` 指定运行数据位置。`bridge_staging` 只是桥接任务暂存区，不是团建成品库；桥接 API 不自动清理其中已有文件。切换前必须暂停采集、对旧账本和暂存文件做哈希回读；旧路径只保留兼容读取，新的任务写入新路径。
+桥接服务代码、UI 和说明由 `xhs-dl` 仓库维护；本机配置真源是 `xhs-dl/config/config.json`。剪贴板历史、队列、心跳、失败计数、日志、桥接账本与暂存统一写入 `D:\江湖有旅人\04-经营运营\本地运行数据\剪贴板采集器`，专用下载暂存位于其 `download_staging` 子目录（每次下载会清空该专用目录，不能改指向其他数据目录）。`bridge_staging` 不是团建成品库，API 不自动清理其中已有文件。旧仓库中的历史运行文件与桥接暂存保留作回退/历史兼容，不作为新任务写入位置；任何路径变更前先暂停写入并做哈希回读。

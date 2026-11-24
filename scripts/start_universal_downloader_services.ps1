@@ -12,15 +12,16 @@ if (-not $pythonw) {
     $pythonw = (Get-Command python.exe -ErrorAction Stop).Source
 }
 
-# Keep the web/bridge services on the same project configuration as the
-# formal clipboard collector entry. Without this explicit environment value,
-# running this script from the repository falls back to the repository-local
-# legacy config and therefore reads the old jobs/staging roots.
-$configPath = 'D:\AICode\AI\skills\技能包\技能\universal-clipboard-collector\config\config.json'
+# All xhs-dl entry points use this project's private config as their source of truth.
+$configPath = Join-Path $projectRoot "config\config.json"
 if (-not (Test-Path -LiteralPath $configPath -PathType Leaf)) {
-    throw "MATERIAL_HUB_CONFIG not found: $configPath"
+    throw "Project-local config not found: $configPath"
 }
 $env:MATERIAL_HUB_CONFIG = $configPath
+$config = Get-Content -LiteralPath $configPath -Raw | ConvertFrom-Json
+$dataRoot = [string]$config.storage.data_dir
+if (-not $dataRoot) { throw "storage.data_dir is missing in $configPath" }
+$serviceLogRoot = Join-Path $dataRoot "service_logs"
 
 function Get-ListeningPid([int]$Port) {
     $connection = Get-NetTCPConnection -LocalAddress 127.0.0.1 -LocalPort $Port -State Listen -ErrorAction SilentlyContinue | Select-Object -First 1
@@ -34,8 +35,11 @@ function Ensure-Service([string]$Name, [string]$Arguments, [int]$Port, [string]$
         return [pscustomobject]@{ name = $Name; port = $Port; pid = $existing; started = $false; healthy = $true }
     }
 
-    $log = Join-Path $projectRoot $LogName
-    $errorLog = Join-Path $projectRoot $ErrorLogName
+    if (-not (Test-Path -LiteralPath $serviceLogRoot -PathType Container)) {
+        New-Item -ItemType Directory -Path $serviceLogRoot -Force | Out-Null
+    }
+    $log = Join-Path $serviceLogRoot $LogName
+    $errorLog = Join-Path $serviceLogRoot $ErrorLogName
     $process = Start-Process -FilePath $pythonw -ArgumentList $Arguments -WorkingDirectory $projectRoot -WindowStyle Hidden -RedirectStandardOutput $log -RedirectStandardError $errorLog -PassThru
     $deadline = (Get-Date).AddSeconds(12)
     do {

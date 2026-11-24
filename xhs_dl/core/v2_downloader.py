@@ -80,6 +80,9 @@ class LocalCliEngine:
     def _subprocess_environment(engine_home: Path) -> dict:
         environment = os.environ.copy()
         environment["PYTHONPATH"] = str(engine_home)
+        for pkey in list(environment.keys()):
+            if pkey.lower() in ("http_proxy", "https_proxy", "all_proxy"):
+                environment.pop(pkey, None)
         for key, value in list(environment.items()):
             if key.lower() != "no_proxy":
                 continue

@@ -55,9 +55,9 @@ if (LIB_DIR / "xhs_dl").exists():
 # 自动探测配置文件
 CONFIG_FILE = None
 for candidate in [
+    SCRIPT_DIR / "config" / "config.json",
     os.environ.get("MATERIAL_HUB_CONFIG"),
     SKILL_ROOT / "config" / "config.json",
-    SCRIPT_DIR / "config" / "config.json",
     SCRIPT_DIR / "config.json"
 ]:
     if candidate and Path(candidate).exists():
@@ -67,8 +67,8 @@ for candidate in [
 # 自愈配置：若无 config.json 则自动从 config.example.json 释放默认便携配置
 if not CONFIG_FILE:
     for example_cand in [
-        SKILL_ROOT / "config" / "config.example.json",
         SCRIPT_DIR / "config" / "config.example.json",
+        SKILL_ROOT / "config" / "config.example.json",
         SCRIPT_DIR / "config.example.json"
     ]:
         if example_cand and Path(example_cand).exists():
@@ -1599,7 +1599,7 @@ def execute_download_and_file(target_url: str) -> tuple[bool, str, dict]:
 
             if is_unclassified:
                 city_dest_dir = C_DOWNLOADS_DIR
-                target_city = "未分类(暂存C盘下载)"
+                target_city = "未分类(00-待识别暂存)"
                 final_target_dir = city_dest_dir / folder_name
             else:
                 target_city = target_category
@@ -1931,7 +1931,7 @@ def queue_worker_loop(queue_mgr: QueueManager, history_set: set):
                 queue_tip = f" (剩余 {rem_count} 篇排队中)" if rem_count > 0 else ""
 
                 if is_unclassified:
-                    notify_text = f"⚠️ 拿不准分类（已暂存至C盘下载，等你定夺）：《{short_title}》\n📍 点击可直接打开 Downloads 文件夹，认领后自行归位{queue_tip}"
+                    notify_text = f"⚠️ 分类未确定（已暂存到项目‘00-待识别’，待你确认）：《{short_title}》\n📍 点击打开当前待识别目录，确认后按规范归位{queue_tip}"
                     send_desktop_notification(notify_text, title="素材待手动分类", status="warning", action_target=target_folder)
                 elif metadata.get("collection_mode") == "manual":
                     notify_text = f"✅ 已定向采集入库（{platform}{note_type}）：《{short_title}》\n📍 已归入【🎯 定向专题·{city}】（含 {media_desc}）{queue_tip}"

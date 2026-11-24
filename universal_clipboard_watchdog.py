@@ -22,10 +22,12 @@ WATCHDOG_DIR = Path(__file__).resolve().parent
 PROJECT_ROOT = WATCHDOG_DIR
 LOG_FILE = PROJECT_ROOT / "collector_watchdog.log"
 COLLECTOR_SCRIPT = PROJECT_ROOT / "universal_clipboard_collector.py"
-CONFIG_FILE = Path(os.environ.get(
-    "MATERIAL_HUB_CONFIG",
-    r"D:\AICode\AI\skills\技能包\技能\universal-clipboard-collector\config\config.json",
-))
+LOCAL_CONFIG_FILE = WATCHDOG_DIR / "config" / "config.json"
+CONFIG_FILE = (
+    LOCAL_CONFIG_FILE
+    if LOCAL_CONFIG_FILE.exists()
+    else Path(os.environ.get("MATERIAL_HUB_CONFIG") or LOCAL_CONFIG_FILE)
+)
 try:
     from collector_paths import load_json_config, resolve_paths
     _paths = resolve_paths(
@@ -36,11 +38,13 @@ try:
     HEARTBEAT_FILE = _paths.heartbeat_file
     FAILURE_STREAK_FILE = _paths.failure_streak_file
     PAUSE_FILE = _paths.pause_file
+    LOG_FILE = _paths.data_dir / "collector_watchdog.log"
 except Exception:
     # Fail closed to legacy paths if the resolver/config cannot be loaded.
     HEARTBEAT_FILE = PROJECT_ROOT / "collector_heartbeat.json"
     FAILURE_STREAK_FILE = PROJECT_ROOT / "collector_failure_streak.json"
     PAUSE_FILE = Path(r"D:\AICode\运行数据\应用状态\后台服务控制\clipboard-collector.paused")
+    LOG_FILE = PROJECT_ROOT / "collector_watchdog.log"
 PYTHONW = r"C:\Users\z\AppData\Local\Programs\Python\Python311\pythonw.exe"
 if not os.path.exists(PYTHONW):
     PYTHONW = sys.executable.replace("python.exe", "pythonw.exe")

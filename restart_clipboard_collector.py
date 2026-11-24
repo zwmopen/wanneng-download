@@ -28,11 +28,11 @@ ROOT = Path(__file__).resolve().parent
 PYTHONW = Path(r"C:\Users\z\AppData\Local\Programs\Python\Python311\pythonw.exe")
 if not PYTHONW.exists():
     PYTHONW = Path(sys.executable.replace("python.exe", "pythonw.exe"))
-CONFIG_PATH = Path(
-    os.environ.get(
-        "MATERIAL_HUB_CONFIG",
-        r"D:\AICode\AI\skills\技能包\技能\universal-clipboard-collector\config\config.json",
-    )
+LOCAL_CONFIG_PATH = ROOT / "config" / "config.json"
+CONFIG_PATH = (
+    LOCAL_CONFIG_PATH
+    if LOCAL_CONFIG_PATH.exists()
+    else Path(os.environ.get("MATERIAL_HUB_CONFIG") or LOCAL_CONFIG_PATH)
 )
 COLLECTOR_SCRIPT = ROOT / "universal_clipboard_collector.py"
 WATCHDOG_SCRIPT = ROOT / "universal_clipboard_watchdog.py"

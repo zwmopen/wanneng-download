@@ -2,7 +2,7 @@ $ErrorActionPreference = "Stop"
 
 $projectRoot = Split-Path -Parent $PSScriptRoot
 $launcher = Join-Path $projectRoot "XHS-Clipboard-Collector.vbs"
-$config = "D:\AICode\AI\skills\技能包\技能\universal-clipboard-collector\config\config.json"
+$config = Join-Path $projectRoot "config\config.json"
 $wscript = Join-Path $env:WINDIR "System32\wscript.exe"
 $arguments = "//B //Nologo `"$launcher`""
 $taskName = "Universal-Clipboard-Collector"
