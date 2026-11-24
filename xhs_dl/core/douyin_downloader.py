@@ -149,6 +149,7 @@ class DouyinBrowserEngine:
       const src = node.currentSrc || node.src || "";
       if (!/^https?:/.test(src) || unique.has(src) || (node.closest("video")?.mediaKeys)) continue;
       unique.set(src, {url: src, kind: "video", extension: "mp4"});
+      break;
     }
   }
   const published = (text.match(/发布时间[：:]\s*([^\n]+)/) || [])[1] || "";
