@@ -9,12 +9,35 @@ Download only public works the user explicitly provides or authorizes. Mixed sup
 
 ## Workflow
 
+For a user-provided public work in Codex, prefer the local 万能下载器 connector
+when available. Submit the share URL, retain its job ID, and read the job
+through a terminal status. Inspect the output folder when the job status is
+unknown. Use the local CLI below when the connector or its bridge is unavailable.
+
 1. Run `python scripts/check.py` and stop if `ready` is false.
 2. Choose an output folder inside the user's requested scope. Default to `./universal_downloads` only when none is given.
 3. Run `python scripts/download.py --text "<share text or links>" --output "<folder>" --mode cautious`.
    For a UTF-8 text file, replace `--text` with `--file <path>`.
 4. Read the JSON printed by the script. Report success only when `success` is positive and the listed local files exist. Images default to high-quality JPG and use `封面-标题`, `内页1-标题` naming; videos use `视频-标题`.
 5. Point the user to the downloaded media, `文案.txt`, and centralized `%LOCALAPPDATA%\xhs-dl\history.json` when history is needed.
+
+## Video references
+
+- Normalize escaped share URLs such as `https\://` before submission. Keep
+  the input link and the resolved work ID as evidence. A matching title from
+  search is insufficient to identify a work.
+- An accepted job, resolved URL, empty directory, or partial file is not a
+  verified download. For video analysis, verify the reported file with
+  `ffprobe` and check that it has a video stream and positive duration.
+- On failure, distinguish bridge or subprocess errors from platform page
+  errors. Check the same job and local output first. Retry once through the
+  configured local engine if the first run had a transient transport or
+  bridge error. Report a persistent media-unavailable or platform access
+  state with the exact stage and ask for a local reference file if needed.
+- Keep reference media in the task work directory. For format adaptation,
+  use the verified source to log timing, shot roles, transitions, captions,
+  and audio cues. Use the user's own venue media and original production
+  assets for the new video.
 
 ## Guardrails
 
