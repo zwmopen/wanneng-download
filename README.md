@@ -2,7 +2,7 @@
 
 一款**本地优先、开箱即用、全面开放**的多平台内容采集与无水印素材下载工作台，面向个人创作者、运营团队与 AI 自动化工作流：**小红书 / 抖音内置持久化浏览器采集 · 公开媒体无水印直解 · 剪贴板后台无感入队 · 智能月份硬链接归档 · 飞书开放通知 · AI HTTP / OpenAPI 联动**。
 
-当前正式版本：**v4.0.0** · [发布说明](docs/RELEASE-NOTES-4.0.0.md) · [版本历史](CHANGELOG.md) · [使用手册](使用手册.md) · [源码仓库](https://github.com/zwmopen/xhs-dl)
+当前正式版本：**v4.0.0** · [发布说明](docs/RELEASE-NOTES-4.0.0.md) · [版本历史](CHANGELOG.md) · [使用手册](使用手册.md) · [源码仓库](https://github.com/zwmopen/wanneng-download)
 
 > 💡 **本地闭环原则**：所有解析、下载、查重账本、历史记录、浏览器会话与元数据 100% 保留在用户自己电脑的本机目录中（默认 `~/.xhs-dl/` 与 `Downloads/`），不经过第三方在线解析站，不上传任何账号隐私。
 
@@ -42,8 +42,8 @@
 ### 1. 克隆并安装依赖
 
 ```powershell
-git clone https://github.com/zwmopen/xhs-dl.git
-cd xhs-dl
+git clone https://github.com/zwmopen/wanneng-download.git
+cd wanneng-download
 pip install -e .
 ```
 

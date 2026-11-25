@@ -2,7 +2,7 @@
 
 > **发布日期**：2026-11-25  
 > **版本号**：v4.0.0（统一智能采集工作台重大升级）  
-> **仓库地址**：https://github.com/zwmopen/xhs-dl
+> **仓库地址**：https://github.com/zwmopen/wanneng-download
 
 ---
 
@@ -30,8 +30,8 @@
 
 1. 拉取或下载源码：
    ```powershell
-   git clone https://github.com/zwmopen/xhs-dl.git
-   cd xhs-dl
+   git clone https://github.com/zwmopen/wanneng-download.git
+   cd wanneng-download
    pip install -e .
    ```
 2. 双击 [`启动万能采集器.cmd`](../启动万能采集器.cmd) 或 [`desktop_shell/万能采集器.exe`](../desktop_shell/万能采集器.exe)，或运行 `python -m xhs_dl.web.app`。
