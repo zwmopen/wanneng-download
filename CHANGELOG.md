@@ -1,5 +1,23 @@
 # 变更记录
 
+## 4.0.0 统一智能采集工作台（内置多浏览器内核 · 统一历史记录 · 通用飞书 · AI 接入） — 2026-11-25
+
+- **内置持久化浏览器内核（`native_collector.py`）**：
+  - 彻底替代外部闭源 `.exe`，支持 `msedge -> chrome -> chromium` 自动探测与回落，默认启用系统沙盒。
+  - 修复离屏坐标隐藏问题，改为正规任务栏最小化，支持随时从任务栏或前端「查看采集浏览器」唤出，并在触发验证码/登录时自动居中置顶与断点续采。
+- **桌面外壳与热升级（`desktop_shell/UniversalCollectorShell.cs`）**：
+  - 基于 WebView2 的独立桌面壳，启动时通过 `/api/v1/health` 的 `code_stamp` 自动检测更新并平滑重启旧后端进程；移除硬编码本机路径以便开源通用部署。
+- **工作台交互与筛选重构（`ui_template.py`, `toolbox_store.py`, `app.py`）**：
+  - 移除冗余右侧栏，将关键词/主页发起卡片置顶，默认进入关键词采集并记住上次标签页。
+  - 顶部新增 7 模式主题下拉菜单（默认跟随北京时间昼夜自动切换，按日轮换拟态/玻璃质感），移除设置页重复主题区。
+  - 关键词与主页新增 **重命名分组**（`op="rename_group"`）及皮肤化输入弹窗；修复「更多 ▾」下拉交互。
+  - 关键词区接入真实 **作品类型筛选（`仅图文`/`仅视频`/`全部`）** 与抖音真实排序/发布时间透传；作品列表补充 **收藏量** 过滤与排序。
+- **统一作品列表、元数据开关与 AI / 飞书开放化**：
+  - 合并原「AI 与任务中心」进入「作品列表」，统一汇总当前采集、剪贴板、单作品、关键词、主页及 AI 任务，顶部内嵌可折叠实时排队抽屉。
+  - 严格区分 **发布时间** 与新增的 **读取时间（`collected_at`）**，清晰展示 **`已读取未下载`** / **`已下载 N 张图`** / **`已入库·月份`** 状态。
+  - 支持在设置中独立开关 **`metadata.json` 元数据自动生成与更新**；新增可折叠飞书机器人配置（兼容群自定义 Webhook 免建应用、OpenAPI App ID/Secret 与本地配置）；新增设置 **「AI 接入」** 子页，内置一键复制 AI 提示词与 HTTP API 示例。
+  - 新增脱敏配置模板 `config.example.json` 并重写 `README.md`、`使用手册.md` 与 `docs/RELEASE-NOTES-4.0.0.md`。
+
 ## [Unreleased collector pause safety] - 2026-11-18
 
 - The manual clipboard restart script and downloader UI now refuse to clear the exact `codex-migration-gate` pause marker; both fail closed if the marker cannot be read. Ordinary pause markers retain the existing recovery flow.

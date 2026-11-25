@@ -1,0 +1,31 @@
+{
+  "system": {
+    "version": "4.0.0",
+    "app_name": "万能采集器 · 统一智能采集工作台",
+    "debug": false
+  },
+  "storage": {
+    "material_root_dir": "D:\\Materials\\图文原料库",
+    "enable_month_hardlink": true,
+    "unclassified_downloads_dir": "D:\\Materials\\00-待识别",
+    "theme_dir": "D:\\Materials\\图文原料库\\06-主题合集"
+  },
+  "notification": {
+    "enable_desktop_toast": true,
+    "feishu": {
+      "enabled": true,
+      "webhook_url": "",
+      "app_id": "",
+      "app_secret": "",
+      "target_chat_name": "素材采集通知群",
+      "target_chat_id": ""
+    }
+  },
+  "filter_rules": {
+    "max_images_allowed": 30,
+    "author_blacklist_keywords": [],
+    "title_ad_patterns": [],
+    "content_ad_patterns": [],
+    "topic_keep_patterns": []
+  }
+}

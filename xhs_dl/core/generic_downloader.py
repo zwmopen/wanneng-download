@@ -5,7 +5,7 @@ import shutil
 import tempfile
 from pathlib import Path
 
-from .media_names import convert_image_file, media_filename, media_sort_key, safe_title
+from .media_names import convert_image_file, media_filename, media_sort_key, normalize_stat_count, safe_title
 from .models import NoteResult
 from xhs_dl.storage import add_history
 
@@ -14,9 +14,7 @@ IMAGE_EXTENSIONS = {"jpg", "jpeg", "png", "webp", "gif", "avif"}
 
 
 def _count(value):
-    if value is None or value == "":
-        return "未知"
-    return str(value)
+    return normalize_stat_count(value, fallback="0")
 
 
 class YtDlpEngine:

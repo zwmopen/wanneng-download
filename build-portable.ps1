@@ -1,5 +1,5 @@
 param(
-    [string]$Version = "3.6.0",
+    [string]$Version = "4.0.0",
     [ValidateSet("onedir", "onefile")]
     [string]$Layout = "onedir"
 )

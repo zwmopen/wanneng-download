@@ -13,6 +13,17 @@ def media_sort_key(path):
     )
 
 
+_STAT_PLACEHOLDERS = {"", "抢首评", "赞", "点赞", "评论", "收藏", "分享", "未知", "-", "—"}
+
+
+def normalize_stat_count(value, fallback="0", limit=12):
+    """Normalize scraped social count text (mapping UI placeholders like 抢首评/赞 to numeric fallback)."""
+    cleaned = re.sub(r'[<>:"/\\|?*\x00-\x1f]', "_", str(value or "")).strip(" .-")
+    if cleaned in _STAT_PLACEHOLDERS:
+        return fallback
+    return cleaned[:limit]
+
+
 def safe_title(value, limit=64):
     cleaned = re.sub(r'[<>:"/\\|?*\x00-\x1f]', "_", str(value or "")).strip(" .-")
     return (cleaned or "未命名作品")[:limit]

@@ -1,5 +1,6 @@
 """xhs-dl V2 浏览器可视化界面。"""
 
+import argparse
 import copy
 import ctypes
 import hashlib
@@ -30,7 +31,23 @@ from xhs_dl.core.downloader import DELAY_MODES, extract_urls_from_text
 from xhs_dl import __version__
 from xhs_dl.branding import APP_NAME
 from xhs_dl.core.unified_downloader import UnifiedDownloader
-from xhs_dl.storage import history_path
+from xhs_dl.storage import history_path, add_history
+from xhs_dl.web import toolbox_store
+from xhs_dl.web.ui_template import TEMPLATE
+
+
+def _compute_web_code_stamp():
+    web_dir = Path(__file__).resolve().parent
+    stamps = []
+    for py_file in web_dir.glob("*.py"):
+        try:
+            stamps.append(int(py_file.stat().st_mtime))
+        except OSError:
+            pass
+    return max(stamps) if stamps else 0
+
+
+SERVER_CODE_STAMP = _compute_web_code_stamp()
 
 
 JOBS = {}
@@ -66,7 +83,7 @@ def _resolve_toolbox_bridge_dir():
     except OSError:
         config_text = ""
 
-    value = ""
+    candidates = []
     if config_text:
         try:
             import tomllib
@@ -75,14 +92,16 @@ def _resolve_toolbox_bridge_dir():
         if tomllib is not None:
             try:
                 config = tomllib.loads(config_text)
-                value = str(
+                codex_val = str(
                     config.get("mcp_servers", {})
                     .get("jianghu_toolbox", {})
                     .get("env", {})
                     .get("JIANGHU_BRIDGE_DIR", "")
                 ).strip()
+                if codex_val:
+                    candidates.append(codex_val)
             except (TypeError, ValueError):
-                value = ""
+                pass
         else:
             in_env_section = False
             for line in config_text.splitlines():
@@ -97,10 +116,33 @@ def _resolve_toolbox_bridge_dir():
                     raw_value = match.group(1).strip()
                     if len(raw_value) >= 2 and raw_value[0] == raw_value[-1] and raw_value[0] in {"'", '"'}:
                         raw_value = raw_value[1:-1]
-                    value = raw_value.strip()
+                    if raw_value.strip():
+                        candidates.append(raw_value.strip())
                     break
 
-    return Path(value).expanduser() if value else Path(r"D:\Program Files\江湖工具箱\MinApp")
+    antigravity_mcp = Path.home() / ".gemini" / "antigravity" / "mcp_config.json"
+    try:
+        mcp_cfg = json.loads(antigravity_mcp.read_text(encoding="utf-8-sig"))
+        agy_val = str(
+            mcp_cfg.get("mcpServers", {})
+            .get("jianghu_toolbox", {})
+            .get("env", {})
+            .get("JIANGHU_BRIDGE_DIR", "")
+        ).strip()
+        if agy_val:
+            candidates.append(agy_val)
+    except (OSError, ValueError, TypeError):
+        pass
+
+    maintained_bridge = Path(r"D:\AICode\运行数据\江湖工具箱\repair-smoke-v4-20261112\runtime\bridge")
+    candidates.append(str(maintained_bridge))
+
+    for raw in candidates:
+        candidate = Path(raw).expanduser()
+        if candidate.is_dir():
+            return candidate
+
+    return Path(r"D:\Program Files\江湖工具箱\MinApp")
 
 
 TOOLBOX_BRIDGE_DIR = _resolve_toolbox_bridge_dir()
@@ -168,12 +210,22 @@ def _update_collection_task(job_id, **values):
     _save_collection_tasks()
 
 
+def _use_native_engine():
+    return os.environ.get("XHS_DL_LEGACY_JIANGHU_ENGINE", "0") != "1"
+
+
 def _toolbox_capability_snapshot():
+    if _use_native_engine():
+        from xhs_dl.web import native_collector
+        return native_collector.get_engine().get_capabilities()
+
     cli_file = TOOLBOX_PROJECT / "jianghu_cli.py"
     status_file = TOOLBOX_BRIDGE_DIR / "bridge_status.json"
+    progress_file = TOOLBOX_BRIDGE_DIR / "keyword_progress.json"
     status = "offline"
     age_seconds = None
     native = {}
+    progress = {}
     try:
         age_seconds = max(0, time.time() - status_file.stat().st_mtime)
         if age_seconds <= 5:
@@ -183,19 +235,60 @@ def _toolbox_capability_snapshot():
             status = "stale"
     except (OSError, ValueError, TypeError):
         pass
+    try:
+        parsed_progress = json.loads(progress_file.read_text(encoding="utf-8-sig"))
+        if isinstance(parsed_progress, dict):
+            progress = parsed_progress
+    except (OSError, ValueError, TypeError):
+        progress = native.get("keyword_progress") if isinstance(native.get("keyword_progress"), dict) else {}
+    ver_req = bool(native.get("verification_required"))
+    if not ver_req and isinstance(progress, dict) and (
+        progress.get("phase") == "verification"
+        or progress.get("status") == "verification_required"
+    ):
+        progress = {}
+    if ver_req:
+        active_plat = str(native.get("active_platform") or "douyin")
+        kw_name = str((progress or {}).get("keyword") or "")
+        plat_cn = "小红书" if active_plat == "xiaohongshu" else "抖音"
+
+        def _notify_verify():
+            try:
+                from xhs_dl.web import notifier
+                notifier.dispatch_workbench_notification(
+                    "verification",
+                    f"⚠️ 万能采集器触发人机验证（{plat_cn}）",
+                    f"关键词/任务：{kw_name or '当前采集'}\n已尝试自动弹出并置顶验证浏览器，请人工完成验证后点击「已完成验证，继续采集」。",
+                    settings=toolbox_store.get_settings(bridge_dir=TOOLBOX_BRIDGE_DIR),
+                    platform=active_plat,
+                    dedup_key=f"cap-verify:{active_plat}:{kw_name}",
+                    cooldown_seconds=90.0,
+                    bring_verify_fn=lambda topmost=True: toolbox_store.focus_and_bring_verify_browser(
+                        TOOLBOX_BRIDGE_DIR,
+                        TOOLBOX_PROJECT,
+                        _python_console_executable(),
+                        topmost=topmost,
+                    ),
+                )
+            except Exception:
+                pass
+
+        threading.Thread(target=_notify_verify, daemon=True).start()
+
     return {
         "available": cli_file.is_file(),
         "status": status,
         "age_seconds": round(age_seconds, 1) if age_seconds is not None else None,
         "active_platform": native.get("active_platform"),
-        "verification_required": bool(native.get("verification_required")),
+        "verification_required": ver_req,
         "busy": bool(
             (native.get("keyword") or {}).get("is_running")
             or (native.get("single") or {}).get("busy_or_unknown")
         ),
+        "keyword_progress": progress,
         "supports": {
             "homepage": ["douyin"],
-            "keyword": ["douyin"],
+            "keyword": ["douyin", "xiaohongshu"],
             "xiaohongshu_homepage": False,
         },
     }
@@ -205,9 +298,18 @@ def _collection_task_payload(task):
     allowed = {
         "job_id", "kind", "label", "status", "stage", "created_at", "updated_at",
         "message", "discovered_count", "download_job_id", "completion_confirmed",
-        "outcome", "native_job_id",
+        "outcome", "native_job_id", "keyword", "target_count", "count", "ingest",
+        "skipped_duplicate_count",
     }
     value = {key: copy.deepcopy(task[key]) for key in allowed if key in task}
+    if value.get("kind") == "keyword" and value.get("status") in {"queued", "discovering"}:
+        progress_data = _read_json(TOOLBOX_BRIDGE_DIR / "keyword_progress.json", {})
+        if isinstance(progress_data, dict) and progress_data:
+            value["keyword_progress"] = progress_data
+            if str(progress_data.get("keyword") or "").strip() == str(task.get("keyword") or "").strip():
+                live_msg = str(progress_data.get("message") or "").strip()
+                if live_msg:
+                    value["message"] = live_msg
     download_job = None
     download_id = value.get("download_job_id")
     if download_id:
@@ -223,7 +325,7 @@ def _collection_task_payload(task):
             if download_job.get("status") == "completed":
                 value["status"] = "completed"
                 value["message"] = (
-                    f"已发现 {value.get('discovered_count', 0)} 条链接；"
+                    f"已读取 {value.get('discovered_count', 0)} 条作品链接；"
                     f"下载完成，成功 {download_job.get('success', 0)} 条，"
                     f"已存在 {download_job.get('skipped', 0)} 条，失败 {download_job.get('failed', 0)} 条"
                 )
@@ -276,10 +378,26 @@ def _queue_collection_links(task, links):
         url = urls[0]
         parsed = urlsplit(url)
         host = (parsed.hostname or "").lower().rstrip(".")
-        if (parsed.scheme.lower() not in {"http", "https"}
-                or not (host == "douyin.com" or host.endswith(".douyin.com")
-                        or host == "iesdouyin.com" or host.endswith(".iesdouyin.com"))
-                or "/note/" not in (parsed.path or "").lower()):
+        is_douyin = (
+            host == "douyin.com"
+            or host.endswith(".douyin.com")
+            or host == "iesdouyin.com"
+            or host.endswith(".iesdouyin.com")
+        )
+        is_xhs = (
+            host == "xiaohongshu.com"
+            or host.endswith(".xiaohongshu.com")
+            or host == "xhslink.com"
+            or host.endswith(".xhslink.com")
+        )
+        path_l = (parsed.path or "").lower()
+        if parsed.scheme.lower() not in {"http", "https"} or not (is_douyin or is_xhs):
+            continue
+        if is_douyin and ("/note/" not in path_l and "/video/" not in path_l):
+            continue
+        if is_xhs and host != "xhslink.com" and (
+            "/explore/" not in path_l and "/discovery/item/" not in path_l and len(path_l.strip("/")) < 6
+        ):
             continue
         if url not in seen:
             seen.add(url)
@@ -287,6 +405,16 @@ def _queue_collection_links(task, links):
     clean_links = clean_links[:MAX_URLS_PER_JOB]
     if not clean_links:
         return None
+    try:
+        toolbox_store.record_discovered_artworks(
+            clean_links,
+            platform=task.get("platform") or "douyin",
+            source=task.get("label") or task.get("kind") or "collection",
+            mark_current=True,
+            bridge_dir=TOOLBOX_BRIDGE_DIR,
+        )
+    except Exception:
+        pass
 
     mode = task.get("mode", "auto")
     image_format = task.get("image_format", "keep")
@@ -322,71 +450,360 @@ def _queue_collection_links(task, links):
     return job_id
 
 
-def _run_collection_discovery(job_id, command):
+def _run_collection_discovery(job_id, command, cleanup_files=None):
     _update_collection_task(job_id, status="discovering", stage="browser",
-                            message="正在读取公开主页或搜索列表；遇到登录/验证会安全停止")
+                            message="正在通过内置 Edge 核心读取搜索列表/主页；遇到登录或验证会置顶弹窗提醒")
     try:
-        process = subprocess.run(
-            command,
-            cwd=str(TOOLBOX_PROJECT),
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-            timeout=1800,
-            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
-        )
-    except subprocess.TimeoutExpired:
-        _update_collection_task(
-            job_id, status="unknown", stage="timeout",
-            message="等待超时，无法确认原生采集是否结束；先查看原生任务状态，避免重复提交",
-        )
-        return
-    except (OSError, ValueError) as exc:
-        _update_collection_task(job_id, status="error", stage="worker", message=f"无法启动采集流程：{exc}")
-        return
+        with COLLECTION_TASKS_LOCK:
+            pre_task = copy.deepcopy(COLLECTION_TASKS.get(job_id))
 
-    result = _last_json_object(process.stdout) or _last_json_object(process.stderr)
-    if not result:
-        details = (process.stderr or process.stdout or "").strip()
-        _update_collection_task(
-            job_id, status="error", stage="worker",
-            message=(details[-500:] if details else f"采集流程未返回结果（退出码 {process.returncode}）"),
-        )
-        return
+        result = None
+        if _use_native_engine() and isinstance(pre_task, dict):
+            from xhs_dl.web import native_collector, notifier
+            eng = native_collector.get_engine()
+            cur_settings = toolbox_store.get_settings(bridge_dir=TOOLBOX_BRIDGE_DIR) or {}
+            sw_cfg = cur_settings.get("software") or {}
+            proxy_url = str(sw_cfg.get("proxy_url") or "")
+            skip_ids = (
+                toolbox_store.collect_downloaded_artwork_ids(bridge_dir=TOOLBOX_BRIDGE_DIR)
+                if pre_task.get("skip_downloaded_history", True)
+                else set()
+            )
+            plat_code = str(pre_task.get("platform") or "douyin")
+            kw_label = str(pre_task.get("label") or pre_task.get("keyword") or "采集任务")
 
-    links = result.get("discovered_links") or []
-    task = None
-    with COLLECTION_TASKS_LOCK:
-        task = copy.deepcopy(COLLECTION_TASKS.get(job_id))
-    if links and task:
-        download_job_id = _queue_collection_links(task, links)
-        if download_job_id:
+            def _on_gate(gate_status, gate_msg):
+                evt = "verification" if gate_status == "verification_required" else "login"
+                def _send():
+                    try:
+                        notifier.dispatch_workbench_notification(
+                            evt,
+                            "⚠️ 万能采集器需要人工验证" if evt == "verification" else "⚠️ 万能采集器需要登录",
+                            f"任务：{kw_label}\n{gate_msg}",
+                            settings=toolbox_store.get_settings(bridge_dir=TOOLBOX_BRIDGE_DIR),
+                            platform=plat_code,
+                            dedup_key=f"gate:{evt}:{plat_code}:{kw_label}",
+                            cooldown_seconds=45.0,
+                        )
+                    except Exception:
+                        pass
+                threading.Thread(target=_send, daemon=True).start()
+
+            if pre_task.get("kind") == "homepage":
+                result = eng.collect_douyin_homepage(
+                    pre_task.get("profile_url") or "",
+                    max_works=int(pre_task.get("max_works") or 10),
+                    min_images=int(pre_task.get("min_images") or 4),
+                    max_images=int(pre_task.get("max_images") or 20),
+                    direct_download=bool(pre_task.get("direct_download", True)),
+                    skip_ids=skip_ids,
+                    output_dir=str(pre_task.get("output_dir") or DEFAULT_OUTPUT_DIR),
+                    image_format=str(pre_task.get("image_format") or "jpg"),
+                    title_template=str(pre_task.get("title_template") or toolbox_store.DEFAULT_TITLE_TEMPLATE),
+                    set_file_time=bool(pre_task.get("set_file_time_to_publish", True)),
+                    proxy_url=proxy_url,
+                    on_gate_cb=_on_gate,
+                    job_request=pre_task,
+                )
+            elif plat_code == "xiaohongshu":
+                result = eng.collect_xhs_keyword(
+                    pre_task.get("keyword") or "",
+                    count=int(pre_task.get("count") or 20),
+                    allow_video=bool(pre_task.get("allow_video", False)),
+                    media_type=str(pre_task.get("media_type") or ("all" if pre_task.get("allow_video") else "image")),
+                    skip_ids=skip_ids,
+                    proxy_url=proxy_url,
+                    on_gate_cb=_on_gate,
+                    job_request=pre_task,
+                )
+            else:
+                cnt_val = int(pre_task.get("count") if pre_task.get("count") is not None else 20)
+                result = eng.collect_douyin_keyword(
+                    pre_task.get("keyword") or "",
+                    count=cnt_val,
+                    min_images=int(pre_task.get("min_images") or 4),
+                    max_images=int(pre_task.get("max_images") or 20),
+                    allow_video=bool(pre_task.get("allow_video", False)),
+                    media_type=str(pre_task.get("media_type") or ("all" if pre_task.get("allow_video") else "image")),
+                    no_filter=bool(pre_task.get("no_filter", False)),
+                    all_results=(cnt_val == 0),
+                    direct_download=bool(pre_task.get("direct_download", True)),
+                    web_sort=str(pre_task.get("web_sort") or "综合排序"),
+                    web_publish_time=str(pre_task.get("web_publish_time") or "不限"),
+                    skip_ids=skip_ids,
+                    output_dir=str(pre_task.get("output_dir") or DEFAULT_OUTPUT_DIR),
+                    image_format=str(pre_task.get("image_format") or "jpg"),
+                    title_template=str(pre_task.get("title_template") or toolbox_store.DEFAULT_TITLE_TEMPLATE),
+                    set_file_time=bool(pre_task.get("set_file_time_to_publish", True)),
+                    proxy_url=proxy_url,
+                    on_gate_cb=_on_gate,
+                    job_request=pre_task,
+                )
+        else:
+            try:
+                process = subprocess.run(
+                    command,
+                    cwd=str(TOOLBOX_PROJECT),
+                    capture_output=True,
+                    text=True,
+                    encoding="utf-8",
+                    errors="replace",
+                    timeout=1800,
+                    creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+                )
+            except subprocess.TimeoutExpired:
+                _update_collection_task(
+                    job_id, status="unknown", stage="timeout",
+                    message="等待超时，无法确认原生采集是否结束；先查看原生任务状态，避免重复提交",
+                )
+                return
+            except (OSError, ValueError) as exc:
+                _update_collection_task(job_id, status="error", stage="worker", message=f"无法启动采集流程：{exc}")
+                return
+
+            result = _last_json_object(process.stdout) or _last_json_object(process.stderr)
+            if not result:
+                details = (process.stderr or process.stdout or "").strip()
+                _update_collection_task(
+                    job_id, status="error", stage="worker",
+                    message=(details[-500:] if details else f"采集流程未返回结果（退出码 {process.returncode}）"),
+                )
+                return
+
+        links = result.get("discovered_links") or []
+        task = None
+        with COLLECTION_TASKS_LOCK:
+            task = copy.deepcopy(COLLECTION_TASKS.get(job_id))
+
+        is_direct = bool(task and task.get("direct_download"))
+        download_info = result.get("download") if isinstance(result.get("download"), dict) else {}
+        download_items = download_info.get("items") or result.get("items") or []
+        success_downloads = int(download_info.get("success_count") or sum(1 for it in download_items if it.get("completion_confirmed") or it.get("downloaded")))
+        media_count = int(result.get("media_file_count") or sum(int(it.get("media_file_count") or 0) for it in download_items))
+        skipped_dup = int(result.get("skipped_duplicate_count") or 0)
+
+        dl_by_id = {str(it.get("id") or ""): it for it in download_items if isinstance(it, dict) and it.get("id")}
+        raw_candidates = result.get("candidates") or download_items or []
+        candidates = []
+        seen_cids = set()
+        for c in raw_candidates:
+            if isinstance(c, dict):
+                cid = str(c.get("id") or "")
+                merged = dict(c)
+                if cid and cid in dl_by_id:
+                    for k in ("download_status", "save_directory", "image_count", "media_file_count", "downloaded", "completion_confirmed"):
+                        if dl_by_id[cid].get(k) not in (None, ""):
+                            merged[k] = dl_by_id[cid][k]
+                    seen_cids.add(cid)
+                candidates.append(merged)
+            else:
+                candidates.append(c)
+        for cid, it in dl_by_id.items():
+            if cid not in seen_cids:
+                candidates.append(it)
+        if candidates and task:
+            try:
+                toolbox_store.record_discovered_artworks(
+                    candidates,
+                    platform=task.get("platform") or "douyin",
+                    source=task.get("label") or task.get("kind") or "collection",
+                    mark_current=True,
+                    bridge_dir=TOOLBOX_BRIDGE_DIR,
+                )
+            except Exception:
+                pass
+
+        if is_direct and (success_downloads > 0 or result.get("success") is True):
+            if task.get("kind") == "keyword" and task.get("keyword"):
+                try:
+                    toolbox_store.mark_keyword_collected(
+                        task.get("keyword"),
+                        platform=task.get("platform") or "douyin",
+                        count=success_downloads,
+                        bridge_dir=TOOLBOX_BRIDGE_DIR,
+                    )
+                except Exception:
+                    pass
+            saved_pkg_dirs = []
+            for it in download_items:
+                if it.get("completion_confirmed") or it.get("downloaded"):
+                    sd = str(it.get("save_directory") or "").strip()
+                    if sd:
+                        saved_pkg_dirs.append(sd)
+                    try:
+                        add_history(
+                            it.get("url") or "",
+                            str(it.get("id") or ""),
+                            it.get("title") or "抖音图文作品",
+                            sd,
+                        )
+                    except Exception:
+                        pass
+            dl_cfg = copy.deepcopy((toolbox_store.get_settings(bridge_dir=TOOLBOX_BRIDGE_DIR) or {}).get("download", {}))
+            auto_ingest = task.get("auto_ingest_material")
+            if auto_ingest is None:
+                auto_ingest = bool(dl_cfg.get("auto_ingest_material", False))
+            ingest_summary = None
+            if auto_ingest and saved_pkg_dirs:
+                plat_hint = "小红书" if (task.get("platform") or "douyin") == "xiaohongshu" else "抖音"
+                src_label = "万能采集器·关键词" if task.get("kind") == "keyword" else "万能采集器·主页"
+                ingest_summary = toolbox_store.ingest_downloaded_packages(
+                    saved_pkg_dirs,
+                    dl_cfg,
+                    source_label=src_label,
+                    platform_hint=plat_hint,
+                )
+                by_source = ingest_summary.get("by_source", {})
+                updated_rows = []
+                for it in download_items:
+                    sd = str(it.get("save_directory") or "").strip()
+                    if not sd:
+                        continue
+                    src_key = str(Path(sd).expanduser().resolve())
+                    if src_key in by_source:
+                        row_patch = dict(it)
+                        toolbox_store._apply_ingest_info_to_row(
+                            row_patch,
+                            by_source[src_key],
+                            copy_only=bool(dl_cfg.get("auto_ingest_copy_only", True)),
+                        )
+                        updated_rows.append(row_patch)
+                if updated_rows:
+                    try:
+                        toolbox_store.record_discovered_artworks(
+                            updated_rows,
+                            platform=task.get("platform") or "douyin",
+                            source=task.get("label") or task.get("kind") or "collection",
+                            mark_current=None,
+                            bridge_dir=TOOLBOX_BRIDGE_DIR,
+                        )
+                    except Exception:
+                        pass
+            final_msg = f"已成功采集并下载 {success_downloads} 套作品（共 {media_count} 张图文素材）"
+            if skipped_dup:
+                final_msg += f"；已去重跳过 {skipped_dup} 条已采作品"
+            if ingest_summary and ingest_summary.get("attempted"):
+                final_msg += f"；自动入库：{ingest_summary['summary']}"
             _update_collection_task(
                 job_id,
-                status="download_queued",
-                stage="download",
-                discovered_count=len(links),
-                download_job_id=download_job_id,
-                message=f"已发现 {len(links)} 条公开链接，已加入万能下载器队列",
-                completion_confirmed=False,
+                status="completed",
+                stage="completed",
+                discovered_count=len(candidates) or len(links),
+                skipped_duplicate_count=skipped_dup,
+                message=final_msg,
+                ingest=ingest_summary,
+                completion_confirmed=True,
+            )
+            def _notify_done():
+                try:
+                    from xhs_dl.web import notifier
+                    first_target = ""
+                    if ingest_summary and ingest_summary.get("results"):
+                        first_target = next((str(r.get("target_dir") or "") for r in ingest_summary["results"] if r.get("success")), "")
+                    if not first_target and saved_pkg_dirs:
+                        first_target = saved_pkg_dirs[0]
+                    notifier.dispatch_workbench_notification(
+                        "completed",
+                        "✅ 万能采集器采集完成",
+                        f"任务：{task.get('label') or task.get('keyword') or '采集任务'}\n{final_msg}",
+                        settings=toolbox_store.get_settings(bridge_dir=TOOLBOX_BRIDGE_DIR),
+                        action_target=first_target,
+                        platform=task.get("platform") or "douyin",
+                        dedup_key=f"done:{job_id}",
+                        cooldown_seconds=10.0,
+                    )
+                except Exception:
+                    pass
+            threading.Thread(target=_notify_done, daemon=True).start()
+            return
+
+        if task and task.get("kind") == "keyword" and not is_direct and candidates:
+            if task.get("keyword"):
+                try:
+                    toolbox_store.mark_keyword_collected(
+                        task.get("keyword"),
+                        platform=task.get("platform") or "douyin",
+                        count=len(candidates),
+                        bridge_dir=TOOLBOX_BRIDGE_DIR,
+                    )
+                except Exception:
+                    pass
+            msg_list = f"已采集 {len(candidates)} 条合格图文到作品列表（可在作品列表勾选后直接下载）"
+            if skipped_dup:
+                msg_list += f"；已去重跳过 {skipped_dup} 条已采作品"
+            _update_collection_task(
+                job_id,
+                status="completed",
+                stage="completed",
+                discovered_count=len(candidates),
+                skipped_duplicate_count=skipped_dup,
+                message=msg_list,
+                completion_confirmed=True,
             )
             return
 
-    accepted = result.get("accepted") is True or result.get("outcome") == "accepted"
-    status = "accepted" if accepted else (
-        "completed" if result.get("success") is True else str(result.get("status") or "error")
-    )
-    _update_collection_task(
-        job_id,
-        status=status,
-        stage=result.get("stage", "collection"),
-        discovered_count=len(links),
-        outcome=result.get("outcome", ""),
-        completion_confirmed=bool(result.get("completion_confirmed")),
-        native_job_id=result.get("job_id", ""),
-        message=result.get("message") or "采集流程已返回",
-    )
+        if links and task:
+            download_job_id = _queue_collection_links(task, links)
+            if download_job_id:
+                _update_collection_task(
+                    job_id,
+                    status="download_queued",
+                    stage="download",
+                    discovered_count=len(links),
+                    download_job_id=download_job_id,
+                    message=f"已读取 {len(links)} 条作品链接，已加入万能下载器队列",
+                    completion_confirmed=False,
+                )
+                return
+
+        accepted = result.get("accepted") is True or result.get("outcome") == "accepted"
+        status = "accepted" if accepted else (
+            "completed" if result.get("success") is True else str(result.get("status") or "error")
+        )
+        msg_term = result.get("message") or "采集流程已返回"
+        if status in {"verification_required", "login_required"} and not _use_native_engine():
+            evt = "verification" if status == "verification_required" else "login"
+            kw_label = (task or {}).get("label") or (task or {}).get("keyword") or "采集任务"
+            plat_code = (task or {}).get("platform") or "douyin"
+            def _notify_gate():
+                try:
+                    from xhs_dl.web import notifier
+                    notifier.dispatch_workbench_notification(
+                        evt,
+                        "⚠️ 万能采集器需要人工验证" if evt == "verification" else "⚠️ 万能采集器需要重新登录",
+                        f"任务：{kw_label}\n详情：{msg_term}\n已自动弹窗并置顶浏览器窗口，请人工完成后点击「继续采集」。",
+                        settings=toolbox_store.get_settings(bridge_dir=TOOLBOX_BRIDGE_DIR),
+                        platform=plat_code,
+                        dedup_key=f"gate:{evt}:{plat_code}:{kw_label}",
+                        cooldown_seconds=60.0,
+                        bring_verify_fn=lambda topmost=True: toolbox_store.focus_and_bring_verify_browser(
+                            TOOLBOX_BRIDGE_DIR,
+                            TOOLBOX_PROJECT,
+                            _python_console_executable(),
+                            topmost=topmost,
+                        ),
+                    )
+                except Exception:
+                    pass
+            threading.Thread(target=_notify_gate, daemon=True).start()
+
+        _update_collection_task(
+            job_id,
+            status=status,
+            stage=result.get("stage", "collection"),
+            discovered_count=len(links),
+            skipped_duplicate_count=skipped_dup,
+            outcome=result.get("outcome", ""),
+            completion_confirmed=bool(result.get("completion_confirmed")),
+            native_job_id=result.get("job_id", ""),
+            message=msg_term,
+        )
+    finally:
+        for cf in (cleanup_files or []):
+            try:
+                Path(cf).unlink(missing_ok=True)
+            except OSError:
+                pass
 
 
 def _validate_douyin_profile(value):
@@ -410,6 +827,7 @@ def _validate_douyin_profile(value):
 def _create_collection_task(kind, label, request, idempotency_key):
     request = copy.deepcopy(request)
     command = request.pop("_command")
+    cleanup_files = request.pop("_cleanup_files", None)
     fingerprint = hashlib.sha256(
         json.dumps(request, sort_keys=True, ensure_ascii=False).encode("utf-8")
     ).hexdigest()
@@ -450,286 +868,28 @@ def _create_collection_task(kind, label, request, idempotency_key):
     _save_collection_tasks()
     threading.Thread(
         target=_run_collection_discovery,
-        args=(job_id, command),
+        args=(job_id, command, cleanup_files),
         daemon=True,
         name=f"collection-{kind}-{job_id[:8]}",
     ).start()
     return _collection_task_payload(task), None, 202
 
 
-TEMPLATE = r"""<!DOCTYPE html>
-<html lang="zh-CN">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width,initial-scale=1.0">
-<meta name="color-scheme" content="light">
-<title>xhs-dl · 无水印下载</title>
-<style>
-:root{--radius-xl:28px;--radius-lg:22px;--radius-md:14px;--ease:220ms ease}
-*{box-sizing:border-box}
-html,body{margin:0;min-height:100%;font-family:"Microsoft YaHei UI","PingFang SC","Noto Sans CJK SC",sans-serif}
-body[data-theme="neo"]{
-  --bg:#e8edf3;--panel:#e2eaf2;--soft:#dce4ec;--line:#d1dbe4;
-  --text:#242a31;--muted:#61758a;--primary:#263442;--primary-hover:#17222e;
-  --active:#d7e4ef;--input:rgba(255,255,255,.34);--ok:#2f7b62;--bad:#a95055;
-  --shadow:8px 8px 20px #c8d0d8,-8px -8px 20px #fbfdff;
-  --shadow-hover:10px 10px 22px #c0c8d0,-10px -10px 22px #fff;
-  --shadow-small:5px 5px 12px #c7cfd7,-5px -5px 12px #fbfdff;
-  --shadow-inset:inset 3px 3px 7px #c8d0d8,inset -3px -3px 7px #f8fbfe;
-}
-body[data-theme="glass"]{
-  --bg:#dfeaf2;--panel:rgba(235,244,249,.86);--soft:rgba(216,229,238,.72);
-  --line:rgba(117,145,166,.18);--text:#102b45;--muted:#617a91;
-  --primary:#2f6f9f;--primary-hover:#245c86;--active:#d6e7f8;
-  --input:rgba(245,250,253,.66);--ok:#27785d;--bad:#a44d55;
-  --shadow:8px 9px 20px rgba(105,132,151,.18),-5px -5px 13px rgba(255,255,255,.72);
-  --shadow-hover:10px 12px 24px rgba(95,123,143,.22),-5px -5px 15px rgba(255,255,255,.78);
-  --shadow-small:5px 6px 13px rgba(105,132,151,.16),-3px -3px 9px rgba(255,255,255,.68);
-  --shadow-inset:inset 2px 2px 5px rgba(117,145,166,.16),inset -2px -2px 5px rgba(255,255,255,.52);
-}
-body{background:var(--bg);color:var(--text);padding:32px;transition:background var(--ease),color var(--ease)}
-body[data-theme="glass"]:before{content:"";position:fixed;inset:0;pointer-events:none;background:radial-gradient(circle at 14% 18%,rgba(255,255,255,.55),transparent 34%),radial-gradient(circle at 84% 76%,rgba(146,181,204,.22),transparent 36%)}
-.shell{position:relative;z-index:1;max-width:1480px;margin:0 auto}
-.topbar{display:flex;align-items:center;justify-content:space-between;margin-bottom:24px;padding:4px 6px;gap:16px}
-.brand{display:flex;align-items:center;gap:14px}
-.mark{width:48px;height:48px;border-radius:16px;display:grid;place-items:center;background:var(--panel);box-shadow:var(--shadow-small);font-family:Georgia,serif;font-size:21px;font-weight:700;letter-spacing:-1px}
-.brand h1{font-family:Georgia,"Noto Serif SC",serif;font-size:25px;line-height:1;margin:0 0 7px;letter-spacing:-.4px}
-.brand p{margin:0;color:var(--muted);font-size:13px}
-.top-actions{display:flex;align-items:center;gap:10px;flex:0 0 auto}
-.theme-switch,.settings-button{white-space:nowrap;border:1px solid var(--line);background:var(--panel);color:var(--text);box-shadow:var(--shadow-small);border-radius:999px;padding:10px 15px;cursor:pointer;transition:box-shadow var(--ease),transform var(--ease)}
-.collector-switch{display:flex;align-items:center;gap:8px;white-space:nowrap;border:1px solid var(--line);background:var(--panel);color:var(--text);box-shadow:var(--shadow-small);border-radius:999px;padding:8px 12px;cursor:pointer;transition:box-shadow var(--ease),transform var(--ease);font:inherit;font-size:12px}
-.collector-switch:hover{box-shadow:var(--shadow-hover)}.collector-switch:active{box-shadow:var(--shadow-inset);transform:translateY(1px)}.collector-switch:disabled{cursor:not-allowed;opacity:.62}
-.collector-led{width:9px;height:9px;border-radius:50%;background:var(--ok);box-shadow:0 0 0 4px rgba(47,123,98,.12)}.collector-switch[aria-checked="false"] .collector-led{background:#a95055;box-shadow:0 0 0 4px rgba(169,80,85,.12)}
-.theme-switch:hover{box-shadow:var(--shadow-hover)}
-.settings-button:hover{box-shadow:var(--shadow-hover)}
-.theme-switch:active{box-shadow:var(--shadow-inset);transform:translateY(1px)}
-.settings-button:active{box-shadow:var(--shadow-inset);transform:translateY(1px)}
-.workspace{display:grid;grid-template-columns:minmax(0,1.25fr) minmax(300px,.75fr);gap:24px;align-items:start}
-.app-layout{display:grid;grid-template-columns:184px minmax(0,1fr);gap:18px;align-items:start}
-.side-nav{position:sticky;top:18px;display:grid;gap:8px;padding:16px 12px;border:1px solid var(--line);border-radius:22px;background:var(--panel);box-shadow:var(--shadow-small)}
-.nav-caption{padding:4px 9px 7px;color:var(--muted);font-size:11px;font-weight:800;letter-spacing:.08em}
-.nav-item{width:100%;display:grid;gap:4px;text-align:left;border:1px solid transparent;border-radius:14px;background:transparent;color:var(--text);padding:12px 10px;cursor:pointer;font:inherit;transition:background var(--ease),border-color var(--ease),box-shadow var(--ease)}
-.nav-item span{font-size:13px;font-weight:800}.nav-item small{color:var(--muted);font-size:10px;line-height:1.4}
-.nav-item:hover{background:var(--soft)}.nav-item[aria-selected="true"]{background:var(--active);border-color:var(--line);box-shadow:var(--shadow-small)}
-.nav-tip{margin:8px 8px 2px;padding-top:12px;border-top:1px solid var(--line);color:var(--muted);font-size:11px;line-height:1.65}
-.work-panel{display:none;min-width:0}.work-panel.active{display:block}
-.form-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px;margin-top:20px}
-.form-grid .wide{grid-column:1/-1}
-.form-help{margin:8px 0 0;color:var(--muted);font-size:11px;line-height:1.6}
-.capability-status{margin:10px 0 0;color:var(--muted);font-size:11px;line-height:1.6}
-.collection-status{margin-top:16px;padding:13px 14px;border:1px solid var(--line);border-radius:14px;background:var(--soft);color:var(--muted);font-size:12px;line-height:1.65;overflow-wrap:anywhere}
-.collection-status strong{display:block;margin-bottom:3px;color:var(--text);font-size:13px}
-.collection-status[data-state="running"]{border-color:rgba(71,123,157,.45)}.collection-status[data-state="error"],.collection-status[data-state="verification_required"],.collection-status[data-state="login_required"]{border-color:rgba(169,80,85,.45);color:var(--bad)}
-.collection-status[hidden]{display:none}
-.right-stack{display:grid;gap:18px;min-width:0}
-.surface{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius-xl);box-shadow:var(--shadow);padding:28px;transition:background var(--ease),box-shadow var(--ease)}
-body[data-theme="glass"] .surface{backdrop-filter:blur(16px) saturate(115%);-webkit-backdrop-filter:blur(16px) saturate(115%)}
-.eyebrow{display:flex;align-items:center;gap:8px;color:var(--muted);font-size:12px;letter-spacing:.12em;text-transform:uppercase;margin-bottom:10px}
-.eyebrow:before{content:"";width:24px;height:2px;border-radius:2px;background:var(--primary)}
-h2{font-family:Georgia,"Noto Serif SC",serif;font-size:29px;line-height:1.28;margin:0 0 10px;letter-spacing:-.5px}
-.lead{margin:0 0 24px;color:var(--muted);line-height:1.75;font-size:14px}
-label{display:block;font-size:13px;font-weight:700;margin-bottom:9px}
-textarea,input,select{width:100%;border:1px solid var(--line);background:var(--input);color:var(--text);border-radius:var(--radius-md);outline:none;box-shadow:var(--shadow-inset);transition:border-color var(--ease),box-shadow var(--ease);font:inherit}
-textarea{min-height:218px;padding:17px;resize:vertical;line-height:1.72}
-input,select{height:46px;padding:0 13px}
-textarea:focus,input:focus,select:focus{border-color:#6f9ab8;box-shadow:var(--shadow-inset),0 0 0 3px rgba(75,129,168,.15)}
-textarea::placeholder,input::placeholder{color:#8092a2}
-.settings{display:grid;grid-template-columns:minmax(220px,1fr) 160px 190px;gap:14px;padding:2px 14px 14px}
-.settings-dialog{width:min(460px,calc(100vw - 32px));max-width:none;max-height:min(88vh,640px);overflow:auto;border:1px solid var(--line);border-radius:24px;background:var(--panel);color:var(--text);padding:24px;box-shadow:var(--shadow-hover)}
-.settings-dialog::backdrop{background:rgba(22,34,46,.30);backdrop-filter:blur(3px)}
-.settings-dialog[open]{animation:modal-in 150ms ease-out}
-.dialog-heading{display:flex;align-items:flex-start;justify-content:space-between;gap:16px;margin-bottom:22px}
-.dialog-heading h2{font-size:23px;margin:0}
-.dialog-heading p{margin:0 0 7px;color:var(--muted);font-size:12px}
-.settings-dialog .settings{grid-template-columns:1fr;gap:16px;padding:0}
-.settings-dialog .settings-note{margin:18px 0 0;padding:0;color:var(--muted);font-size:12px;line-height:1.7}
-.dialog-actions{display:flex;justify-content:flex-end;margin-top:22px}
-.dialog-close,.dialog-done{border:1px solid var(--line);border-radius:12px;background:var(--panel);color:var(--text);padding:9px 15px;cursor:pointer;box-shadow:var(--shadow-small);font:inherit}
-.dialog-close{width:36px;height:36px;padding:0;font-size:20px;line-height:1}
-.dialog-done{min-width:92px;font-weight:700}
-.primary{width:100%;height:52px;margin-top:20px;border:0;border-radius:16px;background:var(--primary);color:#f7fafc;font-size:15px;font-weight:800;letter-spacing:.04em;cursor:pointer;box-shadow:0 10px 22px rgba(38,52,66,.2);transition:background var(--ease),transform var(--ease),box-shadow var(--ease)}
-.primary:hover{background:var(--primary-hover);transform:translateY(-1px);box-shadow:0 12px 26px rgba(38,52,66,.25)}
-.primary:active{transform:translateY(1px);box-shadow:0 5px 12px rgba(38,52,66,.22)}
-.primary:disabled{cursor:not-allowed;opacity:.58;transform:none;box-shadow:none}
-.privacy{display:flex;gap:10px;margin-top:16px;color:var(--muted);font-size:12px;line-height:1.65}
-.shield{flex:0 0 25px;height:25px;border-radius:9px;display:grid;place-items:center;background:var(--active);font-size:12px}
-.settings-note{margin:2px 0 0;padding:0 14px 14px;color:var(--muted);font-size:11px;line-height:1.65}
-.waiting-card,.queue-card,.history-card{padding:22px 24px}
-.panel-head{display:flex;align-items:center;justify-content:space-between;gap:12px}
-.panel-title{font-size:16px;font-weight:800;margin:0}.panel-sub{font-size:12px;color:var(--muted);margin:6px 0 0;line-height:1.55}
-.count-badge{min-width:42px;height:34px;padding:0 10px;display:grid;place-items:center;border-radius:12px;background:var(--active);color:var(--text);font-size:18px;font-weight:800;box-shadow:var(--shadow-small)}
-.queue-list,.history-list{display:flex;flex-direction:column;gap:9px;margin-top:15px;max-height:220px;overflow:auto;padding:2px 4px 2px 1px}
-.history-more{margin-top:12px;border:1px solid var(--line);border-radius:12px;background:var(--panel);color:var(--text);padding:9px 13px;cursor:pointer;box-shadow:var(--shadow-small);font:inherit;font-size:12px}.history-more:hover{box-shadow:var(--shadow-hover)}.history-more:disabled{cursor:wait;opacity:.65}
-.task-row{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:11px 12px;border:1px solid var(--line);border-radius:13px;background:var(--soft);font-size:12px;line-height:1.45}
-.task-main{min-width:0;flex:1}.task-title{display:block;font-weight:700;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.task-meta{display:block;color:var(--muted);margin-top:3px;font-size:11px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.task-location{display:block;color:var(--muted);margin-top:4px;font-size:11px;line-height:1.45;white-space:normal;overflow-wrap:anywhere}.history-row{align-items:flex-start}.history-row .task-state{padding-top:2px}.task-state{flex:0 0 auto;color:var(--muted);font-size:11px}.task-state.ok{color:var(--ok)}.task-state.fail{color:var(--bad)}
-.panel-empty{padding:13px 4px 2px;color:var(--muted);font-size:12px}
-.status-card{min-height:420px;display:flex;flex-direction:column}
-.status-head{display:flex;align-items:flex-start;justify-content:space-between;gap:16px}
-.state-dot{width:11px;height:11px;border-radius:999px;background:#8da0af;box-shadow:0 0 0 6px rgba(141,160,175,.12);margin-top:6px;transition:background var(--ease)}
-.state-dot.running{background:#477b9d;animation:pulse 1.8s infinite}
-.state-dot.done{background:var(--ok);box-shadow:0 0 0 6px rgba(47,123,98,.12)}
-.state-dot.error{background:var(--bad);box-shadow:0 0 0 6px rgba(169,80,85,.12)}
-.status-title{font-size:17px;font-weight:800;margin:0}.status-sub{font-size:12px;color:var(--muted);margin:6px 0 0}
-.progress-wrap{margin:24px 0 18px}.progress-track{height:9px;border-radius:999px;background:var(--soft);box-shadow:var(--shadow-inset);overflow:hidden}
-.progress-bar{height:100%;width:0;background:linear-gradient(90deg,#426f8d,#6b91aa);border-radius:inherit;transition:width 520ms ease}
-.progress-bar.active{width:38%;animation:travel 1.1s ease-in-out infinite}
-.progress-meta{display:flex;justify-content:space-between;margin-top:9px;color:var(--muted);font-size:12px}
-.empty{margin:auto 0;text-align:center;color:var(--muted);padding:34px 16px}
-.empty-symbol{width:72px;height:72px;border-radius:24px;margin:0 auto 18px;display:grid;place-items:center;background:var(--panel);box-shadow:var(--shadow-small);font-family:Georgia,serif;font-size:28px;color:#6d8192}
-.empty strong{display:block;color:var(--text);font-size:14px;margin-bottom:8px}
-.results{display:none;gap:10px;flex-direction:column;max-height:330px;overflow:auto;padding:4px 5px 4px 2px}
-.results.show{display:flex}.result{padding:13px 14px;border-radius:14px;background:var(--soft);border:1px solid var(--line);font-size:13px;line-height:1.55}
-.result-top{display:flex;justify-content:space-between;gap:10px}.result-name{font-weight:700;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.result-count{white-space:nowrap;color:var(--muted);font-size:12px}
-.result.ok{border-left:3px solid var(--ok)}.result.fail{border-left:3px solid var(--bad)}
-.result-error{color:var(--bad);font-size:12px;margin-top:4px}
-.footnote{text-align:center;color:var(--muted);font-size:11px;margin-top:22px;line-height:1.7}
-button:focus-visible,textarea:focus-visible,input:focus-visible,select:focus-visible{outline:3px solid rgba(47,111,159,.32);outline-offset:3px}
-@keyframes pulse{0%,100%{box-shadow:0 0 0 5px rgba(71,123,157,.13)}50%{box-shadow:0 0 0 10px rgba(71,123,157,.04)}}
-@keyframes travel{0%{transform:translateX(-110%)}50%{transform:translateX(80%)}100%{transform:translateX(280%)}}
-@keyframes modal-in{from{opacity:0;transform:translateY(8px) scale(.985)}to{opacity:1;transform:translateY(0) scale(1)}}
-@media(max-width:980px){.app-layout{grid-template-columns:1fr}.side-nav{position:static;grid-template-columns:1fr}.nav-items{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:7px}.nav-tip{grid-column:1/-1;margin-top:3px}}
-@media(max-width:760px){body{padding:18px 14px}.workspace{grid-template-columns:1fr}.surface{padding:20px;border-radius:22px}.settings{grid-template-columns:1fr}.topbar{align-items:flex-start}.brand p{max-width:210px}.status-card{min-height:330px}}
-@media(max-width:480px){.topbar{gap:10px}.brand{min-width:0;gap:10px}.brand p{display:none}.mark{width:40px;height:40px;border-radius:13px;font-size:18px}.brand h1{font-size:22px;margin:9px 0 0}.theme-switch,.settings-button{padding:9px 11px;font-size:12px}.collector-switch{padding:8px 9px;font-size:11px;gap:6px}.surface{padding:18px}textarea{min-height:190px}.side-nav{padding:11px 9px}.nav-items{gap:5px}.nav-item{padding:10px 7px}.nav-item span{font-size:11px}.nav-item small{font-size:9px}.form-grid{grid-template-columns:1fr}.form-grid .wide{grid-column:auto}}
-@media(prefers-reduced-motion:reduce){*,*:before,*:after{animation:none!important;transition:none!important;scroll-behavior:auto!important}}
-@supports not ((backdrop-filter:blur(1px)) or (-webkit-backdrop-filter:blur(1px))){body[data-theme="glass"] .surface{background:#edf4f8}}
-</style>
-</head>
-<body data-theme="neo">
-<main class="shell">
-  <header class="topbar">
-    <div class="brand"><div class="mark">∞</div><div><h1>__APP_NAME__</h1><p>多平台公开媒体 · 本地保存 · 无需登录</p></div></div>
-    <div class="top-actions"><button class="collector-switch" id="collectorToggle" type="button" role="switch" aria-checked="true" aria-label="剪贴板单链接采集开关" title="独立后台监控剪贴板；每条复制内容只采集一条链接"><span class="collector-led" aria-hidden="true"></span><span id="collectorToggleText">剪贴板采集 开</span></button><button class="settings-button" id="settingsButton" type="button" aria-haspopup="dialog" aria-controls="settingsDialog">设置</button><button class="theme-switch" id="themeButton" type="button" aria-label="切换视觉主题">玻璃主题</button></div>
-  </header>
-  <div class="app-layout">
-    <aside class="side-nav" aria-label="采集入口">
-      <div class="nav-caption">采集入口</div>
-      <div class="nav-items" role="tablist" aria-orientation="vertical">
-        <button class="nav-item" id="tabSingle" type="button" role="tab" aria-selected="true" aria-controls="singlePanel" data-view="single"><span>单作品采集</span><small>万能下载器</small></button>
-        <button class="nav-item" id="tabHomepage" type="button" role="tab" aria-selected="false" aria-controls="homepagePanel" data-view="homepage"><span>主页采集</span><small>发现主页公开图文</small></button>
-        <button class="nav-item" id="tabKeyword" type="button" role="tab" aria-selected="false" aria-controls="keywordPanel" data-view="keyword"><span>关键词采集</span><small>发现抖音公开图文</small></button>
-      </div>
-      <p class="nav-tip">剪贴板是独立后台入口，每次只处理一条链接；下载成功后与手动下载共用本机查重和历史。</p>
-    </aside>
-  <section class="workspace">
-    <section class="surface work-panel active" id="singlePanel" role="tabpanel" aria-labelledby="tabSingle" data-panel="single">
-      <div class="eyebrow">Original media</div>
-      <h2>粘贴链接，保存原图。</h2>
-      <p class="lead">当前万能下载器入口。手动粘贴支持单条或多条公开链接；右上角剪贴板后台仍按每次一条链接采集。默认保存到电脑的“下载”文件夹。</p>
-      <label for="input">分享文本或链接</label>
-      <textarea id="input" placeholder="例如：复制小红书或抖音分享文本到这里，也可以一次粘贴多条链接。"></textarea>
-      <button class="primary" id="go" type="button">开始下载</button>
-      <div class="privacy"><span class="shield">✓</span><span>公开笔记无需账号、密码或 Cookie。链接默认只交给本机引擎，不会静默发送到在线解析网站。</span></div>
-    </section>
-    <section class="surface work-panel" id="homepagePanel" role="tabpanel" aria-labelledby="tabHomepage" data-panel="homepage" hidden>
-      <div class="eyebrow">Homepage collection</div>
-      <h2>从主页发现公开图文。</h2>
-      <p class="lead">填写一个抖音作者主页。发现的作品会加入右侧同一万能下载队列，沿用保存位置、原格式、查重和历史记录。</p>
-      <label for="authorUrl">抖音作者主页链接</label>
-      <textarea id="authorUrl" style="min-height:112px" placeholder="https://www.douyin.com/user/…"></textarea>
-      <p class="form-help">默认读取主页前 10 条可见图文。需要登录或遇到验证时会停止，并提示你在原生浏览器处理。</p>
-      <p class="capability-status" id="homepageCapability" role="status">正在读取江湖工具箱状态…</p>
-      <div class="collection-status" id="homepageStatus" role="status" aria-live="polite" hidden></div>
-      <button class="primary" id="startHomepage" type="button">采集主页并加入下载队列</button>
-      <div class="privacy"><span class="shield">✓</span><span>目前主页发现支持抖音公开页面；小红书主页采集未接入此入口。</span></div>
-    </section>
-    <section class="surface work-panel" id="keywordPanel" role="tabpanel" aria-labelledby="tabKeyword" data-panel="keyword" hidden>
-      <div class="eyebrow">Keyword collection</div>
-      <h2>按关键词发现图文。</h2>
-      <p class="lead">搜索列表只读取公开图文卡片，不打开详情页。发现的作品加入同一个万能下载器队列。</p>
-      <div class="form-grid">
-        <div class="wide"><label for="keywordValue">关键词</label><input id="keywordValue" type="text" maxlength="100" placeholder="例如：江浙沪团建"></div>
-        <div><label for="keywordCount">目标作品数</label><input id="keywordCount" type="number" min="1" max="30" value="20"></div>
-        <div><label for="minImages">最少图片数</label><input id="minImages" type="number" min="0" max="50" value="4"></div>
-        <div class="wide"><label for="maxImages">最多图片数</label><input id="maxImages" type="number" min="0" max="50" value="20"></div>
-      </div>
-      <p class="form-help">一次提交一个关键词，最多发现 30 条；默认只采图文，图片张数筛选为 4–20 张。</p>
-      <p class="capability-status" id="keywordCapability" role="status">正在读取江湖工具箱状态…</p>
-      <div class="collection-status" id="keywordStatus" role="status" aria-live="polite" hidden></div>
-      <button class="primary" id="startKeyword" type="button">发现图文并加入下载队列</button>
-      <div class="privacy"><span class="shield">✓</span><span>目前此面板接入抖音列表流程。遇到登录或人机验证会停下；不会绕过验证。小红书关键词仍需其原生核心，不从这里跨平台补采。</span></div>
-    </section>
-    <aside class="right-stack" aria-live="polite">
-      <section class="surface waiting-card">
-        <div class="panel-head"><div><p class="panel-title">等待任务</p><p class="panel-sub" id="waitingSub">当前没有排队的下载</p></div><span class="count-badge" id="waitingCount">0</span></div>
-      </section>
-      <section class="surface status-card">
-        <div class="status-head"><div><p class="status-title" id="statusTitle">正在进行的任务</p><p class="status-sub" id="statusSub">还没有开始下载</p></div><span class="state-dot" id="stateDot"></span></div>
-        <div class="progress-wrap"><div class="progress-track"><div class="progress-bar" id="progressBar"></div></div><div class="progress-meta"><span id="progressText">0 / 0</span><span id="successText">成功 0</span></div></div>
-        <div class="empty" id="empty"><div class="empty-symbol">↓</div><strong>结果会在这里逐条出现</strong><span>关闭页面不会删除已经保存到本地的文件。</span></div>
-        <div class="results" id="results"></div>
-      </section>
-      <section class="surface queue-card">
-        <div class="panel-head"><div><p class="panel-title">排队任务</p><p class="panel-sub" id="queueSub">读取本机下载队列和剪贴板队列</p></div></div>
-        <div class="queue-list" id="queueList"><div class="panel-empty">暂无排队任务</div></div>
-      </section>
-      <section class="surface history-card">
-        <div class="panel-head"><div><p class="panel-title">历史下载记录</p><p class="panel-sub" id="historySub">正在读取本机下载档案</p></div></div>
-        <div class="history-list" id="historyList"><div class="panel-empty">暂无历史记录</div></div>
-        <button class="history-more" id="historyMore" type="button" hidden>加载更多历史记录</button>
-      </section>
-    </aside>
-  </section>
-  </div>
-  <p class="footnote">仅处理你有权保存的公开内容 · 创作者嵌入原图的署名会保留 · __APP_NAME__ V__APP_VERSION__</p>
-</main>
-<dialog class="settings-dialog" id="settingsDialog" aria-labelledby="settingsTitle">
-  <div class="dialog-heading"><div><p>本机下载偏好</p><h2 id="settingsTitle">下载设置</h2></div><button class="dialog-close" id="settingsClose" type="button" aria-label="关闭设置">×</button></div>
-  <div class="settings">
-    <div><label for="outdir">保存位置</label><input id="outdir" type="text" autocomplete="off"></div>
-    <div><label for="mode">下载节奏</label><select id="mode"><option value="auto" selected>智能 · 随结果调节</option><option value="fast">快速 · 3–8 秒</option><option value="normal">标准 · 8–15 秒</option><option value="cautious">稳妥 · 35–55 秒</option><option value="slow">慢速 · 55–85 秒</option><option value="very-slow">极慢 · 110–160 秒</option></select></div>
-    <div><label for="format">图片格式</label><select id="format"><option value="keep" selected>保持原格式（推荐）</option><option value="jpg">JPG</option><option value="png">PNG（无损）</option></select></div>
-  </div>
-  <p class="settings-note">修改后会自动保存在本机。其他本机软件也可调用 <code>POST /api/v1/jobs</code>；<a href="/api/openapi.json" target="_blank" rel="noreferrer">查看接口规范</a>。</p>
-  <div class="dialog-actions"><button class="dialog-done" id="settingsDone" type="button">完成</button></div>
-</dialog>
-<script>
-const THEME_KEY='xhs-dl-theme',OUTPUT_KEY='xhs-dl-output',MODE_KEY='xhs-dl-mode',FORMAT_KEY='xhs-dl-format',DEFAULT_OUTPUT=__DEFAULT_OUTPUT_JSON__,MIN_PROGRESS_MS=1100;
-const $=id=>document.getElementById(id);let activeJob=null,pollTimer=null,jobStartedAt=0,collectorEnabled=true,collectorOnline=false,collectorStartingUntil=0,historyItems=[],historyOffset=0,historyTotal=0;
-function applyTheme(theme){const next=theme==='glass'?'glass':'neo';document.body.dataset.theme=next;localStorage.setItem(THEME_KEY,next);$('themeButton').textContent=next==='neo'?'玻璃主题':'拟态主题'}
-applyTheme(localStorage.getItem(THEME_KEY)||'neo');
-$('themeButton').addEventListener('click',()=>applyTheme(document.body.dataset.theme==='neo'?'glass':'neo'));
-const settingsDialog=$('settingsDialog');
-$('settingsButton').addEventListener('click',()=>settingsDialog.showModal());
-$('settingsClose').addEventListener('click',()=>settingsDialog.close());
-$('settingsDone').addEventListener('click',()=>settingsDialog.close());
-settingsDialog.addEventListener('click',event=>{if(event.target===settingsDialog)settingsDialog.close()});
-$('outdir').value=localStorage.getItem(OUTPUT_KEY)||DEFAULT_OUTPUT;
-if(localStorage.getItem(MODE_KEY)==='cautious')localStorage.setItem(MODE_KEY,'auto');
-if(localStorage.getItem(FORMAT_KEY)==='jpg')localStorage.setItem(FORMAT_KEY,'keep');
-$('mode').value=localStorage.getItem(MODE_KEY)||'auto';$('format').value=localStorage.getItem(FORMAT_KEY)||'keep';
-$('outdir').addEventListener('change',e=>localStorage.setItem(OUTPUT_KEY,e.target.value.trim()));$('mode').addEventListener('change',e=>localStorage.setItem(MODE_KEY,e.target.value));$('format').addEventListener('change',e=>localStorage.setItem(FORMAT_KEY,e.target.value));
-function setState(status,title,sub){$('stateDot').className='state-dot '+status;$('statusTitle').textContent=title;$('statusSub').textContent=sub}
-function render(job){const total=job.total||0,done=job.done||0,success=job.success||0,running=job.status==='running'||job.status==='queued';$('progressBar').classList.toggle('active',running&&done===0);if(!(running&&done===0)){$('progressBar').style.transform='none';$('progressBar').style.width=(total?Math.round(done/total*100):0)+'%'}$('progressText').textContent=`${done} / ${total}`;$('successText').textContent=`成功 ${success}`;
-  const items=job.items||[];$('empty').style.display=items.length?'none':'block';$('results').classList.toggle('show',items.length>0);$('results').innerHTML='';items.forEach(it=>{const d=document.createElement('div');d.className='result '+(it.deduplicated?'ok':it.success?'ok':'fail');const top=document.createElement('div');top.className='result-top';const name=document.createElement('span');name.className='result-name';name.textContent=it.title||it.error||'未命名作品';const count=document.createElement('span');count.className='result-count';count.textContent=it.deduplicated?'已存在 · 跳过':it.success?`${it.image_success||0} 张`:'失败';top.append(name,count);d.append(top);if(!it.success&&!it.deduplicated&&it.error){const err=document.createElement('div');err.className='result-error';err.textContent=it.error;d.append(err)}$('results').append(d)});
-  const skipped=job.skipped||0;if(job.status==='queued')setState('running','等待执行',total?`排队中，共 ${total} 条`:'等待本地引擎');else if(job.status==='running')setState('running','正在逐条提取',total?`已完成 ${done} 条，共 ${total} 条`:'正在准备本地引擎');else if(job.status==='completed')setState(job.failed?'error':'done',job.failed?'任务完成，有失败项':skipped&&!(job.success||0)?'重复项已跳过':skipped?'任务完成（含重复项跳过）':'全部保存完成',`成功 ${job.success||0} 条，跳过 ${skipped} 条，失败 ${job.failed||0} 条`);else if(job.status==='error')setState('error','任务没有完成',job.error||'请稍后重试')}
-function renderRows(target,list,kind){target.innerHTML='';if(!list||!list.length){const empty=document.createElement('div');empty.className='panel-empty';empty.textContent=kind==='history'?'还没有本地成功下载记录':'当前队列为空';target.append(empty);return}list.forEach(job=>{const row=document.createElement('div');row.className='task-row'+(kind==='history'?' history-row':'');const main=document.createElement('div');main.className='task-main';const title=document.createElement('span');title.className='task-title';const first=(job.items||[])[0];title.textContent=job.title||job.title_hint||(first&&first.title)||(job.url||`任务 ${String(job.job_id||'').slice(0,8)}`);const meta=document.createElement('span');meta.className='task-meta';if(kind==='history'){const parts=[];if(job.completed_at)parts.push(job.completed_at);if(job.note_id)parts.push(`笔记 ${job.note_id}`);meta.textContent=parts.join(' · ')||job.url||'旧记录未保存时间'}else if(job.note_id)meta.textContent=`笔记 ${job.note_id}`;else if(job.retry_count)meta.textContent=`${job.url||''} · 已重试 ${job.retry_count} 次`;else if(job.url)meta.textContent=job.url;else meta.textContent=`${job.done||0} / ${job.total||0} 条 · 成功 ${job.success||0}`;main.append(title,meta);if(kind==='history'){const location=document.createElement('span');location.className='task-location';location.textContent=job.save_dir?`保存位置：${job.save_dir}`:'旧记录位置未登记（未找到可确认的素材目录）';if(job.save_dir)location.title=job.save_dir;main.append(location)}const state=document.createElement('span');const status=job.status||'';const ok=kind==='history'||status==='completed'||status==='success';const failed=status==='error'||status==='failed';state.className='task-state '+(ok?'ok':failed?'fail':'');state.textContent=kind==='history'?'已保存':status==='running'?'进行中':status==='cooling_down'?'冷却中':failed?'失败':'等待';row.append(main,state);target.append(row)})}
-function updateCollectorSwitch(collector){collectorEnabled=collector.enabled!==false;collectorOnline=collector.online===true;if(collectorOnline)collectorStartingUntil=0;const control=$('collectorToggle');control.setAttribute('aria-checked',String(collectorEnabled));control.disabled=collector.control_available===false;const starting=!collectorOnline&&collectorStartingUntil>Date.now();const label=starting?'剪贴板采集 启动中':collectorOnline?(collectorEnabled?'剪贴板采集 开':'剪贴板采集 关'):'剪贴板采集 离线';$('collectorToggleText').textContent=label;const state=collectorOnline?'在线':collector.status==='offline'?'离线':'';control.title=`${label}${state?` · 守护进程${state}`:''}${!collectorOnline?' · 点击启动': ''}${collector.pause_reason?` · ${collector.pause_reason}`:''}`}
-function historyKey(item){return String(item.job_id||item.url||item.note_id||'')}
-function updateHistoryFromDashboard(data){const incoming=data.history||[],counts=data.counts||{},collector=data.collector||{};let changed=false;if(!historyItems.length){historyItems=incoming;historyOffset=incoming.length;changed=true}else{const seen=new Set(historyItems.map(historyKey));const added=incoming.filter(item=>!seen.has(historyKey(item)));if(added.length){historyItems=[...added,...historyItems];historyOffset+=added.length;changed=true}}historyTotal=counts.download_history||0;if(changed){const list=$('historyList'),oldHeight=list.scrollHeight,oldTop=list.scrollTop;renderRows(list,historyItems,'history');if(oldHeight&&oldTop)list.scrollTop=Math.min(list.scrollHeight-list.clientHeight,oldTop+Math.max(0,list.scrollHeight-oldHeight))}$('historySub').textContent=`显示 ${Math.min(historyOffset,historyTotal)} / ${historyTotal} 条共享成功记录 · 剪贴板历史 ${collector.history_count||0} 条`;$('historyMore').hidden=historyOffset>=historyTotal;$('historyMore').textContent=`加载更多（剩余 ${Math.max(0,historyTotal-historyOffset)} 条）`}
-async function loadMoreHistory(){const button=$('historyMore');if(button.disabled||historyOffset>=historyTotal)return;button.disabled=true;const oldText=button.textContent;button.textContent='正在读取…';try{const requestOffset=historyOffset;const r=await fetch(`/api/v1/jobs?limit=50&history_offset=${requestOffset}`);const data=await r.json();if(!r.ok)throw new Error(data.error||'读取历史失败');const page=data.history||[],seen=new Set(historyItems.map(historyKey)),added=page.filter(item=>!seen.has(historyKey(item)));historyItems=historyItems.concat(added);historyOffset=requestOffset+page.length;historyTotal=data.counts?.download_history??historyTotal;renderRows($('historyList'),historyItems,'history');$('historySub').textContent=`显示 ${Math.min(historyOffset,historyTotal)} / ${historyTotal} 条共享成功记录 · 剪贴板历史 ${data.collector?.history_count||0} 条`;button.hidden=historyOffset>=historyTotal;button.textContent=`加载更多（剩余 ${Math.max(0,historyTotal-historyOffset)} 条）`}catch(e){button.textContent='读取失败，点击重试';button.title=e.message}finally{button.disabled=false;if(!button.hidden&&button.textContent==='正在读取…')button.textContent=oldText}}
-async function toggleCollector(){const control=$('collectorToggle'),enable=!collectorEnabled||!collectorOnline;control.disabled=true;try{const r=await fetch('/api/v1/collector',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({enabled:enable})});const data=await r.json();if(!r.ok)throw new Error(data.error||'剪贴板采集设置失败');collectorEnabled=Boolean(data.enabled);if(data.starting)collectorStartingUntil=Date.now()+15000;updateCollectorSwitch({...data,control_available:true});refreshDashboard()}catch(e){setState('error','剪贴板开关未生效',e.message);control.disabled=false}}
-async function refreshDashboard(){try{const r=await fetch('/api/v1/jobs?limit=50&history_offset=0');if(!r.ok)return;const data=await r.json();const counts=data.counts||{},collector=data.collector||{};updateCollectorSwitch(collector);updateHistoryFromDashboard(data);const waiting=data.waiting||[];const queue=data.queue||waiting;const running=data.running||[];$('waitingCount').textContent=counts.waiting??waiting.length;$('waitingSub').textContent=waiting.length?`有 ${waiting.length} 条任务等待 · 剪贴板 ${collector.pending_count||0} 条`:'当前队列为空 · 剪贴板待采集 0 条';$('queueSub').textContent=`剪贴板队列 ${collector.pending_count||0} 条 · 失败归档 ${collector.failed_archive_count||0} 条（不在等待队列）`;renderRows($('queueList'),queue,'queue');if(activeJob)return;if(running.length){const current=running[0];if(current.source==='clipboard'){setState('running','剪贴板正在采集',current.title||current.url||'正在处理当前链接');$('progressBar').classList.add('active');$('progressText').textContent='采集进行中';$('successText').textContent='';$('empty').style.display='none';$('results').classList.remove('show')}else setState('running','正在逐条提取',`任务进行中，共 ${current.total||0} 条`);return}if(collector.status==='offline'){setState('error','剪贴板采集器离线',collector.last_heartbeat?`最近心跳：${collector.last_heartbeat}`:'没有可用心跳');$('progressBar').classList.remove('active')}else if(collector.status==='paused'){setState('','剪贴板采集已暂停',collector.pending_count?`仍有 ${collector.pending_count} 条等待恢复`:'当前没有等待任务');$('progressBar').classList.remove('active')}else if(collector.status==='cooling'){setState('running','采集器冷却中',collector.cooldown_remaining_seconds?`约 ${collector.cooldown_remaining_seconds} 秒后继续 · ${collector.cooldown_reason||'按限速策略等待'}`:'按限速策略等待');$('progressBar').classList.add('active')}else{setState('done','当前没有进行中的下载',collector.status==='idle'?'下载器已就绪，采集器空闲':'等待任务启动');$('progressBar').classList.remove('active')}}catch(_){}}
-$('collectorToggle').addEventListener('click',toggleCollector);
-$('historyMore').addEventListener('click',loadMoreHistory);
-function finish(){activeJob=null;$('go').disabled=false;$('go').textContent='开始下载';refreshDashboard()}
-async function poll(){if(!activeJob)return;try{const r=await fetch('/api/jobs/'+activeJob);const job=await r.json();if(!r.ok)throw new Error(job.error||'读取任务失败');if(job.status==='completed'||job.status==='error'){const wait=Math.max(0,MIN_PROGRESS_MS-(Date.now()-jobStartedAt));if(wait){pollTimer=setTimeout(()=>{render(job);finish()},wait);return}render(job);finish();return}render(job);refreshDashboard();pollTimer=setTimeout(poll,700)}catch(e){setState('error','连接中断',e.message);$('progressBar').classList.remove('active');$('go').disabled=false;$('go').textContent='重新开始';activeJob=null}}
-async function start(){if(activeJob)return;const text=$('input').value.trim();if(!text){$('input').focus();setState('error','还缺少分享文本','请先粘贴至少一条公开媒体链接');return}const output_dir=$('outdir').value.trim()||DEFAULT_OUTPUT,mode=$('mode').value,image_format=$('format').value;localStorage.setItem(OUTPUT_KEY,output_dir);localStorage.setItem(MODE_KEY,mode);localStorage.setItem(FORMAT_KEY,image_format);jobStartedAt=Date.now();$('go').disabled=true;$('go').textContent='正在准备…';$('progressBar').classList.add('active');$('progressBar').style.width='38%';$('progressText').textContent='准备中';$('successText').textContent='';$('results').innerHTML='';$('results').classList.remove('show');$('empty').style.display='block';setState('running','正在准备','连接本地无水印引擎');try{const r=await fetch('/api/jobs',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({text,output_dir,mode,image_format})});const data=await r.json();if(!r.ok)throw new Error(data.error||'创建任务失败');activeJob=data.job_id;$('go').textContent='下载进行中';poll()}catch(e){$('progressBar').classList.remove('active');setState('error','无法开始',e.message);$('go').disabled=false;$('go').textContent='重新开始'}}
-function activateView(name){document.querySelectorAll('[data-view]').forEach(tab=>{const active=tab.dataset.view===name;tab.setAttribute('aria-selected',String(active));tab.tabIndex=active?0:-1});document.querySelectorAll('[data-panel]').forEach(panel=>{const active=panel.dataset.panel===name;panel.classList.toggle('active',active);panel.hidden=!active});localStorage.setItem('xhs-dl-active-view',name)}
-document.querySelectorAll('[data-view]').forEach(tab=>{tab.addEventListener('click',()=>activateView(tab.dataset.view));tab.addEventListener('keydown',event=>{if(!['ArrowDown','ArrowUp','ArrowRight','ArrowLeft'].includes(event.key))return;event.preventDefault();const tabs=[...document.querySelectorAll('[data-view]')],index=tabs.indexOf(tab),delta=['ArrowDown','ArrowRight'].includes(event.key)?1:-1,next=tabs[(index+delta+tabs.length)%tabs.length];activateView(next.dataset.view);next.focus()})});
-activateView(['single','homepage','keyword'].includes(localStorage.getItem('xhs-dl-active-view'))?localStorage.getItem('xhs-dl-active-view'):'single');
-const collectionPollTimers={};
-function collectionSettings(){const output_dir=$('outdir').value.trim()||DEFAULT_OUTPUT,mode=$('mode').value,image_format=$('format').value;localStorage.setItem(OUTPUT_KEY,output_dir);localStorage.setItem(MODE_KEY,mode);localStorage.setItem(FORMAT_KEY,image_format);return{output_dir,mode,image_format}}
-function setCollectionStatus(kind,task,errorText=''){const box=$(kind==='homepage'?'homepageStatus':'keywordStatus');box.hidden=false;box.replaceChildren();const title=document.createElement('strong');const message=document.createElement('span');const state=errorText?'error':task?.status||'error';box.dataset.state=state;if(errorText){title.textContent='未能提交';message.textContent=errorText}else{const names={queued:'已排队',discovering:'正在发现公开作品',download_queued:'已进入下载队列',completed:'下载完成',accepted:'原生工具已接收',unknown:'状态待确认',verification_required:'需要人工验证',login_required:'需要登录',completed_zero:'没有发现作品',error:'采集失败'};title.textContent=names[state]||'采集状态';let detail=task.message||'正在读取状态';if(task.download_job){const job=task.download_job;detail+=` · 下载 ${job.done||0}/${job.total||0}，成功 ${job.success||0}，跳过 ${job.skipped||0}，失败 ${job.failed||0}`}if(task.discovered_count)detail=`发现 ${task.discovered_count} 条。${detail}`;if(state==='accepted'&&!task.discovered_count)detail+='；完成情况尚未确认，请在江湖工具箱任务里查看后再决定是否重试';message.textContent=detail}box.append(title,message);if(task?.download_job_id){const link=document.createElement('button');link.type='button';link.className='history-more';link.textContent='查看统一下载队列';link.addEventListener('click',()=>{activateView('single');$('queueList').scrollIntoView({behavior:'smooth',block:'center'})});box.append(link)}}
-async function pollCollection(kind,jobId){try{const response=await fetch('/api/v1/collections/jobs/'+encodeURIComponent(jobId)),task=await response.json();if(!response.ok)throw new Error(task.error||'读取采集状态失败');setCollectionStatus(kind,task);if(['queued','discovering','download_queued'].includes(task.status)){collectionPollTimers[kind]=setTimeout(()=>pollCollection(kind,jobId),1200);return}sessionStorage.setItem('xhs-dl-collection-last-'+kind,jobId);if(task.status!=='unknown')sessionStorage.removeItem('xhs-dl-collection-key-'+kind)}catch(error){setCollectionStatus(kind,null,error.message)}}
-async function startCollection(kind){const button=$(kind==='homepage'?'startHomepage':'startKeyword'),box=$(kind==='homepage'?'homepageStatus':'keywordStatus');if(button.disabled)return;let request;if(kind==='homepage'){const profile_url=$('authorUrl').value.trim();if(!profile_url){$('authorUrl').focus();setCollectionStatus(kind,null,'请填写一个抖音作者主页链接');return}request={profile_url,...collectionSettings()}}else{const keyword=$('keywordValue').value.trim(),count=Number($('keywordCount').value),min_images=Number($('minImages').value),max_images=Number($('maxImages').value);if(!keyword){$('keywordValue').focus();setCollectionStatus(kind,null,'请填写一个关键词');return}request={keyword,count,min_images,max_images,...collectionSettings()}}const endpoint='/api/v1/collections/'+kind,fingerprint=JSON.stringify(request),cacheKey='xhs-dl-collection-key-'+kind;let cached;try{cached=JSON.parse(sessionStorage.getItem(cacheKey)||'null')}catch(_){}if(!cached||cached.fingerprint!==fingerprint){cached={fingerprint,key:`${kind}-${crypto.randomUUID?crypto.randomUUID():Date.now()+'-'+Math.random().toString(16).slice(2)}`};sessionStorage.setItem(cacheKey,JSON.stringify(cached))}button.disabled=true;button.textContent='正在提交…';setCollectionStatus(kind,{status:'queued',message:'正在连接本地采集流程'});try{const response=await fetch(endpoint,{method:'POST',headers:{'Content-Type':'application/json','Idempotency-Key':cached.key},body:JSON.stringify(request)}),task=await response.json();if(!response.ok)throw new Error(task.error||'提交失败');sessionStorage.setItem('xhs-dl-collection-last-'+kind,task.job_id);if(collectionPollTimers[kind])clearTimeout(collectionPollTimers[kind]);await pollCollection(kind,task.job_id);refreshDashboard()}catch(error){setCollectionStatus(kind,null,error.message)}finally{button.disabled=false;button.textContent=kind==='homepage'?'采集主页并加入下载队列':'发现图文并加入下载队列'}}
-async function loadLastCollection(kind){const jobId=sessionStorage.getItem('xhs-dl-collection-last-'+kind);if(jobId){setCollectionStatus(kind,{status:'queued',message:'正在读取最近任务'});await pollCollection(kind,jobId)}}
-async function refreshCollectionCapabilities(){const targets=[$('homepageCapability'),$('keywordCapability')];try{const response=await fetch('/api/v1/collections/capabilities'),data=await response.json();let message;if(!data.available)message='未找到江湖工具箱采集接口。';else if(data.status!=='online')message=`江湖工具箱当前${data.status==='stale'?'心跳已过期':'离线'}；打开工具箱后即可使用此入口。`;else if(data.verification_required)message='原生浏览器正在等待人工验证；完成后再提交采集。';else if(data.active_platform!=='douyin')message='当前原生核心不是抖音；请先在江湖工具箱切换到抖音。';else if(data.busy)message='原生采集任务正在运行或状态待确认；请先查看现有任务。';else message='抖音原生采集在线。发现链接后会送入本页的万能下载器队列。';targets.forEach(target=>target.textContent=message)}catch(_){targets.forEach(target=>target.textContent='暂时无法读取江湖工具箱状态；提交时会再次检查。')}}
-$('startHomepage').addEventListener('click',()=>startCollection('homepage'));$('startKeyword').addEventListener('click',()=>startCollection('keyword'));
-loadLastCollection('homepage');loadLastCollection('keyword');refreshCollectionCapabilities();setInterval(refreshCollectionCapabilities,5000);
-$('go').addEventListener('click',start);$('input').addEventListener('keydown',e=>{if((e.ctrlKey||e.metaKey)&&e.key==='Enter')start()});refreshDashboard();setInterval(refreshDashboard,2500);
-</script>
-</body>
-</html>"""
+def _resume_native_paused_job(paused_req):
+    req = dict(paused_req or {})
+    kind = req.get("kind") or "keyword"
+    label = req.get("label") or ("抖音主页" if kind == "homepage" else f"恢复采集：{req.get('keyword') or ''}")
+    for k in ("job_id", "status", "stage", "created_at", "updated_at", "message", "discovered_count", "download_job_id", "completion_confirmed", "fingerprint", "idempotency_key"):
+        req.pop(k, None)
+    req["_command"] = []
+    task, err, _code = _create_collection_task(kind, label, req, "")
+    if err:
+        raise ValueError(err)
+    return task
+
+
+toolbox_store.set_native_resume_callback(_resume_native_paused_job)
+
 
 
 def _item_payload(item):
@@ -1193,6 +1353,28 @@ def _openapi_document():
                     "responses": {"200": {"description": "开关状态已更新；starting 表示正在启动离线采集器"}, "400": {"description": "enabled 必须是布尔值"}, "503": {"description": "本机暂停标记或采集器启动失败"}},
                 }
             },
+            "/api/v1/workbench/keywords": {
+                "get": {"summary": "读取统一工作台关键词列表", "responses": {"200": {"description": "关键词与同步状态"}}},
+                "post": {"summary": "管理工作台关键词（增删改/批量勾选/同步江湖词库）", "responses": {"200": {"description": "操作后列表"}}},
+            },
+            "/api/v1/workbench/authors": {
+                "get": {"summary": "读取统一工作台作者主页列表", "responses": {"200": {"description": "主页作者列表"}}},
+                "post": {"summary": "管理工作台作者主页", "responses": {"200": {"description": "操作后列表"}}},
+            },
+            "/api/v1/workbench/artworks": {
+                "get": {"summary": "筛选与查看统一作品列表（当前/历史）", "responses": {"200": {"description": "作品列表"}}},
+                "post": {"summary": "作品列表勾选/删除/同步/导出 CSV", "responses": {"200": {"description": "操作结果"}}},
+            },
+            "/api/v1/workbench/settings": {
+                "get": {"summary": "读取统一工作台全部筛选、下载与主题设置", "responses": {"200": {"description": "完整设置对象"}}},
+                "post": {"summary": "保存工作台设置", "responses": {"200": {"description": "已保存设置"}}},
+            },
+            "/api/v1/workbench/ai-jobs": {
+                "get": {"summary": "读取 AI CLI/MCP 与后台采集任务实时流水", "responses": {"200": {"description": "任务列表"}}},
+            },
+            "/api/v1/workbench/engine": {
+                "post": {"summary": "调度原生登录窗口、平台切换、引擎启动与目录打开", "responses": {"200": {"description": "执行结果"}}},
+            },
         },
         "components": {
             "schemas": {
@@ -1350,6 +1532,25 @@ def _run_job(job_id, urls, output_dir, delay, image_format, adaptive=False):
 class Handler(BaseHTTPRequestHandler):
     """HTTP 请求处理。"""
 
+    def _read_json_body(self, max_bytes=256 * 1024):
+        try:
+            length = int(self.headers.get("Content-Length", 0))
+        except (TypeError, ValueError):
+            self._json({"error": "请求内容长度无效"}, 400)
+            return None
+        if length > max_bytes:
+            self._json({"error": "请求内容过大"}, 413)
+            return None
+        try:
+            body = json.loads(self.rfile.read(length) or b"{}")
+        except (ValueError, json.JSONDecodeError):
+            self._json({"error": "请求格式无效"}, 400)
+            return None
+        if not isinstance(body, dict):
+            self._json({"error": "请求内容必须是 JSON 对象"}, 400)
+            return None
+        return body
+
     def _api_path(self):
         path = urlsplit(self.path).path
         if path.startswith("/api/v1/"):
@@ -1366,11 +1567,48 @@ class Handler(BaseHTTPRequestHandler):
             ).replace("__APP_VERSION__", __version__).replace("__APP_NAME__", APP_NAME)
             self._html(html)
             return
+        if path in ("/favicon.ico", "/app-icon.png"):
+            ico_path, png_path = _app_icon_paths()
+            target = ico_path if path == "/favicon.ico" else png_path
+            ctype = "image/x-icon" if path == "/favicon.ico" else "image/png"
+            if target and target.is_file():
+                try:
+                    data = target.read_bytes()
+                    self.send_response(200)
+                    self.send_header("Content-Type", ctype)
+                    self.send_header("Content-Length", str(len(data)))
+                    self.send_header("Cache-Control", "public, max-age=3600")
+                    self.end_headers()
+                    self.wfile.write(data)
+                    return
+                except OSError:
+                    pass
+            self.send_response(404)
+            self.end_headers()
+            return
+        if path == "/manifest.webmanifest":
+            manifest = {
+                "name": f"{APP_NAME} · 统一智能采集工作台",
+                "short_name": "万能采集器",
+                "start_url": "/",
+                "display": "standalone",
+                "background_color": "#e8edf3",
+                "theme_color": "#263442",
+                "icons": [{"src": "/app-icon.png", "sizes": "256x256", "type": "image/png"}],
+            }
+            data = json.dumps(manifest, ensure_ascii=False).encode("utf-8")
+            self.send_response(200)
+            self.send_header("Content-Type", "application/manifest+json; charset=utf-8")
+            self.send_header("Content-Length", str(len(data)))
+            self.send_header("Cache-Control", "no-store")
+            self.end_headers()
+            self.wfile.write(data)
+            return
         if path == "/api/openapi.json":
             self._json(_openapi_document())
             return
         if path == "/api/health":
-            self._json({"status": "ok", "name": APP_NAME, "version": __version__})
+            self._json({"status": "ok", "name": APP_NAME, "version": __version__, "code_stamp": SERVER_CODE_STAMP, "pid": os.getpid()})
             return
         if path == "/api/capabilities":
             self._json(
@@ -1393,10 +1631,97 @@ class Handler(BaseHTTPRequestHandler):
                         "homepage_collection": "POST /api/v1/collections/homepage",
                         "keyword_collection": "POST /api/v1/collections/keyword",
                         "collection_job": "GET /api/v1/collections/jobs/<job_id>",
+                        "workbench_keywords": "GET/POST /api/v1/workbench/keywords",
+                        "workbench_authors": "GET/POST /api/v1/workbench/authors",
+                        "workbench_artworks": "GET/POST /api/v1/workbench/artworks",
+                        "workbench_settings": "GET/POST /api/v1/workbench/settings",
+                        "workbench_ai_jobs": "GET /api/v1/workbench/ai-jobs",
+                        "workbench_engine": "POST /api/v1/workbench/engine",
                         "openapi": "GET /api/openapi.json",
                     },
                 }
             )
+            return
+        if path == "/api/workbench/keywords":
+            query = parse_qs(parsed.query)
+            self._json(
+                toolbox_store.list_keywords(
+                    platform=query.get("platform", ["all"])[0],
+                    search=query.get("search", [""])[0],
+                    group=query.get("group", ["all"])[0],
+                    sort_by=query.get("sort_by", ["seq"])[0],
+                    sort_dir=query.get("sort_dir", ["asc"])[0],
+                    bridge_dir=TOOLBOX_BRIDGE_DIR,
+                )
+            )
+            return
+        if path == "/api/workbench/authors":
+            query = parse_qs(parsed.query)
+            self._json(
+                toolbox_store.list_authors(
+                    platform=query.get("platform", ["all"])[0],
+                    search=query.get("search", [""])[0],
+                    sort_by=query.get("sort_by", ["seq"])[0],
+                    sort_dir=query.get("sort_dir", ["asc"])[0],
+                    group=query.get("group", ["all"])[0],
+                    bridge_dir=TOOLBOX_BRIDGE_DIR,
+                )
+            )
+            return
+        if path == "/api/workbench/artworks":
+            query = parse_qs(parsed.query)
+            extra_history, _ = _download_history(limit=150, offset=0)
+            ai_jobs_data = toolbox_store.read_ai_jobs(TOOLBOX_BRIDGE_DIR, limit=40)
+            rules = []
+            for key_name, field in (
+                ("min_likes", "likes"),
+                ("min_comments", "comments"),
+                ("min_favorites", "favorites"),
+                ("min_images", "image_count"),
+            ):
+                raw_v = query.get(key_name, ["0"])[0]
+                try:
+                    val = int(float(raw_v))
+                except (TypeError, ValueError):
+                    val = 0
+                if val > 0:
+                    rules.append({"enabled": True, "field": field, "op": ">=", "value": val})
+            self._json(
+                toolbox_store.list_artworks(
+                    mode=query.get("mode", ["history"])[0],
+                    search=query.get("search", [""])[0],
+                    platform=query.get("platform", ["all"])[0],
+                    artwork_type=query.get("artwork_type", ["all"])[0],
+                    include_kw=query.get("include_kw", [""])[0],
+                    exclude_kw=query.get("exclude_kw", [""])[0],
+                    rules=rules,
+                    sort_by=query.get("sort_by", ["seq"])[0],
+                    sort_dir=query.get("sort_dir", ["asc"])[0],
+                    extra_history=extra_history,
+                    extra_ai_jobs=(ai_jobs_data.get("jobs") if isinstance(ai_jobs_data, dict) else []),
+                    bridge_dir=TOOLBOX_BRIDGE_DIR,
+                )
+            )
+            return
+        if path == "/api/workbench/settings":
+            self._json(toolbox_store.get_settings(bridge_dir=TOOLBOX_BRIDGE_DIR))
+            return
+        if path == "/api/workbench/ai-jobs":
+            query = parse_qs(parsed.query)
+            try:
+                limit = max(1, min(int(query.get("limit", ["40"])[0]), 80))
+            except (TypeError, ValueError):
+                limit = 40
+            self._json(toolbox_store.read_ai_jobs(TOOLBOX_BRIDGE_DIR, limit=limit))
+            return
+        if path == "/api/workbench/state":
+            self._json({
+                "capabilities": _toolbox_capability_snapshot(),
+                "settings": toolbox_store.get_settings(bridge_dir=TOOLBOX_BRIDGE_DIR),
+                "keywords": toolbox_store.list_keywords(bridge_dir=TOOLBOX_BRIDGE_DIR),
+                "authors": toolbox_store.list_authors(bridge_dir=TOOLBOX_BRIDGE_DIR),
+                "ai_jobs": toolbox_store.read_ai_jobs(TOOLBOX_BRIDGE_DIR, limit=25),
+            })
             return
         if path == "/api/collections/capabilities":
             self._json(_toolbox_capability_snapshot())
@@ -1436,6 +1761,57 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_POST(self):
         api_path = self._api_path()
+        if api_path == "/api/server/shutdown":
+            self._json({"status": "stopping", "pid": os.getpid()})
+
+            def _graceful_stop():
+                time.sleep(0.15)
+                try:
+                    if _use_native_engine():
+                        from xhs_dl.web import native_collector
+                        native_collector.get_engine().close()
+                except Exception:
+                    pass
+                try:
+                    self.server.shutdown()
+                except Exception:
+                    pass
+
+            threading.Thread(target=_graceful_stop, daemon=True).start()
+            return
+        if api_path in {
+            "/api/workbench/keywords",
+            "/api/workbench/authors",
+            "/api/workbench/artworks",
+            "/api/workbench/settings",
+            "/api/workbench/engine",
+        }:
+            body = self._read_json_body(max_bytes=512 * 1024)
+            if body is None:
+                return
+            try:
+                if api_path == "/api/workbench/keywords":
+                    result = toolbox_store.mutate_keywords(str(body.get("op") or ""), body, bridge_dir=TOOLBOX_BRIDGE_DIR)
+                elif api_path == "/api/workbench/authors":
+                    result = toolbox_store.mutate_authors(str(body.get("op") or ""), body, bridge_dir=TOOLBOX_BRIDGE_DIR)
+                elif api_path == "/api/workbench/artworks":
+                    result = toolbox_store.mutate_artworks(str(body.get("op") or ""), body, bridge_dir=TOOLBOX_BRIDGE_DIR)
+                elif api_path == "/api/workbench/settings":
+                    result = toolbox_store.update_settings(body, bridge_dir=TOOLBOX_BRIDGE_DIR)
+                else:
+                    result = toolbox_store.run_engine_action(
+                        str(body.get("action") or ""),
+                        body.get("params") or {},
+                        TOOLBOX_BRIDGE_DIR,
+                        TOOLBOX_PROJECT,
+                        _python_console_executable(),
+                    )
+                self._json(result)
+            except ValueError as exc:
+                self._json({"error": str(exc)}, 400)
+            except Exception as exc:
+                self._json({"error": str(exc)}, 503)
+            return
         if api_path in {"/api/collections/homepage", "/api/collections/keyword"}:
             try:
                 length = int(self.headers.get("Content-Length", 0))
@@ -1452,24 +1828,39 @@ class Handler(BaseHTTPRequestHandler):
 
             capability = _toolbox_capability_snapshot()
             if not capability["available"]:
-                self._json({"error": "没有找到江湖工具箱采集接口"}, 503)
+                self._json({"error": "采集引擎不可用"}, 503)
                 return
             if capability["status"] != "online":
-                self._json({"error": "江湖工具箱原生采集模块当前不在线；本次没有启动采集"}, 503)
+                self._json({"error": "采集模块当前不在线；本次没有启动采集"}, 503)
                 return
-            if capability["verification_required"]:
-                self._json({"error": "原生浏览器正在等待人工验证；完成验证后再提交"}, 409)
-                return
-            if capability["active_platform"] != "douyin":
-                self._json({"error": "当前原生核心不是抖音；请先在江湖工具箱切换到抖音"}, 409)
-                return
+            requested_platform = "douyin"
+            if api_path.endswith("/keyword"):
+                raw_plat = str(body.get("platform") or "douyin").strip().lower()
+                requested_platform = "xiaohongshu" if raw_plat in {"xiaohongshu", "xhs", "小红书"} else "douyin"
+            if not _use_native_engine():
+                if capability["verification_required"]:
+                    self._json({"error": "原生浏览器正在等待人工验证；完成验证后再提交"}, 409)
+                    return
+                if capability["active_platform"] != requested_platform:
+                    expected_name = "小红书" if requested_platform == "xiaohongshu" else "抖音"
+                    self._json({"error": f"当前原生核心不是{expected_name}；请先在平台登录或江湖工具箱切换到{expected_name}"}, 409)
+                    return
             if capability["busy"]:
-                self._json({"error": "原生采集任务仍在运行或状态待确认；先核对现有任务，避免重复启动"}, 409)
+                self._json({"error": "采集任务仍在运行中，请等待当前任务完成"}, 409)
                 return
 
-            output_dir = body.get("output_dir") or DEFAULT_OUTPUT_DIR
-            mode = body.get("mode", "auto")
-            image_format = body.get("image_format", "keep")
+            all_cfg = toolbox_store.get_settings(bridge_dir=TOOLBOX_BRIDGE_DIR) or {}
+            dl_cfg = all_cfg.get("download", {})
+            kw_cfg = all_cfg.get("keyword", {})
+            output_dir = body.get("output_dir") or dl_cfg.get("output_dir") or DEFAULT_OUTPUT_DIR
+            mode = body.get("mode", dl_cfg.get("delay_mode") or "auto")
+            image_format = body.get("image_format") or dl_cfg.get("image_format") or "jpg"
+            title_template = str(
+                body.get("title_template")
+                or dl_cfg.get("title_template")
+                or toolbox_store.DEFAULT_TITLE_TEMPLATE
+            ).strip()
+            set_file_time = bool(body.get("set_file_time_to_publish", dl_cfg.get("set_file_time_to_publish", True)))
             if not isinstance(output_dir, str) or not output_dir.strip() or len(output_dir) > 4096:
                 self._json({"error": "保存位置格式无效"}, 400)
                 return
@@ -1480,66 +1871,166 @@ class Handler(BaseHTTPRequestHandler):
                 self._json({"error": "图片格式无效"}, 400)
                 return
 
+            auto_ingest_param = (
+                bool(body["auto_ingest_material"])
+                if "auto_ingest_material" in body
+                else bool(dl_cfg.get("auto_ingest_material", False))
+            )
+            skip_downloaded_history = (
+                bool(body["skip_downloaded_history"])
+                if "skip_downloaded_history" in body
+                else bool(dl_cfg.get("skip_downloaded_history", True))
+            )
+            skip_cleanup_files = []
+            skip_cmd_args = []
+            if skip_downloaded_history:
+                skip_ids = toolbox_store.collect_downloaded_artwork_ids(bridge_dir=TOOLBOX_BRIDGE_DIR)
+                if skip_ids:
+                    TOOLBOX_BRIDGE_DIR.mkdir(parents=True, exist_ok=True)
+                    skip_file = TOOLBOX_BRIDGE_DIR / f".skip-ids-{uuid.uuid4().hex}.json"
+                    skip_file.write_text(json.dumps(sorted(skip_ids), ensure_ascii=False), encoding="utf-8")
+                    skip_cmd_args = ["--skip-ids-file", str(skip_file)]
+                    skip_cleanup_files = [str(skip_file)]
+
             if api_path.endswith("/homepage"):
                 try:
                     profile_url = _validate_douyin_profile(body.get("profile_url", ""))
                 except ValueError as exc:
+                    for path_str in skip_cleanup_files:
+                        Path(path_str).unlink(missing_ok=True)
                     self._json({"error": str(exc)}, 400)
                     return
+                max_works = body.get("max_works", 10)
+                min_images = body.get("min_images", 4)
+                max_images = body.get("max_images", 20)
+                if (isinstance(max_works, bool) or not isinstance(max_works, int) or not 1 <= max_works <= 50
+                        or isinstance(min_images, bool) or not isinstance(min_images, int)
+                        or isinstance(max_images, bool) or not isinstance(max_images, int)
+                        or not 0 <= min_images <= max_images <= 50):
+                    for path_str in skip_cleanup_files:
+                        Path(path_str).unlink(missing_ok=True)
+                    self._json({"error": "主页作品数量需在 1–50；图片范围需满足 0 ≤ 最小张数 ≤ 最大张数 ≤ 50"}, 400)
+                    return
+                direct_download = bool(body.get("direct_download", True))
                 command = [
                     _python_console_executable(), str(TOOLBOX_PROJECT / "jianghu_cli.py"),
-                    "--bridge-dir", str(TOOLBOX_BRIDGE_DIR), "--timeout", "60",
-                    "extract-author", "--url", profile_url, "--no-auto-download",
+                    "--bridge-dir", str(TOOLBOX_BRIDGE_DIR), "--timeout", "120",
+                    "extract-author", "--url", profile_url,
+                    "--max-works", str(max_works),
+                    "--min-images", str(min_images),
+                    "--max-images", str(max_images),
+                    "--output-dir", output_dir,
+                    "--image-format", image_format,
+                    "--title-template", title_template,
+                    "--set-file-time" if set_file_time else "--no-set-file-time",
                 ]
+                if not direct_download:
+                    command.append("--no-auto-download")
+                command.extend(skip_cmd_args)
                 kind = "homepage"
                 label = "抖音主页"
                 request = {
                     "profile_url": profile_url,
+                    "max_works": max_works,
+                    "min_images": min_images,
+                    "max_images": max_images,
+                    "direct_download": direct_download,
+                    "auto_ingest_material": auto_ingest_param,
+                    "skip_downloaded_history": skip_downloaded_history,
                     "output_dir": output_dir,
                     "mode": mode,
                     "image_format": image_format,
+                    "title_template": title_template,
                     "_command": command,
+                    "_cleanup_files": skip_cleanup_files,
                 }
             else:
                 keyword = body.get("keyword", "")
                 if not isinstance(keyword, str) or not keyword.strip() or len(keyword.strip()) > 100 or "\n" in keyword or "\r" in keyword:
+                    for path_str in skip_cleanup_files:
+                        Path(path_str).unlink(missing_ok=True)
                     self._json({"error": "请填写一个不超过 100 个字符的关键词"}, 400)
                     return
                 count = body.get("count", 20)
+                all_results = bool(body.get("all_results", False)) or count == 0
                 min_images = body.get("min_images", 4)
                 max_images = body.get("max_images", 20)
-                if (isinstance(count, bool) or not isinstance(count, int) or not 1 <= count <= 30
+                if (isinstance(count, bool) or not isinstance(count, int) or not 0 <= count <= 500
                         or isinstance(min_images, bool) or not isinstance(min_images, int)
                         or isinstance(max_images, bool) or not isinstance(max_images, int)
                         or not 0 <= min_images <= max_images <= 50):
-                    self._json({"error": "数量需为 1–30；图片范围需满足 0 ≤ 最小张数 ≤ 最大张数 ≤ 50"}, 400)
+                    for path_str in skip_cleanup_files:
+                        Path(path_str).unlink(missing_ok=True)
+                    self._json({"error": "数量需为 0–500（0=全部）；图片范围需满足 0 ≤ 最小张数 ≤ 最大张数 ≤ 50"}, 400)
                     return
+                effective_count = 300 if all_results else count
+                cli_timeout = max(60, min(180, effective_count * 2 + 40))
+                wait_seconds = max(180, min(1500, effective_count * 8 + 60))
+                raw_mtype = str(body.get("media_type") or "").strip().lower()
+                if raw_mtype not in {"image", "video", "all"}:
+                    media_type = "all" if bool(body.get("allow_video", False)) else "image"
+                else:
+                    media_type = raw_mtype
+                allow_video = media_type in {"video", "all"}
+                no_filter = bool(body.get("no_filter", False))
+                direct_download = bool(body.get("direct_download", True))
                 command = [
                     _python_console_executable(), str(TOOLBOX_PROJECT / "jianghu_cli.py"),
-                    "--bridge-dir", str(TOOLBOX_BRIDGE_DIR), "--timeout", "60",
-                    "extract-keyword", "--platform", "douyin", "--keyword", keyword.strip(),
-                    "--count", str(count), "--min-images", str(min_images),
-                    "--max-images", str(max_images), "--metadata-only",
+                    "--bridge-dir", str(TOOLBOX_BRIDGE_DIR), "--timeout", str(cli_timeout),
+                    "extract-keyword", "--platform", requested_platform, "--keyword", keyword.strip(),
+                    "--count", str(effective_count), "--min-images", str(min_images),
+                    "--max-images", str(max_images), "--wait-seconds", str(wait_seconds),
+                    "--output-dir", output_dir,
+                    "--image-format", image_format,
+                    "--title-template", title_template,
+                    "--set-file-time" if set_file_time else "--no-set-file-time",
                 ]
+                if all_results and requested_platform == "douyin" and not allow_video:
+                    command.append("--all-results")
+                if allow_video:
+                    command.append("--allow-video")
+                if no_filter:
+                    command.append("--no-filter")
+                if not direct_download:
+                    command.append("--metadata-only")
+                command.extend(skip_cmd_args)
+                web_sort = str(body.get("web_sort") or kw_cfg.get("web_sort") or "综合排序").strip()
+                web_publish_time = str(body.get("web_publish_time") or kw_cfg.get("web_publish_time") or "不限").strip()
                 kind = "keyword"
-                label = f"抖音关键词：{keyword.strip()}"
+                plat_cn = "小红书" if requested_platform == "xiaohongshu" else "抖音"
+                label = f"{plat_cn}关键词：{keyword.strip()}"
                 request = {
+                    "platform": requested_platform,
                     "keyword": keyword.strip(),
                     "count": count,
                     "min_images": min_images,
                     "max_images": max_images,
+                    "allow_video": allow_video,
+                    "media_type": media_type,
+                    "no_filter": no_filter,
+                    "direct_download": direct_download,
+                    "web_sort": web_sort,
+                    "web_publish_time": web_publish_time,
+                    "auto_ingest_material": auto_ingest_param,
+                    "skip_downloaded_history": skip_downloaded_history,
                     "output_dir": output_dir,
                     "mode": mode,
                     "image_format": image_format,
+                    "title_template": title_template,
                     "_command": command,
+                    "_cleanup_files": skip_cleanup_files,
                 }
 
             idempotency_key = self.headers.get("Idempotency-Key", "").strip()
             if len(idempotency_key) > 128:
+                for path_str in skip_cleanup_files:
+                    Path(path_str).unlink(missing_ok=True)
                 self._json({"error": "Idempotency-Key 最长 128 个字符"}, 400)
                 return
             task, error, code = _create_collection_task(kind, label, request, idempotency_key)
             if error:
+                for path_str in skip_cleanup_files:
+                    Path(path_str).unlink(missing_ok=True)
                 self._json({"error": error}, code)
                 return
             self._json(
@@ -1615,17 +2106,18 @@ class Handler(BaseHTTPRequestHandler):
         if len(urls) > MAX_URLS_PER_JOB:
             self._json({"error": f"单批最多提交 {MAX_URLS_PER_JOB} 条链接"}, 413)
             return
-        output_dir = body.get("output_dir") or DEFAULT_OUTPUT_DIR
+        dl_cfg = (toolbox_store.get_settings(bridge_dir=TOOLBOX_BRIDGE_DIR) or {}).get("download", {})
+        output_dir = body.get("output_dir") or dl_cfg.get("output_dir") or DEFAULT_OUTPUT_DIR
         if not isinstance(output_dir, str) or not output_dir.strip():
             self._json({"error": "保存位置格式无效"}, 400)
             return
-        mode = body.get("mode", "auto")
+        mode = body.get("mode", dl_cfg.get("delay_mode") or "auto")
         if mode not in DELAY_MODES:
             self._json({"error": "下载节奏无效", "supported_modes": sorted(DELAY_MODES)}, 400)
             return
         adaptive = mode == "auto"
         delay = DELAY_MODES[mode]
-        image_format = body.get("image_format", "keep")
+        image_format = body.get("image_format") or dl_cfg.get("image_format") or "jpg"
         if image_format not in {"jpg", "png", "keep"}:
             self._json({"error": "图片格式无效"}, 400)
             return
@@ -1756,14 +2248,242 @@ class Handler(BaseHTTPRequestHandler):
         pass
 
 
-def main():
-    host = "127.0.0.1"
-    port = 5678
-    server = ThreadingHTTPServer((host, port), Handler)
-    url = "http://{}:{}".format(host, port)
+def _find_app_browser():
+    candidates = [
+        shutil.which("msedge.exe") or shutil.which("msedge"),
+        r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe",
+        r"C:\Program Files\Microsoft\Edge\Application\msedge.exe",
+        shutil.which("chrome.exe") or shutil.which("chrome"),
+        r"C:\Program Files\Google\Chrome\Application\chrome.exe",
+        r"C:\Program Files (x86)\Google\Chrome\Application\chrome.exe",
+    ]
+    local_app = os.environ.get("LOCALAPPDATA", "")
+    if local_app:
+        candidates.extend([
+            str(Path(local_app) / "Microsoft" / "Edge" / "Application" / "msedge.exe"),
+            str(Path(local_app) / "Google" / "Chrome" / "Application" / "chrome.exe"),
+        ])
+    for item in candidates:
+        if item and Path(item).is_file():
+            return str(Path(item))
+    return None
+
+
+def _is_server_alive(url):
+    from urllib.error import URLError
+    from urllib.request import urlopen
+
+    try:
+        with urlopen(url + "/api/v1/health", timeout=1.2) as resp:
+            return resp.status == 200
+    except (OSError, URLError, ValueError):
+        return False
+
+
+def _app_icon_paths():
+    assets = PROJECT_ROOT / "assets"
+    ico = assets / "universal-collector.ico"
+    png = assets / "universal-collector-256.png"
+    if not ico.is_file():
+        ico = assets / "red-sweet-potato-download.ico"
+    if not png.is_file():
+        png = assets / "red-sweet-potato-download-256.png"
+    return (ico if ico.is_file() else None), (png if png.is_file() else None)
+
+
+def _apply_windows_taskbar_icon(title_keyword="万能下载器"):
+    """Assign standalone taskbar AUMID + WM_SETICON to the workbench window."""
+    if os.name != "nt":
+        return 0
+    ico_path, _ = _app_icon_paths()
+    if ico_path is None:
+        return 0
+    try:
+        user32 = ctypes.WinDLL("user32", use_last_error=True)
+        shell32 = ctypes.WinDLL("shell32", use_last_error=True)
+        ole32 = ctypes.WinDLL("ole32", use_last_error=True)
+    except OSError:
+        return 0
+
+    class _GUID(ctypes.Structure):
+        _fields_ = [
+            ("Data1", wintypes.DWORD),
+            ("Data2", wintypes.WORD),
+            ("Data3", wintypes.WORD),
+            ("Data4", ctypes.c_ubyte * 8),
+        ]
+
+    class _PROPERTYKEY(ctypes.Structure):
+        _fields_ = [("fmtid", _GUID), ("pid", wintypes.DWORD)]
+
+    class _PROPVARIANT(ctypes.Structure):
+        _fields_ = [
+            ("vt", ctypes.c_ushort),
+            ("wReserved1", ctypes.c_ushort),
+            ("wReserved2", ctypes.c_ushort),
+            ("wReserved3", ctypes.c_ushort),
+            ("pwszVal", ctypes.c_wchar_p),
+            ("pad", ctypes.c_size_t),
+        ]
+
+    IID_IPropertyStore = _GUID(0x886D8EEB, 0x8CF2, 0x4446, (ctypes.c_ubyte * 8)(0x8D, 0x02, 0xCD, 0xBA, 0x1D, 0xBD, 0xCF, 0x99))
+    FMTID_AUM = _GUID(0x9F4C2855, 0x9F79, 0x4B39, (ctypes.c_ubyte * 8)(0xA8, 0xD0, 0xE1, 0xD4, 0x2D, 0xE1, 0xD5, 0xF3))
+    PKEY_ID = _PROPERTYKEY(FMTID_AUM, 5)
+    PKEY_ICON = _PROPERTYKEY(FMTID_AUM, 3)
+    PKEY_NAME = _PROPERTYKEY(FMTID_AUM, 4)
+
+    IMAGE_ICON = 1
+    LR_LOADFROMFILE = 0x0010
+    WM_SETICON = 0x0080
+    ICON_SMALL = 0
+    ICON_BIG = 1
+    VT_LPWSTR = 31
+
+    h_big = user32.LoadImageW(None, str(ico_path), IMAGE_ICON, 48, 48, LR_LOADFROMFILE)
+    h_small = user32.LoadImageW(None, str(ico_path), IMAGE_ICON, 16, 16, LR_LOADFROMFILE)
+    if not h_big and not h_small:
+        return 0
+
+    matched = []
+    enum_proc = ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
+
+    def _cb(hwnd, _lparam):
+        if not user32.IsWindowVisible(hwnd):
+            return True
+        buf = ctypes.create_unicode_buffer(512)
+        if user32.GetWindowTextW(hwnd, buf, 512) > 0:
+            title = buf.value
+            if title_keyword in title or "万能采集器" in title:
+                matched.append(hwnd)
+        return True
+
+    user32.EnumWindows(enum_proc(_cb), 0)
+    if not matched:
+        return 0
+
+    ole_init = False
+    try:
+        ole_init = ole32.CoInitialize(None) >= 0
+    except Exception:
+        pass
+
+    shell32.SHGetPropertyStoreForWindow.argtypes = [
+        wintypes.HWND, ctypes.POINTER(_GUID), ctypes.POINTER(ctypes.c_void_p)
+    ]
+    shell32.SHGetPropertyStoreForWindow.restype = ctypes.c_long
+
+    updated = 0
+    try:
+        for hwnd in matched:
+            if h_small:
+                user32.SendMessageW(hwnd, WM_SETICON, ICON_SMALL, h_small)
+            if h_big:
+                user32.SendMessageW(hwnd, WM_SETICON, ICON_BIG, h_big)
+            try:
+                store_ptr = ctypes.c_void_p()
+                hr = shell32.SHGetPropertyStoreForWindow(hwnd, ctypes.byref(IID_IPropertyStore), ctypes.byref(store_ptr))
+                if hr == 0 and store_ptr.value:
+                    vtbl = ctypes.cast(
+                        ctypes.cast(store_ptr, ctypes.POINTER(ctypes.POINTER(ctypes.c_void_p))).contents,
+                        ctypes.POINTER(ctypes.c_void_p),
+                    )
+                    # IPropertyStore: QI(0), AddRef(1), Release(2), GetCount(3), GetAt(4), GetValue(5), SetValue(6), Commit(7)
+                    set_val_fn = ctypes.WINFUNCTYPE(
+                        ctypes.c_long, ctypes.c_void_p, ctypes.POINTER(_PROPERTYKEY), ctypes.POINTER(_PROPVARIANT)
+                    )(vtbl[6])
+                    commit_fn = ctypes.WINFUNCTYPE(ctypes.c_long, ctypes.c_void_p)(vtbl[7])
+                    release_fn = ctypes.WINFUNCTYPE(ctypes.c_ulong, ctypes.c_void_p)(vtbl[2])
+                    for pkey, val_str in (
+                        (PKEY_ID, "UniversalCollector.Workbench.Desktop"),
+                        (PKEY_ICON, f"{ico_path},0"),
+                        (PKEY_NAME, "万能采集器"),
+                    ):
+                        pv = _PROPVARIANT(vt=VT_LPWSTR, pwszVal=val_str)
+                        set_val_fn(store_ptr, ctypes.byref(pkey), ctypes.byref(pv))
+                    commit_fn(store_ptr)
+                    release_fn(store_ptr)
+            except Exception:
+                pass
+            updated += 1
+    finally:
+        if ole_init:
+            try:
+                ole32.CoUninitialize()
+            except Exception:
+                pass
+    return updated
+
+
+def _open_workbench_ui(url, prefer_app=True):
+    if prefer_app:
+        native_shell = PROJECT_ROOT / "desktop_shell" / "万能采集器.exe"
+        if native_shell.is_file():
+            try:
+                subprocess.Popen([str(native_shell)], cwd=str(native_shell.parent))
+                return
+            except OSError:
+                pass
+        browser = _find_app_browser()
+        if browser:
+            profile = Path.home() / ".xhs-dl" / "app-window-profile"
+            try:
+                profile.mkdir(parents=True, exist_ok=True)
+                kwargs = {}
+                if os.name == "nt":
+                    si = subprocess.STARTUPINFO()
+                    si.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+                    si.wShowWindow = 1  # SW_SHOWNORMAL
+                    kwargs["startupinfo"] = si
+                subprocess.Popen(
+                    [
+                        browser,
+                        f"--app={url}",
+                        "--window-size=1520,940",
+                        "--no-first-run",
+                        "--no-default-browser-check",
+                        "--disable-background-mode",
+                        f"--user-data-dir={profile}",
+                    ],
+                    **kwargs,
+                )
+                for delay in (1.2, 3.0):
+                    threading.Timer(delay, _apply_windows_taskbar_icon).start()
+                return
+            except OSError:
+                pass
+    webbrowser.open(url)
+
+
+def main(argv=None):
+    if sys.stdout is None:
+        sys.stdout = open(os.devnull, "w", encoding="utf-8", errors="ignore")
+    if sys.stderr is None:
+        sys.stderr = open(os.devnull, "w", encoding="utf-8", errors="ignore")
+    parser = argparse.ArgumentParser(description=f"{APP_NAME} 统一工作台服务")
+    parser.add_argument("--host", default="127.0.0.1")
+    parser.add_argument("--port", type=int, default=5678)
+    parser.add_argument("--app", action="store_true", help="优先以独立桌面应用窗口打开")
+    parser.add_argument("--browser", action="store_true", help="以系统默认浏览器打开")
+    parser.add_argument("--no-open", action="store_true", help="仅启动服务，不自动打开窗口")
+    args, _ = parser.parse_known_args(argv)
+
+    url = f"http://{args.host}:{args.port}"
+    prefer_app = bool(args.app or not args.browser)
+
+    if _is_server_alive(url):
+        print(f"{APP_NAME} V{__version__} 已在运行: {url}")
+        if not args.no_open:
+            _open_workbench_ui(url, prefer_app=prefer_app)
+        return
+
+    ThreadingHTTPServer.allow_reuse_address = True
+    server = ThreadingHTTPServer((args.host, args.port), Handler)
     print("{} V{} Web: {}".format(APP_NAME, __version__, url))
     print("Press Ctrl+C to stop")
-    threading.Timer(0.5, lambda: webbrowser.open(url)).start()
+    if not args.no_open:
+        threading.Timer(0.45, lambda: _open_workbench_ui(url, prefer_app=prefer_app)).start()
+    else:
+        threading.Timer(0.8, _apply_windows_taskbar_icon).start()
     try:
         server.serve_forever()
     except KeyboardInterrupt:

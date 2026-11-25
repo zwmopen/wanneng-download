@@ -141,12 +141,16 @@ def test_v2_local_cli_adapter():
         assert Path(result.save_dir).name == "评128-赞3560-测试标题-作者"
         assert (Path(result.save_dir) / "封面-测试标题.jpg").is_file()
         copy_text = (Path(result.save_dir) / "文案.txt").read_text(encoding="utf-8-sig")
-        assert "标题：测试标题" in copy_text and "正文：\n这是正文" in copy_text
+        assert "测试标题" in copy_text and "这是正文" in copy_text and "标题：" not in copy_text
         assert "#数码 #技巧" in copy_text
         assert not list(output.rglob("*.json"))
         assert not list(output.rglob("*.db"))
         history = json.loads((root / "appdata" / "xhs-dl" / "history.json").read_text("utf-8"))
-        assert history == [{"下载网址": "http://xhslink.com/o/test", "笔记ID": result.note_id, "标题": "测试标题"}]
+        assert len(history) == 1
+        assert history[0]["下载网址"] == "http://xhslink.com/o/test"
+        assert history[0]["笔记ID"] == result.note_id
+        assert history[0]["标题"] == "测试标题"
+        assert history[0]["保存位置"] == str(Path(result.save_dir).resolve())
         def fake_skip(command, **kwargs):
             return SimpleNamespace(
                 returncode=0,
@@ -201,7 +205,9 @@ def test_web_job_api():
         assert "xhs-dl-theme" in page
         assert json.dumps(str(Path.home() / "Downloads"), ensure_ascii=False) in page
         assert "MIN_PROGRESS_MS=1100" in page
-        assert '<details class="advanced">' in page
+        assert 'id="settingsDialog"' in page
+        assert 'id="tabHomepage"' in page
+        assert 'id="tabKeyword"' in page
 
         payload = json.dumps({
             "text": "http://xhslink.com/o/testcode",
@@ -229,10 +235,8 @@ def test_portable_and_update_versions():
     from xhs_dl.portable import configure_engine_home
 
     assert version_tuple("v2.3.0") > version_tuple("2.2.1")
-    assert automatic_mode(1) == "cautious"
-    assert automatic_mode(20) == "cautious"
-    assert automatic_mode(21) == "slow"
-    assert automatic_mode(51) == "very-slow"
+    assert automatic_mode(1) == "auto"
+    assert automatic_mode(50) == "auto"
     with tempfile.TemporaryDirectory() as temp:
         root = Path(temp)
         executable = root / "app" / "小红书无水印下载器.exe"
@@ -273,7 +277,7 @@ def test_invalid_persisted_settings_fall_back_without_crashing():
         assert settings["mode"] == "auto"
         assert settings["auto_update"] is True
         assert settings["theme"] == "neo"
-        assert settings["image_format"] == "jpg"
+        assert settings["image_format"] == "keep"
 
 
 def test_desktop_worker_delivers_background_exception_to_ui(monkeypatch, tmp_path):

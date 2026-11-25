@@ -63,17 +63,52 @@ def read_pause_state() -> dict:
     return value if isinstance(value, dict) else {}
 
 
-def stop_existing_processes() -> None:
+def stop_existing_processes() -> set[int]:
+    stopped: set[int] = set()
     for process in psutil.process_iter(["pid", "name", "cmdline"]):
         try:
             command = " ".join(process.info.get("cmdline") or [])
             if "universal_clipboard_collector" in command or "universal_clipboard_watchdog" in command:
+                stopped.add(int(process.pid))
                 process.kill()
+                try:
+                    process.wait(timeout=3)
+                except Exception:
+                    pass
                 print(f"   ✔ 已停止进程 PID={process.pid}")
         except (psutil.NoSuchProcess, psutil.AccessDenied):
             pass
         except Exception:
             pass
+    return stopped
+
+
+def is_fresh_restart_heartbeat(
+    heartbeat: dict | None,
+    *,
+    restart_started_at: float,
+    stopped_pids: set[int],
+    now: float | None = None,
+    pid_exists=None,
+) -> bool:
+    """Ensure recovery heartbeat came from a newly started, live collector PID."""
+    if not isinstance(heartbeat, dict):
+        return False
+    try:
+        hb_ts = float(heartbeat.get("timestamp", 0))
+    except (TypeError, ValueError):
+        return False
+    current_time = time.time() if now is None else float(now)
+    if hb_ts < float(restart_started_at) or (current_time - hb_ts) > 15.0:
+        return False
+    hb_pid = heartbeat.get("pid")
+    if type(hb_pid) is not int or hb_pid <= 0 or hb_pid in stopped_pids:
+        return False
+    check_pid = psutil.pid_exists if pid_exists is None else pid_exists
+    try:
+        return bool(check_pid(hb_pid))
+    except Exception:
+        return False
 
 
 def main() -> int:
@@ -93,28 +128,40 @@ def main() -> int:
             print(f"   ⚠️ 清除普通暂停锁失败: {exc}")
             return 2
 
-    stop_existing_processes()
+    stopped_pids = stop_existing_processes()
     time.sleep(1.0)
+    restart_started_at = time.time()
     env = os.environ.copy()
     env["MATERIAL_HUB_CONFIG"] = str(CONFIG_PATH)
+    creationflags = (
+        getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000)
+        | getattr(subprocess, "DETACHED_PROCESS", 0)
+        | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
+    )
     subprocess.Popen(
         [str(PYTHONW), str(WATCHDOG_SCRIPT)],
         cwd=str(ROOT),
         env=env,
-        creationflags=0x08000000,
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        creationflags=creationflags,
         close_fds=True,
     )
 
     print("3. 正在等待采集器自愈并校验心跳...", end="", flush=True)
-    for _ in range(20):
+    for _ in range(30):
         time.sleep(0.5)
         print(".", end="", flush=True)
         if not HEARTBEAT_FILE.exists():
             continue
         try:
             heartbeat = json.loads(HEARTBEAT_FILE.read_text(encoding="utf-8"))
-            age = time.time() - float(heartbeat.get("timestamp", 0))
-            if age <= 10:
+            if is_fresh_restart_heartbeat(
+                heartbeat,
+                restart_started_at=restart_started_at,
+                stopped_pids=stopped_pids,
+            ):
                 print("\n✅ 心跳已恢复。")
                 print(f"   PID: {heartbeat.get('pid')}")
                 print(f"   历史: {heartbeat.get('history_len', 0)} ｜ 队列: {heartbeat.get('queue_len', 0)}")

@@ -20,6 +20,7 @@ import sys
 import time
 import re
 import json
+import uuid
 import shutil
 import random
 import threading
@@ -332,14 +333,11 @@ def _find_shelf_dir(base: Path, standard_name: str, legacy_name: str) -> Path:
     return base / standard_name
 
 BASE_MATERIAL_DIR = PATHS.material_root_dir
-PRECISION_DIR = _resolve_dir(storage_cfg.get("precision_dir"), "精准流量") if storage_cfg.get("precision_dir") else (BASE_MATERIAL_DIR / "精准流量")
-PAN_TRAFFIC_DIR = _resolve_dir(storage_cfg.get("pan_traffic_dir"), "泛流量") if storage_cfg.get("pan_traffic_dir") else (BASE_MATERIAL_DIR / "泛流量")
-AUTUMN_DIR = Path(storage_cfg.get("autumn_dir")) if storage_cfg.get("autumn_dir") else _find_shelf_dir(BASE_MATERIAL_DIR, "01-秋季专区（9—11月·时令团建）", "秋季（9—11月·智能分类）")
-WINTER_DIR = Path(storage_cfg.get("winter_dir")) if storage_cfg.get("winter_dir") else _find_shelf_dir(BASE_MATERIAL_DIR, "02-冬季专区（12—2月·温泉滑雪年会）", "冬季（12—2月·智能分类）")
-SPRING_DIR = Path(storage_cfg.get("spring_dir")) if storage_cfg.get("spring_dir") else _find_shelf_dir(BASE_MATERIAL_DIR, "03-春季专区（3—5月·踏青赏花）", "春季（3—5月·智能分类）")
-SUMMER_DIR = Path(storage_cfg.get("summer_dir")) if storage_cfg.get("summer_dir") else _find_shelf_dir(BASE_MATERIAL_DIR, "04-夏季专区（6—8月·溯溪漂流避暑）", "夏季（6—8月·智能分类）")
-ALL_SEASON_DIR = Path(storage_cfg.get("all_season_dir")) if storage_cfg.get("all_season_dir") else _find_shelf_dir(BASE_MATERIAL_DIR, "05-四季通用（全年·常规轰趴团建）", "四季通用（全年·无季节限制）")
-THEME_DIR = Path(storage_cfg.get("theme_dir")) if storage_cfg.get("theme_dir") else _find_shelf_dir(BASE_MATERIAL_DIR, "06-主题合集（特色玩法·垂直专题）", "主题合集")
+PRECISION_DIR = _resolve_dir(storage_cfg.get("precision_dir"), "01月") if storage_cfg.get("precision_dir") else (BASE_MATERIAL_DIR / "01月")
+PAN_TRAFFIC_DIR = _resolve_dir(storage_cfg.get("pan_traffic_dir"), "01月") if storage_cfg.get("pan_traffic_dir") else (BASE_MATERIAL_DIR / "01月")
+MONTH_DIRS = {m: BASE_MATERIAL_DIR / f"{m:02d}月" for m in range(1, 13)}
+HR_DIR = Path(storage_cfg.get("hr_dir")) if storage_cfg.get("hr_dir") else (BASE_MATERIAL_DIR / "行政HR图文")
+THEME_DIR = Path(storage_cfg.get("theme_dir")) if storage_cfg.get("theme_dir") else _find_shelf_dir(BASE_MATERIAL_DIR, "06-主题合集", "06-主题合集（特色玩法·垂直专题）")
 STAGING_CHANNEL_DIR = Path(storage_cfg.get("collection_staging_dir")) if storage_cfg.get("collection_staging_dir") else (BASE_MATERIAL_DIR / "_采集仓库" / "03-小红书采集器")
 
 # 下载器临时目录仍由配置控制；预演默认指向项目运行数据，不触碰旧暂存目录。
@@ -370,9 +368,9 @@ try:
 except Exception:
     DOWNLOAD_TIMEOUT_SECONDS = 120
 
-# 引入万能下载器 CLI
+# 引入万能下载器核心与统一入库管线
 try:
-    from xhs_dl.cli import main as xhs_dl_main
+    from xhs_dl.core.unified_downloader import UnifiedDownloader
     from xhs_dl.storage import (
         find_downloaded,
         merge_download_history,
@@ -380,12 +378,18 @@ try:
         update_history_location,
     )
 except Exception as e:
+    UnifiedDownloader = None
     find_downloaded = None
     merge_download_history = None
     same_download = None
     update_history_location = None
     if sys.stdout:
-        print(f"Warning: Failed to import xhs_dl.cli directly: {e}")
+        print(f"Warning: Failed to import xhs_dl core: {e}")
+
+from material_ingestor import (
+    ingest_work_package,
+    parse_cn_count,
+)
 
 
 def _already_in_shared_history(url):
@@ -789,45 +793,58 @@ def detect_traffic_and_category(title: str, content: str) -> tuple[str, str]:
 
 SEASON_RULES = {
     '春季': {
-        'folder': SPRING_DIR.name,
-        'dir_obj': SPRING_DIR,
-        'words': ['春季', '春天', '春日', '春游', '踏青', '赏花', '采茶', '新茶', '明前茶', '春茶', '挖笋', '采笋', '春笋', '青团', '放风筝', '清明', '五一', '早春', '海棠', '杜鹃', '郁金香', '油菜花', '樱花', '桃花', '梨花'],
+        'folder': '03月',
+        'dir_obj': MONTH_DIRS[3],
+        'words': ['春季', '春天', '春日', '(?<!新)春游', '踏青', '赏花', '采茶', '新茶', '明前茶', '春茶', '挖笋', '采笋', '春笋', '青团', '放风筝', '清明', '五一', '早春', '海棠', '杜鹃', '郁金香', '油菜花', '樱花', '桃花', '梨花'],
         'months': ['3月', '4月', '5月', '三月', '四月', '五月']
     },
     '夏季': {
-        'folder': SUMMER_DIR.name,
-        'dir_obj': SUMMER_DIR,
-        'words': ['夏季', '夏天', '夏日', '夏游', '避暑', '漂流', '溯溪', '玩水', '水上乐园', '杨梅', '采杨梅', '西瓜', '桨板', '皮划艇', '赶海', '海岛', '瀑布', '纳凉', '夜市', '夜游', '萤火虫', '端午', '暑假', '梅雨', '入梅', '出梅'],
+        'folder': '06月',
+        'dir_obj': MONTH_DIRS[6],
+        'words': ['夏季', '夏天', '夏日', '夏游', '避暑', '漂流', '溯溪', '玩水', '水上乐园', '杨梅', '采杨梅', '西瓜', '桨板', '皮划艇', '赶海', '海岛', '帆船', '瀑布', '纳凉', '萤火虫', '端午', '七夕', '暑假', '梅雨', '入梅', '出梅'],
         'months': ['6月', '7月', '8月', '六月', '七月', '八月']
     },
     '秋季': {
-        'folder': AUTUMN_DIR.name,
-        'dir_obj': AUTUMN_DIR,
+        'folder': '09月',
+        'dir_obj': MONTH_DIRS[9],
         'words': ['秋季', '秋天', '秋日', '秋游', '赏秋', '大闸蟹', '吃蟹', '品蟹', '太湖蟹', '开捕', '开渔', '桂花', '桂花龙井', '板栗', '柿子', '枫叶', '红枫', '银杏', '稻田', '割稻', '秋收', '丰收', '晒秋', '芦苇', '粉黛乱子草', '重阳', '登高', '赏菊', '菊花', '秋意', '秋色', '中秋', '国庆'],
         'months': ['9月', '10月', '11月', '九月', '十月', '十一月']
     },
     '冬季': {
-        'folder': WINTER_DIR.name,
-        'dir_obj': WINTER_DIR,
+        'folder': '12月',
+        'dir_obj': MONTH_DIRS[12],
         'words': ['冬季', '冬天', '冬日', '冬游', '滑雪', '赏雪', '冰雪', '圣诞', '春节', '过年', '年会', '温泉', '泡汤', '私汤', '围炉煮茶', '杀年猪', '刨猪汤', '烤全羊', '跨年', '元旦', '尾牙', '雾凇', '年终总结'],
         'months': ['12月', '1月', '2月', '十二月', '一月', '二月']
     }
 }
 
 def detect_season_matches(title: str, content: str) -> list[str]:
-    """返回匹配的季节列表（'春季', '夏季', '秋季', '冬季'，若均未命中则返回 ['四季通用']）"""
-    text = f"{title} {content}".lower()
+    """返回匹配的季节列表；未命中特定季节时返回全部四季（硬链至春夏秋冬）。"""
+    if "material_ingestor" in sys.modules:
+        return sys.modules["material_ingestor"].detect_season_matches(title, content)
+    try:
+        from material_ingestor import detect_season_matches as _mi_detect
+        return _mi_detect(title, content)
+    except Exception:
+        pass
+    lines = []
+    for raw_line in f"{title}\n{content}".splitlines():
+        if re.search(r"发布时间|下载时间|采集时间|原链接|原始链接|作品\s*ID|https?://", raw_line):
+            continue
+        lines.append(re.sub(r"20\d{2}[-./年]?\d{1,2}(?:[-./月]?\d{1,2}日?)?", " ", raw_line))
+    text = "\n".join(lines).lower()
     scores = {}
     for s_name, s_data in SEASON_RULES.items():
         found_w = [w for w in s_data['words'] if w in text]
         found_m = [m for m in s_data['months'] if m in text]
         if found_w or found_m:
             scores[s_name] = len(found_w) * 2 + len(found_m) * 3
+    all_four = ["秋季", "冬季", "春季", "夏季"]
     if not scores:
-        return ["四季通用"]
+        return all_four
     max_score = max(scores.values())
-    matched = [s for s, sc in scores.items() if not (max_score > sc * 2)]
-    return matched if matched else ["四季通用"]
+    matched = [s for s in all_four if s in scores and not (max_score > scores[s] * 2)]
+    return matched if matched else all_four
 
 
 # ---- 主题合集智能识别规则 (直通 06-主题合集，NTFS 0 空间硬链接) ----
@@ -845,39 +862,31 @@ THEME_RULES = [
         "keywords": ["泳池", "无边泳池", "恒温泳池", "玩水", "溯溪", "漂流", "溯溪玩水", "夏日避暑"]
     },
     {
-        "name": "04-🍁秋日银杏·红枫徒步与品蟹专区",
-        "keywords": ["银杏", "红枫", "赏秋", "品蟹", "大闸蟹", "阳澄湖蟹", "蟹宴", "秋日银杏", "赏枫"]
+        "name": "04-🍁秋日徒步与品蟹",
+        "keywords": ["银杏", "红枫", "赏秋", "品蟹", "大闸蟹", "阳澄湖蟹", "蟹宴", "秋日银杏", "赏枫", "秋日徒步"]
     },
     {
-        "name": "05-📸个人精选攻略与C端种草专区",
+        "name": "05-📸个人攻略C端种草",
         "keywords": ["个人精选", "拍照出片", "打卡机位", "机位分享", "C端种草", "拍照打卡"]
     },
     {
-        "name": "06-🎉节假日与特色节庆专区",
-        "keywords": ["中秋", "国庆", "五一", "元旦", "跨年", "端午", "清明", "春节", "节庆", "节日团建"]
+        "name": "06-🎉节日",
+        "keywords": ["中秋", "国庆", "五一", "元旦", "跨年", "端午", "清明", "春节", "圣诞", "年会", "尾牙", "节庆", "节日团建"]
     },
     {
-        "name": "07-🎮破冰互动与团建小游戏专区",
+        "name": "07-🎮团建小游戏",
         "keywords": ["破冰", "小游戏", "团建游戏", "互动游戏", "桌游", "热身游戏", "室内游戏", "户外游戏", "破冰小游戏"]
     },
     {
-        "name": "08-🏨核心目的地精品民宿专辑",
-        "keywords": ["精品民宿", "宝藏民宿", "设计师民宿", "野奢民宿", "高端民宿", "美宿专辑"]
-    },
-    {
-        "name": "09-🗺️全景大盘地图与跨城合集攻略",
-        "keywords": ["路线地图", "全景攻略", "地图攻略", "路线图", "出行大盘", "攻略地图"]
-    },
-    {
-        "name": "10-🗺️江浙沪大合集",
+        "name": "10-📚攻略与团建方案大合集",
         "keywords": [
             "江浙沪大合集", "江浙沪合集", "江浙沪方案", "团建方案", "两天一夜方案", "2天1夜方案",
             "方案合集", "HR抄作业", "大厂同款", "短途游大合集", "神仙目的地合集", "徒步路线合集",
-            "场地合集", "团建大合集"
+            "场地合集", "团建大合集", "路线地图", "全景攻略", "地图攻略", "攻略合集"
         ]
     },
     {
-        "name": "11-🍳胡闹厨房趣味烹饪主题专区",
+        "name": "11-🍳胡闹厨房",
         "keywords": ["胡闹厨房", "现实版胡闹厨房", "真人胡闹厨房", "烹饪团建", "做饭团建", "厨房团建", "全员厨神"]
     }
 ]
@@ -1111,7 +1120,9 @@ class QueueManager:
 
     def save(self):
         try:
-            tmp_file = QUEUE_FILE.with_suffix(".tmp")
+            tmp_file = QUEUE_FILE.with_name(
+                f".{QUEUE_FILE.name}.{os.getpid()}.{uuid.uuid4().hex[:8]}.tmp"
+            )
             data = {
                 "queue": self.queue,
                 "failed": self.failed,
@@ -1121,6 +1132,8 @@ class QueueManager:
             }
             with open(tmp_file, "w", encoding="utf-8") as f:
                 json.dump(data, f, ensure_ascii=False, indent=2)
+                f.flush()
+                os.fsync(f.fileno())
             tmp_file.replace(QUEUE_FILE)
             try:
                 self._last_mtime = QUEUE_FILE.stat().st_mtime
@@ -1129,6 +1142,64 @@ class QueueManager:
         except Exception as e:
             if sys.stdout:
                 print(f"[Queue Save Error]: {e}")
+
+    def retry_failed_items(
+        self,
+        item_ids: list[str] | None = None,
+        *,
+        clear_cooldown: bool = True,
+    ) -> dict:
+        """Move selected or all failed items back to the pending queue safely."""
+        with self.lock:
+            self._reload_if_changed_locked()
+            target_ids = {str(x) for x in item_ids} if item_ids is not None else None
+            moved_ids: list[str] = []
+            remaining_failed: list[dict] = []
+            for item in self.failed:
+                item_id = str(item.get("id") or "")
+                if target_ids is not None and item_id not in target_ids:
+                    remaining_failed.append(item)
+                    continue
+                url = str(item.get("url") or "").strip()
+                if url and any(_same_collected_work(q.get("url"), url) for q in self.queue):
+                    moved_ids.append(item_id)
+                    continue
+                restored = dict(item)
+                restored["status"] = "pending"
+                restored["retry_count"] = 0
+                restored["last_error"] = None
+                restored["requeued_at"] = time.strftime("%Y-%m-%d %H:%M:%S")
+                self.queue.append(restored)
+                moved_ids.append(item_id)
+            self.failed = remaining_failed
+            if clear_cooldown:
+                self.cooldown_until = 0.0
+                self.cooldown_reason = ""
+            self.save()
+            return {
+                "moved_count": len(moved_ids),
+                "moved_ids": moved_ids,
+                "queue_len": len(self.queue),
+                "failed_len": len(self.failed),
+            }
+
+    def _reload_if_changed_locked(self):
+        if QUEUE_FILE.exists():
+            try:
+                mtime = QUEUE_FILE.stat().st_mtime
+                if mtime > getattr(self, "_last_mtime", 0):
+                    with open(QUEUE_FILE, "r", encoding="utf-8") as f:
+                        data = json.load(f)
+                        self.queue = data.get("queue", [])
+                        self.failed = data.get("failed", [])
+                        self.cooldown_until = data.get("cooldown_until", 0.0)
+                        self.cooldown_reason = data.get("cooldown_reason", "")
+                        for item in self.queue:
+                            if not item.get("id"):
+                                item["id"] = f"xhs_{int(time.time()*1000)}_{random.randint(100, 999)}"
+                        self._last_mtime = mtime
+            except Exception:
+                pass
 
     def add(self, url: str, raw_text: str, title_hint: str) -> tuple[bool, int, dict]:
         with self.lock:
@@ -1163,22 +1234,7 @@ class QueueManager:
     def peek(self) -> dict | None:
         with self.lock:
             # 外部改动同步（若前端或外部移除了任务或清空了队列，自动重载内存）
-            if QUEUE_FILE.exists():
-                try:
-                    mtime = QUEUE_FILE.stat().st_mtime
-                    if mtime > getattr(self, "_last_mtime", 0):
-                        with open(QUEUE_FILE, "r", encoding="utf-8") as f:
-                            data = json.load(f)
-                            self.queue = data.get("queue", [])
-                            self.failed = data.get("failed", [])
-                            self.cooldown_until = data.get("cooldown_until", 0.0)
-                            self.cooldown_reason = data.get("cooldown_reason", "")
-                            for item in self.queue:
-                                if not item.get("id"):
-                                    item["id"] = f"xhs_{int(time.time()*1000)}_{random.randint(100, 999)}"
-                            self._last_mtime = mtime
-                except Exception:
-                    pass
+            self._reload_if_changed_locked()
             if self.queue:
                 head = self.queue[0]
                 if not head.get("id"):
@@ -1466,6 +1522,35 @@ def detect_commercial_ad(title: str, content: str, author: str = "") -> tuple[bo
 
     return False, ""
 
+def _effective_ingest_config() -> dict:
+    """Build runtime ingestion config aligned with module-level paths."""
+    cfg = dict(LOADED_CONFIG) if isinstance(LOADED_CONFIG, dict) else {}
+    storage = dict(cfg.get("storage", {}) or {})
+    storage.update({
+        "material_root_dir": str(BASE_MATERIAL_DIR),
+        "precision_dir": str(PRECISION_DIR),
+        "pan_traffic_dir": str(PAN_TRAFFIC_DIR),
+        "enable_month_hardlink": True,
+        "hr_dir": str(HR_DIR),
+        "theme_dir": str(THEME_DIR),
+        "unclassified_downloads_dir": str(C_DOWNLOADS_DIR),
+        "temp_download_dir": str(TEMP_DOWNLOAD_DIR),
+    })
+    cfg["storage"] = storage
+    routing = dict(cfg.get("project_routing", {}) or {})
+    doubao = dict(routing.get("doubao_pullnew", {}) or {})
+    doubao.update({
+        "enabled": DOUBAO_ROUTE_ENABLED,
+        "material_dir": str(DOUBAO_MATERIAL_DIR),
+        "link_md_file": str(DOUBAO_LINK_MD),
+    })
+    if "keywords" not in doubao:
+        doubao["keywords"] = list(DOUBAO_KEYWORDS)
+    routing["doubao_pullnew"] = doubao
+    cfg["project_routing"] = routing
+    return cfg
+
+
 # 核心下载执行函数
 def execute_download_and_file(target_url: str) -> tuple[bool, str, dict]:
     """
@@ -1477,34 +1562,52 @@ def execute_download_and_file(target_url: str) -> tuple[bool, str, dict]:
     if not is_note:
         return False, type_msg, {}
 
+    if UnifiedDownloader is None:
+        return False, "下载引擎未加载(UnifiedDownloader不可用)", {}
+
     if TEMP_DOWNLOAD_DIR.exists():
         shutil.rmtree(TEMP_DOWNLOAD_DIR, ignore_errors=True)
     TEMP_DOWNLOAD_DIR.mkdir(parents=True, exist_ok=True)
 
-    saved_argv = sys.argv[:]
     try:
-        sys.argv = [
-            "xhs-dl",
-            target_url,
-            "-o",
-            str(TEMP_DOWNLOAD_DIR),
-            "--mode",
-            "fast",
-            "--timeout",
-            str(DOWNLOAD_TIMEOUT_SECONDS),
-            "--max-images",
-            str(MAX_IMAGE_ALLOWED),
-        ]
-        xhs_dl_main()
-    except SystemExit:
-        pass
+        downloader = UnifiedDownloader(
+            output_dir=str(TEMP_DOWNLOAD_DIR),
+            delay=(0, 0),
+            timeout=DOWNLOAD_TIMEOUT_SECONDS,
+            image_format="keep",
+            max_images=MAX_IMAGE_ALLOWED,
+            adaptive=False,
+        )
+        dl_result = downloader.download([target_url])
     except Exception as e:
         return False, f"下载引擎异常: {e}", {}
-    finally:
-        sys.argv = saved_argv
 
-    downloaded_dirs = [d for d in TEMP_DOWNLOAD_DIR.iterdir() if d.is_dir()]
-    if not downloaded_dirs:
+    note_result = dl_result.results[0] if getattr(dl_result, "results", None) else None
+    if note_result is not None and getattr(note_result, "deduplicated", False):
+        return True, "ALREADY_DOWNLOADED: 已在万能下载器成功记录中，跳过重复采集", {
+            "title": note_result.title or "",
+            "note_id": note_result.note_id or "",
+            "target_dir": note_result.save_dir or "",
+            "deduplicated": True,
+        }
+
+    if note_result is not None and not getattr(note_result, "success", False):
+        err_msg = str(getattr(note_result, "error", "") or "").strip()
+        if note_result.save_dir:
+            shutil.rmtree(note_result.save_dir, ignore_errors=True)
+        return False, (err_msg or "下载引擎未返回有效媒体结果"), {}
+
+    work_dir = None
+    if note_result is not None and getattr(note_result, "save_dir", ""):
+        cand = Path(note_result.save_dir)
+        if cand.is_dir():
+            work_dir = cand
+    if work_dir is None:
+        downloaded_dirs = [d for d in TEMP_DOWNLOAD_DIR.iterdir() if d.is_dir()]
+        if downloaded_dirs:
+            work_dir = downloaded_dirs[0]
+
+    if work_dir is None:
         existing = _already_in_shared_history(target_url)
         if existing:
             return True, "ALREADY_DOWNLOADED: 已在万能下载器成功记录中，跳过重复采集", {
@@ -1515,299 +1618,72 @@ def execute_download_and_file(target_url: str) -> tuple[bool, str, dict]:
             }
         return False, "UNKNOWN_NO_OUTPUT: 下载引擎未产出目录，原因未证实，保留任务并退避重试", {}
 
-    work_dir = downloaded_dirs[0]
-    folder_name = work_dir.name
-
-    # 读取文案
-    txt_file = work_dir / "文案.txt"
-    content_text = ""
-    title_text = folder_name
-    if txt_file.exists():
-        try:
-            content_text = txt_file.read_text(encoding="utf-8", errors="ignore")
-            m_title = re.search(r"标题[：:]\s*(.+)", content_text)
-            if m_title:
-                title_text = m_title.group(1).strip()
-        except:
-            pass
-
-    # 校验是否真正下载到了媒体资源 (图片或视频均认可，防风控空壳)
-    VIDEO_SUFFIXES = [".mp4", ".mov", ".avi", ".mkv", ".webm"]
-    images = [f for f in work_dir.iterdir() if f.suffix.lower() in [".jpg", ".png", ".jpeg", ".webp"]]
-    videos = [f for f in work_dir.iterdir() if f.suffix.lower() in VIDEO_SUFFIXES]
-    img_count = len(images)
-    video_count = len(videos)
-    if img_count == 0 and video_count == 0:
-        return False, "解析未包含有效图片或视频资源(可能触发页面验证)", {}
-
-    # 用户明确铁律：超过 15 张的超长素材一律不得落地入库，直接拦截丢弃
-    if img_count > MAX_IMAGE_ALLOWED:
-        shutil.rmtree(work_dir, ignore_errors=True)
-        return False, f"素材图片超限({img_count}张 > 上限{MAX_IMAGE_ALLOWED}张)，触发超长过滤策略直接拦截丢弃", {}
-
-    # 提取作者信息
-    author_text = ""
-    m_stat = re.match(r"^评\d+-赞\d+-(.+?)-([^-]+)$", folder_name)
-    if m_stat:
-        author_text = m_stat.group(2).strip()
-    if not author_text and content_text:
-        m_auth = re.search(r"作者[：:]\s*(.+)", content_text)
-        if m_auth:
-            author_text = m_auth.group(1).strip()
-
-    # 商业广告与车企/租车/代泊等无关营销前置拦截过滤
-    is_ad, ad_reason = detect_commercial_ad(title_text, content_text, author_text)
-    if is_ad:
-        shutil.rmtree(work_dir, ignore_errors=True)
-        return False, f"检测到商业广告/营销软文({ad_reason})，触发广告拦截策略直接丢弃", {}
-
-    # 动态检测当前采集路由模式 (自动识别模式 vs 手动定向归类模式)
     mode_info = get_current_collector_mode()
     curr_mode = mode_info.get("mode", "auto")
     manual_target = mode_info.get("target_folder", "").strip()
 
-    if curr_mode == "manual" and manual_target:
-        # 手动定向归类模式：暂停多分支动态识别，所有素材直接落地至指定目标文件夹 (如: 民宿合集)
-        traffic_type = "手动定向"
-        target_category = manual_target
-        target_city = manual_target
-        is_unclassified = False
-        project_routed = None
-        
-        # 兼容相对路径（相对于素材库根目录）或绝对路径
-        if Path(manual_target).is_absolute():
-            city_dest_dir = Path(manual_target)
-        else:
-            city_dest_dir = BASE_MATERIAL_DIR / manual_target
-        final_target_dir = city_dest_dir / folder_name
-    else:
-        # 项目级关键词路由 (最高优先级)：豆包拉新等命中即直落对应项目素材库
-        project_routed = None
-        route_key = detect_project_route(title_text, content_text) if curr_mode == "auto" else None
-        if route_key == "doubao_pullnew":
-            traffic_type = "项目路由"
-            target_category = "豆包拉新·参考爆款"
-            target_city = "豆包拉新"
-            is_unclassified = False
-            project_routed = route_key
-            city_dest_dir = DOUBAO_MATERIAL_DIR
-            final_target_dir = city_dest_dir / folder_name
-        else:
-            # 智能流量类型与目标二级分类/城市识别 (大合集/团建游戏直通顶层平级货架)
-            traffic_type, target_category = detect_traffic_and_category(title_text, content_text)
-            is_unclassified = (traffic_type == "未分类")
+    extra_meta = {}
+    if note_result is not None:
+        if note_result.title:
+            extra_meta["title"] = note_result.title
+        if note_result.author:
+            extra_meta["author"] = note_result.author
+        if note_result.note_id:
+            extra_meta["note_id"] = note_result.note_id
+        if note_result.likes:
+            extra_meta["likes_count"] = parse_cn_count(note_result.likes)
+        if note_result.comments:
+            extra_meta["comments_count"] = parse_cn_count(note_result.comments)
 
-            if is_unclassified:
-                city_dest_dir = C_DOWNLOADS_DIR
-                target_city = "未分类(00-待识别暂存)"
-                final_target_dir = city_dest_dir / folder_name
-            else:
-                target_city = target_category
-                # 优先直落新版标准专区城市货架 (如 ALL_SEASON_DIR / target_category)
-                if (ALL_SEASON_DIR / target_category).exists() or not (ALL_SEASON_DIR / "精准流量").exists():
-                    city_dest_dir = ALL_SEASON_DIR / target_category
-                elif traffic_type == "泛流量":
-                    city_dest_dir = (ALL_SEASON_DIR / "泛流量" / target_category) if (ALL_SEASON_DIR / "泛流量").exists() else (PAN_TRAFFIC_DIR / target_category)
-                else:
-                    city_dest_dir = (ALL_SEASON_DIR / "精准流量" / target_category) if (ALL_SEASON_DIR / "精准流量").exists() else (PRECISION_DIR / target_category)
-                final_target_dir = city_dest_dir / folder_name
+    ingest_res = ingest_work_package(
+        work_dir,
+        config=_effective_ingest_config(),
+        config_path=CONFIG_FILE,
+        url=target_url,
+        mode=curr_mode,
+        target_folder=manual_target,
+        source_label="剪贴板监听",
+        engine_label="万能下载器 v3.8.4",
+        max_images=MAX_IMAGE_ALLOWED,
+        copy_only=False,
+        dry_run=False,
+        clean_copy_file=True,
+        extra_metadata=extra_meta,
+    )
 
-    city_dest_dir.mkdir(parents=True, exist_ok=True)
-    if final_target_dir.exists():
-        shutil.rmtree(final_target_dir, ignore_errors=True)
+    outcome = ingest_res.get("outcome", "")
+    if outcome in {"filtered_oversized", "filtered_ad"}:
+        shutil.rmtree(work_dir, ignore_errors=True)
+        return False, str(ingest_res.get("message") or "内容已被规则过滤"), {}
+    if outcome == "no_media":
+        return False, "解析未包含有效图片或视频资源(可能触发页面验证)", {}
+    if not ingest_res.get("success"):
+        return False, str(ingest_res.get("message") or "统一入库管线处理失败"), {}
 
-    shutil.move(str(work_dir), str(final_target_dir))
+    metadata = dict(ingest_res.get("metadata") or {})
+    metadata["captured_by"] = "universal-clipboard-collector"
+    tags = list(metadata.get("tags") or [])
+    for tag in ("剪切板下载", "万能下载器下载"):
+        if tag not in tags:
+            tags.insert(0, tag)
+    metadata["tags"] = tags
 
-    # 从标准文件夹名解析作者与赞评互动元数据: 评X-赞Y-标题-作者
-    author = ""
-    comments_cnt = 0
-    likes_cnt = 0
-    m_stat = re.match(r"^评(\d+)-赞(\d+)-(.*?)(?:-([^-]+))?$", folder_name)
-    if m_stat:
-        try:
-            comments_cnt = int(m_stat.group(1))
-            likes_cnt = int(m_stat.group(2))
-            if m_stat.group(4):
-                author = m_stat.group(4).strip()
-        except:
-            pass
-
-    # 季节判断与硬链接目录预备 (支持春、夏、秋、冬及四季通用多维穿透)
-    # 注意：在手动定向模式下专注于该专项合集，不自动向四季目录扩散
-    season_work_dirs = []
-    if curr_mode == "auto" and not project_routed:
-        matched_seasons = detect_season_matches(title_text, content_text)
-        season_name = "、".join(matched_seasons)
-        if not is_unclassified:
-            for s in matched_seasons:
-                if s == "四季通用":
-                    s_base = ALL_SEASON_DIR
-                elif s in SEASON_RULES:
-                    s_base = SEASON_RULES[s]['dir_obj']
-                else:
-                    s_base = ALL_SEASON_DIR
-                # 优先构建新版扁平标准层级 [季节专区]/[城市或大盘]/[帖子包]
-                if (s_base / target_category).exists() or not (s_base / "精准流量").exists():
-                    s_target_dir = s_base / target_category / folder_name
-                elif traffic_type == "泛流量":
-                    s_target_dir = s_base / "泛流量" / target_category / folder_name
-                else:
-                    s_target_dir = s_base / "精准流量" / target_category / folder_name
-                season_work_dirs.append((s, s_target_dir))
-    elif project_routed:
-        matched_seasons = ["项目路由"]
-        season_name = "项目直达(无季节扩散)"
-    else:
-        matched_seasons = ["指定专题"]
-        season_name = f"手动定向({manual_target})"
-
-    # 元数据打标 (metadata.json) - 100% 完备规范元数据
-    platform = "抖音" if ("douyin" in target_url.lower()) else "小红书"
-    metadata = {
-        "title": title_text,
-        "author": author,
-        "likes_count": likes_cnt,
-        "comments_count": comments_cnt,
-        "city": target_city,
-        "traffic_type": traffic_type,
-        "category": target_category,
-        "season": season_name,
-        "is_unclassified": is_unclassified,
-        "collection_mode": curr_mode,
-        "manual_target_folder": manual_target if curr_mode == "manual" else "",
-        "source": "剪贴板监听",
-        "engine": "万能下载器 v3.8.3",
-        "platform": platform,
-        "tags": ["剪切板下载", "万能下载器下载", f"{platform}{'视频' if video_count > 0 else '图文'}", traffic_type, target_city] + [f"{s}素材" for s in matched_seasons],
-        "project_route": project_routed or "",
-        "downloaded_at": time.strftime("%Y-%m-%d %H:%M:%S"),
-        "url": target_url,
-        "source_url": target_url,
-        "original_url": target_url,
-        "share_url": target_url,
-        "images_count": img_count,
-        "images_list": [f.name for f in images],
-        "note_type": "视频" if video_count > 0 else "图文",
-        "videos_count": video_count,
-        "videos_list": [f.name for f in videos],
-        "content_length": len(content_text),
-        "content_preview": content_text[:120].strip() if content_text else "",
-        "folder_name": folder_name,
-        "target_dir": str(final_target_dir),
-        "season_hardlink_dirs": [str(d) for _, d in season_work_dirs],
-        "version": "3.8.0",
-        "status": "success",
-        "captured_by": "universal-clipboard-collector"
-    }
+    final_target_dir = Path(ingest_res["target_dir"])
     try:
-        (final_target_dir / "metadata.json").write_text(json.dumps(metadata, ensure_ascii=False, indent=2), encoding="utf-8")
+        (final_target_dir / "metadata.json").write_text(
+            json.dumps(metadata, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
         log_daemon(f"📝 元数据打标完成: {final_target_dir / 'metadata.json'} (包含 {len(metadata)} 项核心属性)")
     except Exception as e:
         log_daemon(f"❌ 元数据打标异常: {e}")
-        if sys.stdout:
-            print(f"[Metadata Error]: {e}")
 
-    # 三大解耦铁律：文案.txt 严禁混入原链接元数据，原链接100%沉淀在 metadata.json 中
-    pass
+    for s_tag, mode_label in (ingest_res.get("hardlink_modes") or {}).items():
+        log_daemon(f"🔗 四季归档建立成功 ({s_tag}·{mode_label})")
+    for t_dir in (ingest_res.get("theme_hardlink_dirs") or []):
+        log_daemon(f"🔗 主题专区硬链接建立成功: {t_dir}")
 
-    # 项目路由命中：把原链接同步追加进对应项目的灵感链接 md (如豆包拉新·对标灵感链接)
-    try:
-        append_project_link_record(project_routed, title_text, target_url)
-    except Exception as e:
-        log_daemon(f"⚠️ 项目链接记录异常: {e}")
-
-    # 四季分类与 NTFS 原生硬链接分发 (已识别地名才分发，跨卷自动降级保障 100% 留存)
-    if not is_unclassified and season_work_dirs:
-        for s_tag, s_work_dir in season_work_dirs:
-            try:
-                s_work_dir.mkdir(parents=True, exist_ok=True)
-                link_mode = "NTFS硬链接"
-                for src_file in final_target_dir.iterdir():
-                    if src_file.is_file():
-                        dest_file = s_work_dir / src_file.name
-                        if not dest_file.exists():
-                            linked = False
-                            # 1. 优先尝试 NTFS 原生硬链接 (要求同卷同盘符，0 存储占用)
-                            src_drive = getattr(src_file, 'drive', '')
-                            dest_drive = getattr(dest_file, 'drive', '')
-                            if src_drive and dest_drive and src_drive.upper() == dest_drive.upper():
-                                try:
-                                    os.link(src_file, dest_file)
-                                    linked = True
-                                except Exception:
-                                    linked = False
-                            # 2. 跨驱动器容灾降级：尝试软链接或智能复制 (绝不静默丢失)
-                            if not linked:
-                                link_mode = "跨卷副本/软链"
-                                try:
-                                    os.symlink(src_file, dest_file)
-                                except Exception:
-                                    try:
-                                        shutil.copy2(src_file, dest_file)
-                                    except Exception:
-                                        pass
-                log_daemon(f"🔗 四季归档建立成功 ({s_tag}·{link_mode}): {s_work_dir}")
-            except Exception as ex_link:
-                log_daemon(f"❌ 建立四季归档异常 ({s_tag}): {ex_link}")
-                if sys.stdout:
-                    print(f"[Hardlink Error {s_tag}]: {ex_link}")
-
-    # The downloader first records its staging directory. Replace it with the
-    # final organized folder so the shared history points at the files users see.
-    
-    # 主题合集智能识别与 NTFS 原生硬链接分发 (特色玩法直通 06-主题合集，0 空间占用)
-    matched_themes = detect_theme_matches(title_text, content_text)
-    theme_work_dirs = []
-    if not is_unclassified and matched_themes and THEME_DIR.exists():
-        for t_name in matched_themes:
-            t_base = THEME_DIR / t_name
-            if not t_base.exists():
-                continue
-            if (t_base / target_category).exists() and (t_base / target_category).is_dir():
-                t_dest_dir = t_base / target_category / folder_name
-            else:
-                t_dest_dir = t_base / folder_name
-            
-            try:
-                t_dest_dir.mkdir(parents=True, exist_ok=True)
-                for src_file in final_target_dir.iterdir():
-                    if src_file.is_file():
-                        dest_file = t_dest_dir / src_file.name
-                        if not dest_file.exists():
-                            try:
-                                os.link(src_file, dest_file)
-                            except Exception:
-                                try:
-                                    shutil.copy2(src_file, dest_file)
-                                except Exception:
-                                    pass
-                theme_work_dirs.append(str(t_dest_dir))
-                log_daemon(f"🔗 主题专区硬链接建立成功 ({t_name}): {t_dest_dir}")
-            except Exception as ex_t:
-                log_daemon(f"❌ 建立主题专区硬链接异常 ({t_name}): {ex_t}")
-        
-        # 实时回写元数据
-        if theme_work_dirs:
-            try:
-                metadata["theme_hardlink_dirs"] = theme_work_dirs
-                metadata["matched_themes"] = matched_themes
-                (final_target_dir / "metadata.json").write_text(json.dumps(metadata, ensure_ascii=False, indent=2), encoding="utf-8")
-            except Exception:
-                pass
-
-    if update_history_location is not None:
-        try:
-            existing = find_downloaded(download_url=target_url) if find_downloaded else None
-            update_history_location(
-                target_url,
-                (existing or {}).get("笔记ID", ""),
-                (existing or {}).get("标题") or title_text,
-                str(final_target_dir),
-            )
-        except Exception as exc:
-            log_daemon(f"⚠️ 下载历史保存位置更新失败: {exc}")
-
-    return True, folder_name, metadata
+    return True, str(ingest_res.get("folder_name") or final_target_dir.name), metadata
 
 
 # 消费工作线程 (Queue Worker Thread)
@@ -1975,15 +1851,15 @@ def queue_worker_loop(queue_mgr: QueueManager, history_set: set):
                 time.sleep(1.0)
                 continue
 
-            elif "素材图片超限" in result_msg or "超长过滤策略" in result_msg:
-                # 用户铁律：单篇素材严格限制 <= 15 张图，超过直接拦截丢弃并显式通知
+            elif any(k in result_msg for k in ["素材图片超限", "超长过滤策略", "前置熔断", "图片数量超过限制"]):
+                # 用户铁律：单篇素材超图前置/后置拦截直接丢弃，不计入通道连续失败
                 queue_mgr.pop_discard(item_id, result_msg)
                 rem_count = queue_mgr.get_remaining_count()
                 short_hint = title_hint[:22] + ("..." if len(title_hint) > 22 else "")
                 queue_tip = f" (队列剩余 {rem_count} 篇继续处理中)" if rem_count > 0 else ""
                 warn_notify = (
                     f"🚫 超长素材已拦截丢弃：《{short_hint}》\n"
-                    f"💡 规则：严格限制 ≤ 15 张图，{result_msg}，不予落地入库{queue_tip}"
+                    f"💡 规则：严格限制 ≤ {MAX_IMAGE_ALLOWED} 张图，{result_msg}，不予落地入库{queue_tip}"
                 )
                 send_desktop_notification(warn_notify, title="超长素材拦截 (已丢弃)", status="warning")
                 send_feishu_error_sync(title_hint, url, f"超长素材拦截丢弃: {result_msg}")
@@ -1992,9 +1868,13 @@ def queue_worker_loop(queue_mgr: QueueManager, history_set: set):
                 time.sleep(1.0)
                 continue
 
-            elif any(k in result_msg for k in ["未能成功解析", "0目录产出", "404", "无法浏览", "获取数据失败", "UNSUPPORTED_PROFILE", "暂不支持", "前置熔断", "超限"]):
-                # 单篇资源级终态或解析受限（私密笔记/已删除/或缺少免登安全凭据/超限前置拦截）
-                # 关键：这属于单篇笔记自身属性问题，绝非 IP 级风控，严禁触发长达数分钟的全局队头死锁！
+            elif "UNSUPPORTED_PROFILE" in result_msg or any(
+                k in result_msg for k in [
+                    "作品不存在", "视频不存在", "内容不存在", "已被删除", "暂不可见",
+                    "私密作品", "已设为私密", "该作品无法查看", "404", "暂不支持这个链接来源",
+                ]
+            ):
+                # 明确的单篇资源终态（主页/已删除/私密/不支持链接），立即移出队列且不计入通道失败计数
                 queue_mgr.pop_discard(item_id, result_msg)
                 rem_count = queue_mgr.get_remaining_count()
                 short_hint = title_hint[:22] + ("..." if len(title_hint) > 22 else "")
@@ -2005,7 +1885,7 @@ def queue_worker_loop(queue_mgr: QueueManager, history_set: set):
                         is_new, creator = register_benchmark_account(url, item.get("raw_text", ""), title_hint)
                         if is_new:
                             send_desktop_notification(
-                                f"🎯 检测到博主主页，已自动归档至【团建对标库】：《{creator}》\\n💡 已同步更新项目对标清单与第二大脑",
+                                f"🎯 检测到博主主页，已自动归档至【团建对标库】：《{creator}》\n💡 已同步更新项目对标清单与第二大脑",
                                 title="对标账号自动建档",
                                 status="success",
                                 action_target=str(PROJECT_BENCHMARK_FILE)
@@ -2020,26 +1900,20 @@ def queue_worker_loop(queue_mgr: QueueManager, history_set: set):
                     send_feishu_error_sync(title_hint, url, f"链接类型不符或非单篇图文作品 ({result_msg[:40]})")
                 else:
                     warn_notify = (
-                        f"⚠️ 单篇笔记解析受限已移入异常：《{short_hint}》\n"
+                        f"⚠️ 单篇作品不可访问已跳过：《{short_hint}》\n"
                         f"💡 原因: {result_msg[:40]}{queue_tip}"
                     )
-                    send_desktop_notification(warn_notify, title="单篇受限已跳过", status="warning")
-                    send_feishu_error_sync(title_hint, url, f"单篇笔记解析受限或缺少Token ({result_msg[:40]})")
+                    send_desktop_notification(warn_notify, title="单篇不可用已跳过", status="warning")
+                    send_feishu_error_sync(title_hint, url, f"单篇作品已删除/私密或不支持 ({result_msg[:40]})")
 
-                log_daemon(f"[Worker Discard]: Discarded item {url} ({result_msg}), moving to next...")
+                log_daemon(f"[Worker Discard Terminal]: Discarded item {url} ({result_msg}), moving to next...")
                 if sys.stdout:
-                    print(f"[Worker Discard]: Discarded item {url} ({result_msg}), moving to next...")
-                # 连续失败熔断：同一通道连续挂掉说明是通道问题，不是单篇问题
-                _fail_n = record_download_failure(url, result_msg)
-                if _fail_n >= FAIL_PAUSE_THRESHOLD:
-                    trip_failure_pause(_fail_n, url, result_msg)
-                    return
-                # 仅保留拟人微间隔 1.5 秒，立即流转执行队列下一篇！
+                    print(f"[Worker Discard Terminal]: Discarded item {url} ({result_msg}), moving to next...")
                 time.sleep(1.5)
                 continue
 
             else:
-                # 真正的网络中断或频次告警处理：进入阶梯式风控退避冷却
+                # 通道级 / 风控 / 验证码 / 网络超时 / 解析异常：阶梯退避并计入连续失败熔断
                 curr_retries = retry_count + 1
                 if AdaptiveRetryPolicy:
                     backoff_sec = AdaptiveRetryPolicy.retry_delay(
@@ -2057,30 +1931,30 @@ def queue_worker_loop(queue_mgr: QueueManager, history_set: set):
                 queue_mgr.mark_retry(item_id, result_msg, backoff_sec)
                 rem_count = queue_mgr.get_remaining_count()
 
+                # 先记录连续失败次数，且绝对不在重试耗尽时错误清零（否则永远无法达到熔断阈值）
+                _fail_n = record_download_failure(url, result_msg)
+
                 if curr_retries >= MAX_RETRIES:
                     short_hint = title_hint[:20] + ("..." if len(title_hint) > 20 else "")
                     err_notify = f"❌ 连续多次重试失败，已移入异常待查：《{short_hint}》\n⚠️ 原因: {result_msg[:40]}"
                     send_desktop_notification(err_notify, title="已移入异常队列", status="error")
                     send_feishu_error_sync(title_hint, url, f"重试耗尽移入异常: {result_msg[:40]}")
-                    # 该单篇任务已彻底移入 failed 队列，重置连续失败计数，避免单篇死锁阻断后续队列
-                    reset_download_failure_streak()
-                    continue
                 else:
                     short_hint = title_hint[:20] + ("..." if len(title_hint) > 20 else "")
                     cd_notify = (
-                        f"⚠️ 遇到网络波动/频次保护，已启动冷却缓冲\n"
+                        f"⚠️ 遇到网络波动/风控保护，已启动冷却缓冲\n"
                         f"⏳ 剩余 {rem_count} 篇已安全保存在【待下载队列】，将在 {int(backoff_sec)} 秒后自动续接"
                     )
                     send_desktop_notification(cd_notify, title="冷却缓冲保护中", status="warning")
 
-                log_daemon(f"[Worker Warning]: {result_msg}, enter cooldown {backoff_sec}s")
+                log_daemon(f"[Worker Warning]: {result_msg}, enter cooldown {backoff_sec}s (fail_streak={_fail_n})")
                 if sys.stdout:
-                    print(f"[Worker Warning]: {result_msg}, enter cooldown {backoff_sec}s")
-                # 连续失败熔断：网络/频次类失败同样计入
-                _fail_n = record_download_failure(url, result_msg)
+                    print(f"[Worker Warning]: {result_msg}, enter cooldown {backoff_sec}s (fail_streak={_fail_n})")
                 if _fail_n >= FAIL_PAUSE_THRESHOLD:
                     trip_failure_pause(_fail_n, url, result_msg)
                     return
+                if curr_retries >= MAX_RETRIES:
+                    continue
 
         except Exception as ex:
             log_daemon(f"[Worker Loop Fatal Exception]: {ex}\n{traceback.format_exc()}")

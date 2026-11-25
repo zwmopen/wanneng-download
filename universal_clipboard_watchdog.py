@@ -16,6 +16,7 @@ import json
 import subprocess
 import ctypes
 from ctypes import wintypes
+from datetime import datetime, timezone
 from pathlib import Path
 
 WATCHDOG_DIR = Path(__file__).resolve().parent
@@ -60,6 +61,23 @@ def log(msg: str):
         pass
 
 
+def _parse_iso_timestamp(value: str) -> float | None:
+    text = str(value or "").strip()
+    if not text:
+        return None
+    if text.endswith("Z"):
+        text = text[:-1] + "+00:00"
+    elif len(text) >= 5 and text[-5] in {"+", "-"} and text[-4:].isdigit():
+        text = text[:-2] + ":" + text[-2:]
+    try:
+        dt = datetime.fromisoformat(text)
+    except ValueError:
+        return None
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt.timestamp()
+
+
 def is_collector_paused() -> bool:
     if not PAUSE_FILE.exists():
         return False
@@ -76,9 +94,25 @@ def is_collector_paused() -> bool:
             if data.get("paused") is False:
                 PAUSE_FILE.unlink(missing_ok=True)
                 return False
-            # 若超过 24 小时未更新的熔断锁，视作陈旧标记自动拔除
-            paused_at = data.get("paused_at", "")
+            # 若超过 24 小时未更新的自动熔断锁，视作陈旧标记自动拔除（人工暂停或迁移锁绝不自动解除）
             if data.get("paused_by") == "auto-fail-guard":
+                paused_ts = _parse_iso_timestamp(data.get("paused_at", ""))
+                if paused_ts is not None and (time.time() - paused_ts) >= 86400.0:
+                    PAUSE_FILE.unlink(missing_ok=True)
+                    if FAILURE_STREAK_FILE.exists():
+                        try:
+                            s_data = json.loads(FAILURE_STREAK_FILE.read_text(encoding="utf-8"))
+                            if isinstance(s_data, dict):
+                                s_data["count"] = 0
+                                s_data["reset_at"] = time.strftime("%Y-%m-%d %H:%M:%S")
+                                FAILURE_STREAK_FILE.write_text(
+                                    json.dumps(s_data, ensure_ascii=False, indent=2),
+                                    encoding="utf-8",
+                                )
+                        except Exception:
+                            pass
+                    log("检测到超过 24 小时的陈旧 auto-fail-guard 熔断锁，已自动拔除并清零计数以恢复采集")
+                    return False
                 # 检查连续失败记录是否已被清理
                 streak_file = FAILURE_STREAK_FILE
                 if streak_file.exists():
@@ -111,18 +145,27 @@ def is_collector_alive() -> bool:
                     if proc_age < 30.0:
                         return True
 
-                    # 检查是否当前进程的心跳
-                    if HEARTBEAT_FILE.exists():
+                    # 超过 120 秒但缺失心跳、心跳损坏或心跳 PID 不匹配，说明进程已僵死
+                    if proc_age > 120.0:
+                        if not HEARTBEAT_FILE.exists():
+                            log(f"采集器进程 PID={p.pid} 运行超 {int(proc_age)}s 但缺失心跳文件，终结进程自愈！")
+                            p.kill()
+                            return False
                         try:
                             hb = json.loads(HEARTBEAT_FILE.read_text(encoding="utf-8"))
-                            if hb.get("pid") == p.pid:
-                                age = now - float(hb.get("timestamp", 0))
-                                if age > 120.0:
-                                    log(f"采集器进程 PID={p.pid} 运行超 {int(proc_age)}s 但心跳已僵死 {int(age)} 秒，终结进程自愈！")
-                                    p.kill()
-                                    return False
                         except Exception:
-                            pass
+                            log(f"采集器进程 PID={p.pid} 运行超 {int(proc_age)}s 但心跳文件损坏，终结进程自愈！")
+                            p.kill()
+                            return False
+                        if hb.get("pid") != p.pid:
+                            log(f"采集器进程 PID={p.pid} 运行超 {int(proc_age)}s 但心跳 PID={hb.get('pid')} 不匹配，终结进程自愈！")
+                            p.kill()
+                            return False
+                        age = now - float(hb.get("timestamp", 0))
+                        if age > 120.0:
+                            log(f"采集器进程 PID={p.pid} 运行超 {int(proc_age)}s 但心跳已僵死 {int(age)} 秒，终结进程自愈！")
+                            p.kill()
+                            return False
                     return True
             except Exception:
                 pass
@@ -134,7 +177,12 @@ def is_collector_alive() -> bool:
 def spawn_collector():
     """以独立脱壳无窗口模式启动采集器"""
     log("正在拉起 universal_clipboard_collector.py 守护进程...")
-    CREATE_NO_WINDOW = 0x08000000
+    CREATE_NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000)
+    creationflags = (
+        CREATE_NO_WINDOW
+        | getattr(subprocess, "DETACHED_PROCESS", 0)
+        | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
+    )
     env = os.environ.copy()
     config_path = str(CONFIG_FILE)
     if os.path.exists(config_path):
@@ -145,7 +193,10 @@ def spawn_collector():
             [PYTHONW, str(COLLECTOR_SCRIPT)],
             cwd=str(PROJECT_ROOT),
             env=env,
-            creationflags=CREATE_NO_WINDOW,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            creationflags=creationflags,
             close_fds=True
         )
         log(f"已拉起采集器子进程 PID={p.pid}")

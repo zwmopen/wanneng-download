@@ -1,0 +1,1894 @@
+"""Unified HTML/CSS/JS template for the 萬能采集器 / universal workbench."""
+
+TEMPLATE = r"""<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0">
+<meta name="color-scheme" content="light dark">
+<title>__APP_NAME__ · 统一智能采集工作台</title>
+<link rel="icon" type="image/x-icon" href="/favicon.ico">
+<link rel="shortcut icon" href="/favicon.ico">
+<link rel="icon" type="image/png" sizes="256x256" href="/app-icon.png">
+<link rel="manifest" href="/manifest.webmanifest">
+<style>
+:root{
+  --radius-xl:26px;--radius-lg:20px;--radius-md:14px;--radius-sm:10px;
+  --ease:220ms cubic-bezier(.22,1,.36,1);
+  --spring:360ms cubic-bezier(.22,1.18,.36,1);
+}
+*{box-sizing:border-box}
+::-webkit-scrollbar{width:7px;height:7px}
+::-webkit-scrollbar-track{background:transparent}
+::-webkit-scrollbar-thumb{background:rgba(110,136,162,.34);border-radius:999px}
+::-webkit-scrollbar-thumb:hover{background:rgba(110,136,162,.58)}
+html,body{margin:0;min-height:100%;font-family:"Microsoft YaHei UI","PingFang SC","Noto Sans CJK SC",sans-serif;-webkit-font-smoothing:antialiased}
+
+body[data-theme="light"]{
+  color-scheme:light;
+  --bg:#f5f7fb;--panel:#ffffff;--soft:#f0f4f8;--line:#e2e8f0;
+  --text:#111827;--muted:#64748b;--primary:#2563eb;--primary-hover:#1d4ed8;--accent:#2563eb;
+  --active:#eff6ff;--input:#f8fafc;--ok:#16a34a;--bad:#dc2626;--warn:#d97706;
+  --shadow:0 4px 16px rgba(15,23,42,.06);--shadow-hover:0 8px 24px rgba(15,23,42,.10);
+  --shadow-small:0 2px 8px rgba(15,23,42,.05);--shadow-inset:inset 0 1px 3px rgba(15,23,42,.06);
+  --pill-bg:#ffffff;--pill-border:#e2e8f0;--orb-a:transparent;--orb-b:transparent;
+}
+body[data-theme="dark"]{
+  color-scheme:dark;
+  --bg:#0f141c;--panel:#161d27;--soft:#1e2736;--line:#2a3547;
+  --text:#f1f5f9;--muted:#94a3b8;--primary:#3b82f6;--primary-hover:#2563eb;--accent:#60a5fa;
+  --active:#1e2c42;--input:#0c1118;--ok:#22c55e;--bad:#ef4444;--warn:#f59e0b;
+  --shadow:0 6px 20px rgba(0,0,0,.35);--shadow-hover:0 10px 28px rgba(0,0,0,.45);
+  --shadow-small:0 2px 10px rgba(0,0,0,.28);--shadow-inset:inset 0 1px 4px rgba(0,0,0,.38);
+  --pill-bg:#243145;--pill-border:rgba(148,163,184,.25);--orb-a:transparent;--orb-b:transparent;
+}
+body[data-theme="neo"]{
+  color-scheme:light;
+  --bg:#e8edf3;--panel:#e4ecf4;--soft:#dce4ec;--line:#d1dbe4;
+  --text:#1f2937;--muted:#5f7287;--primary:#263442;--primary-hover:#17222e;--accent:#436e91;
+  --active:#d9e5f0;--input:rgba(255,255,255,.46);--ok:#277b60;--bad:#b24c54;--warn:#c27824;
+  --shadow:8px 8px 20px #c7cfd8,-8px -8px 20px #fbfdff;
+  --shadow-hover:10px 12px 24px #bfcad5,-10px -10px 24px #ffffff;
+  --shadow-small:5px 5px 12px #c7cfd7,-5px -5px 12px #fbfdff;
+  --shadow-inset:inset 3px 3px 7px #c8d0d8,inset -3px -3px 7px #f8fbfe;
+  --pill-bg:rgba(255,255,255,.78);--pill-border:rgba(255,255,255,.92);--orb-a:transparent;--orb-b:transparent;
+}
+body[data-theme="neo-dark"]{
+  color-scheme:dark;
+  --bg:#151c26;--panel:#1c2533;--soft:#232e3f;--line:#2d3b4f;
+  --text:#eef3f9;--muted:#95a7be;--primary:#3b82f6;--primary-hover:#2563eb;--accent:#60a5fa;
+  --active:#253348;--input:rgba(13,19,28,.55);--ok:#34d399;--bad:#f87171;--warn:#fbbf24;
+  --shadow:8px 8px 20px #0d1219,-6px -6px 16px #232f40;
+  --shadow-hover:10px 12px 24px #090d12,-7px -7px 18px #283649;
+  --shadow-small:5px 5px 12px #0d1219,-4px -4px 10px #243041;
+  --shadow-inset:inset 3px 3px 7px #0c1118,inset -3px -3px 7px #243041;
+  --pill-bg:rgba(43,61,88,.82);--pill-border:rgba(120,160,210,.26);--orb-a:transparent;--orb-b:transparent;
+}
+body[data-theme="glass"]{
+  color-scheme:light;
+  --bg:#dce9f4;--panel:rgba(241,247,252,.74);--soft:rgba(219,233,245,.66);
+  --line:rgba(117,149,176,.22);--text:#102b45;--muted:#57738d;--primary:#26699b;--primary-hover:#1d547e;--accent:#3b82c4;
+  --active:rgba(255,255,255,.78);--input:rgba(255,255,255,.68);--ok:#1f7a5c;--bad:#ad454f;--warn:#c4751d;
+  --shadow:0 14px 36px rgba(72,107,138,.16),inset 0 1px 0 rgba(255,255,255,.75);
+  --shadow-hover:0 18px 42px rgba(64,98,128,.22),inset 0 1px 0 rgba(255,255,255,.88);
+  --shadow-small:0 6px 16px rgba(72,107,138,.14),inset 0 1px 0 rgba(255,255,255,.72);
+  --shadow-inset:inset 2px 2px 6px rgba(103,136,164,.18),inset -2px -2px 6px rgba(255,255,255,.65);
+  --pill-bg:rgba(255,255,255,.82);--pill-border:rgba(255,255,255,.95);
+  --orb-a:rgba(255,255,255,.72);--orb-b:rgba(125,180,224,.34);
+}
+body[data-theme="glass-dark"]{
+  color-scheme:dark;
+  --bg:#0e1a28;--panel:rgba(22,38,58,.72);--soft:rgba(31,52,78,.62);
+  --line:rgba(112,163,212,.22);--text:#ecf5ff;--muted:#93b4d4;--primary:#0ea5e9;--primary-hover:#38bdf8;--accent:#38bdf8;
+  --active:rgba(46,79,116,.68);--input:rgba(12,24,38,.66);--ok:#2dd4bf;--bad:#fb7185;--warn:#fbbf24;
+  --shadow:0 16px 40px rgba(3,8,16,.46),inset 0 1px 0 rgba(186,230,253,.14);
+  --shadow-hover:0 20px 46px rgba(3,8,16,.56),inset 0 1px 0 rgba(186,230,253,.22);
+  --shadow-small:0 6px 16px rgba(3,8,16,.34),inset 0 1px 0 rgba(186,230,253,.12);
+  --shadow-inset:inset 2px 2px 6px rgba(4,10,18,.52),inset -2px -2px 6px rgba(80,126,172,.14);
+  --pill-bg:rgba(38,69,104,.74);--pill-border:rgba(125,211,252,.28);
+  --orb-a:rgba(14,165,233,.20);--orb-b:rgba(56,189,248,.14);
+}
+
+body{background:var(--bg);color:var(--text);padding:20px 24px 28px;transition:background var(--ease),color var(--ease)}
+body[data-theme="glass"]:before,body[data-theme="glass-dark"]:before{
+  content:"";position:fixed;inset:0;pointer-events:none;z-index:0;
+  background:radial-gradient(circle at 12% 14%,var(--orb-a),transparent 36%),radial-gradient(circle at 86% 80%,var(--orb-b),transparent 38%);
+}
+body[data-theme="glass"] .surface,body[data-theme="glass"] .side-nav,body[data-theme="glass"] .topbar,
+body[data-theme="glass-dark"] .surface,body[data-theme="glass-dark"] .side-nav,body[data-theme="glass-dark"] .topbar{
+  backdrop-filter:blur(22px) saturate(140%);-webkit-backdrop-filter:blur(22px) saturate(140%);
+}
+.shell{position:relative;z-index:1;max-width:1540px;margin:0 auto}
+
+/* Top Bar */
+.topbar{
+  display:flex;align-items:center;justify-content:space-between;gap:14px;
+  padding:12px 18px;margin-bottom:18px;border-radius:22px;
+  background:var(--panel);border:1px solid var(--line);box-shadow:var(--shadow-small);
+  transition:background var(--ease),box-shadow var(--ease),border-color var(--ease);
+}
+.brand{display:flex;align-items:center;gap:13px;min-width:0}
+.mark{
+  width:42px;height:42px;border-radius:14px;display:grid;place-items:center;
+  background:linear-gradient(135deg,var(--primary),var(--accent));color:#fff;
+  box-shadow:0 8px 18px rgba(38,90,145,.26),inset 0 1px 1px rgba(255,255,255,.45);
+  font-family:Georgia,serif;font-size:20px;font-weight:700;flex:0 0 auto;
+}
+.brand h1{font-size:20px;line-height:1.15;margin:0;letter-spacing:-.3px}
+.brand p{margin:3px 0 0;color:var(--muted);font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.top-actions{display:flex;align-items:center;gap:9px;flex-wrap:wrap;justify-content:flex-end}
+
+.pill-btn{
+  display:inline-flex;align-items:center;gap:7px;white-space:nowrap;
+  border:1px solid var(--line);background:var(--panel);color:var(--text);
+  box-shadow:var(--shadow-small);border-radius:999px;padding:8px 14px;cursor:pointer;
+  font:inherit;font-size:12px;font-weight:700;
+  transition:transform var(--spring),box-shadow var(--ease),background var(--ease),border-color var(--ease);
+}
+.pill-btn:hover{transform:translateY(-1.5px);box-shadow:var(--shadow-hover)}
+.pill-btn:active{transform:translateY(1px) scale(.985);box-shadow:var(--shadow-inset)}
+.pill-btn:disabled{opacity:.58;cursor:not-allowed;transform:none}
+.led-dot{width:8px;height:8px;border-radius:50%;background:var(--ok);box-shadow:0 0 0 4px rgba(39,123,96,.18);transition:background var(--ease)}
+.collector-switch[aria-checked="false"] .led-dot{background:var(--bad);box-shadow:0 0 0 4px rgba(178,76,84,.16)}
+.engine-pill[data-online="false"] .led-dot{background:var(--muted);box-shadow:0 0 0 4px rgba(120,140,160,.16)}
+.engine-pill[data-verify="true"] .led-dot{background:var(--warn);box-shadow:0 0 0 5px rgba(245,158,11,.22);animation:pulse 1.5s infinite}
+
+/* Global Engine Alert Banner */
+.alert-banner{
+  display:none;align-items:center;justify-content:space-between;gap:14px;
+  padding:12px 18px;margin-bottom:16px;border-radius:18px;
+  background:var(--panel);border:1px solid var(--warn);box-shadow:var(--shadow-small);font-size:13px;
+}
+.alert-banner.show{display:flex;animation:panel-in 260ms var(--spring)}
+
+/* Main App Grid */
+.app-layout{display:grid;grid-template-columns:204px minmax(0,1fr);gap:18px;align-items:start}
+.side-nav{
+  position:sticky;top:18px;display:flex;flex-direction:column;gap:8px;
+  padding:14px 10px;border:1px solid var(--line);border-radius:22px;
+  background:var(--panel);box-shadow:var(--shadow-small);
+}
+.nav-caption{padding:4px 10px 4px;color:var(--muted);font-size:11px;font-weight:800;letter-spacing:.08em}
+.nav-items{position:relative;display:flex;flex-direction:column;gap:4px}
+.nav-liquid-pill{
+  position:absolute;left:0;right:0;top:0;height:48px;border-radius:14px;
+  background:var(--pill-bg);border:1px solid var(--pill-border);box-shadow:var(--shadow-small);
+  pointer-events:none;z-index:0;opacity:0;
+  transition:transform var(--spring),height var(--spring),opacity 180ms ease;
+}
+.nav-liquid-pill:before{
+  content:"";position:absolute;left:6px;top:24%;bottom:24%;width:3.5px;border-radius:4px;background:var(--accent);
+}
+.nav-item{
+  position:relative;z-index:1;width:100%;display:grid;gap:2px;text-align:left;
+  border:0;border-radius:14px;background:transparent;color:var(--text);
+  padding:10px 12px 10px 16px;cursor:pointer;font:inherit;
+  transition:color var(--ease),transform var(--spring);
+}
+.nav-item span{font-size:13px;font-weight:800}.nav-item small{color:var(--muted);font-size:10.5px;line-height:1.35}
+.nav-item:hover{transform:translateX(2px)}
+.nav-item[aria-selected="true"] span{color:var(--accent)}
+.nav-tip{margin:6px 6px 2px;padding-top:10px;border-top:1px solid var(--line);color:var(--muted);font-size:11px;line-height:1.55}
+
+.workspace{display:grid;grid-template-columns:minmax(0,1fr);gap:18px;align-items:start}
+.surface{
+  background:var(--panel);border:1px solid var(--line);border-radius:var(--radius-xl);
+  box-shadow:var(--shadow);padding:24px;min-width:0;
+  transition:background var(--ease),box-shadow var(--ease),border-color var(--ease);
+}
+.work-panel{display:none;min-width:0}.work-panel.active{display:block;animation:panel-in 300ms var(--spring)}
+
+.eyebrow{display:flex;align-items:center;gap:8px;color:var(--muted);font-size:11px;font-weight:700;letter-spacing:.12em;text-transform:uppercase;margin-bottom:8px}
+.eyebrow:before{content:"";width:22px;height:2.5px;border-radius:2px;background:var(--accent)}
+h2{font-size:24px;line-height:1.25;margin:0 0 6px;letter-spacing:-.4px}
+.lead{margin:0 0 18px;color:var(--muted);line-height:1.65;font-size:13px}
+label{display:block;font-size:12px;font-weight:700;margin-bottom:6px;color:var(--text)}
+
+textarea,input[type="text"],input[type="password"],input[type="number"],input[type="url"],input[type="datetime-local"],select{
+  width:100%;border:1px solid var(--line);background:var(--input);color:var(--text);
+  border-radius:var(--radius-md);outline:none;box-shadow:var(--shadow-inset);
+  font:inherit;font-size:13px;transition:border-color var(--ease),box-shadow var(--ease);
+}
+textarea{min-height:130px;padding:13px 14px;resize:vertical;line-height:1.65}
+input[type="text"],input[type="password"],input[type="number"],input[type="url"],input[type="datetime-local"],select{height:38px;padding:0 11px}
+textarea:focus,input:focus,select:focus{border-color:var(--accent);box-shadow:var(--shadow-inset),0 0 0 3px rgba(59,130,246,.16)}
+
+/* Segmented Switch */
+.seg-group{
+  display:inline-flex;align-items:center;gap:4px;padding:4px;border-radius:999px;
+  background:var(--soft);border:1px solid var(--line);box-shadow:var(--shadow-inset);
+}
+.seg-btn{
+  border:0;background:transparent;color:var(--muted);border-radius:999px;
+  padding:6px 14px;font:inherit;font-size:12px;font-weight:700;cursor:pointer;
+  transition:background var(--spring),color var(--ease),box-shadow var(--ease),transform var(--spring);
+}
+.seg-btn.active{background:var(--pill-bg);color:var(--text);box-shadow:var(--shadow-small)}
+.seg-btn:active{transform:scale(.96)}
+
+/* Buttons */
+.btn-row{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-top:16px}
+.primary{
+  flex:1;min-width:170px;height:46px;border:0;border-radius:15px;
+  background:linear-gradient(135deg,var(--primary),var(--accent));color:#fff;
+  font:inherit;font-size:14px;font-weight:800;letter-spacing:.03em;cursor:pointer;
+  box-shadow:0 10px 22px rgba(32,68,112,.22),inset 0 1px 0 rgba(255,255,255,.32);
+  transition:transform var(--spring),box-shadow var(--ease),filter var(--ease);
+}
+.primary:hover{transform:translateY(-1.5px);box-shadow:0 14px 28px rgba(32,68,112,.28);filter:brightness(1.05)}
+.primary:active{transform:translateY(1px) scale(.985)}
+.primary:disabled{opacity:.55;cursor:not-allowed;transform:none}
+.secondary{
+  height:42px;padding:0 15px;border:1px solid var(--line);border-radius:13px;
+  background:var(--panel);color:var(--text);box-shadow:var(--shadow-small);
+  font:inherit;font-size:12px;font-weight:700;cursor:pointer;white-space:nowrap;
+  transition:transform var(--spring),box-shadow var(--ease);
+}
+.secondary:hover{transform:translateY(-1px);box-shadow:var(--shadow-hover)}
+.secondary:active{transform:translateY(1px) scale(.985);box-shadow:var(--shadow-inset)}
+.secondary.danger{color:var(--bad)}
+.mini-btn{
+  padding:5px 10px;border:1px solid var(--line);border-radius:9px;background:var(--panel);
+  color:var(--text);font:inherit;font-size:11.5px;font-weight:700;cursor:pointer;white-space:nowrap;
+  box-shadow:var(--shadow-small);transition:transform var(--spring),box-shadow var(--ease);
+}
+.mini-btn:hover{transform:translateY(-1px);box-shadow:var(--shadow-hover)}
+.mini-btn:active{transform:scale(.96)}
+
+/* Toolbar & Tables */
+.panel-head-row{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:14px}
+.toolbar{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:10px}
+.toolbar .search-box{flex:1;min-width:160px;max-width:250px}
+.toolbar select.sort-select{width:auto;min-width:116px;height:34px;padding:0 10px;border-radius:10px;font-size:12px;font-weight:700}
+.toolbar select.group-select{min-width:128px;max-width:185px;font-weight:800}
+.toolbar select.group-select[data-filtered="true"]{border-color:var(--accent);color:var(--accent)}
+.more-menu{position:relative;display:inline-block}
+.more-menu summary{list-style:none;padding:5px 10px;border:1px solid var(--line);border-radius:9px;background:var(--panel);color:var(--text);font:inherit;font-size:11.5px;font-weight:700;cursor:pointer;white-space:nowrap;box-shadow:var(--shadow-small)}
+.more-menu summary::-webkit-details-marker{display:none}
+.more-pop{position:absolute;right:0;top:calc(100% + 4px);z-index:40;min-width:154px;padding:6px;border-radius:12px;background:var(--panel);border:1px solid var(--line);box-shadow:var(--shadow-hover);display:grid;gap:4px}
+.more-pop button{width:100%;text-align:left;border:0;background:transparent;color:var(--text);padding:7px 10px;border-radius:8px;font:inherit;font-size:12px;font-weight:600;cursor:pointer}
+.more-pop button:hover{background:var(--active)}
+.theme-menu-wrap{position:relative;display:inline-block}
+.theme-popover{position:absolute;right:0;top:calc(100% + 8px);z-index:60;width:248px;padding:8px;border-radius:16px;background:var(--panel);border:1px solid var(--line);box-shadow:var(--shadow-hover);display:grid;gap:4px;backdrop-filter:blur(18px);-webkit-backdrop-filter:blur(18px)}
+.theme-popover[hidden]{display:none}
+.theme-opt{width:100%;display:grid;gap:2px;text-align:left;border:1px solid transparent;background:transparent;color:var(--text);padding:8px 11px;border-radius:11px;font:inherit;cursor:pointer;transition:background var(--ease),border-color var(--ease)}
+.theme-opt:hover{background:var(--soft)}
+.theme-opt.active{background:var(--active);border-color:var(--accent)}
+.theme-opt strong{font-size:12.5px;font-weight:800}.theme-opt small{font-size:11px;color:var(--muted)}
+.quick-launch-card{margin:12px 0;padding:16px;border-radius:18px;background:var(--soft);border:1px solid var(--line);box-shadow:var(--shadow-small);display:grid;gap:12px}
+.param-chips{display:flex;align-items:stretch;gap:10px;flex-wrap:wrap}
+.param-chip{display:inline-flex;align-items:center;gap:8px;padding:7px 12px;border-radius:12px;background:var(--panel);border:1px solid var(--line);box-shadow:var(--shadow-small);font-size:12px;font-weight:700}
+.param-chip input[type="number"]{width:68px;height:30px;padding:0 8px;text-align:center;font-weight:800;font-variant-numeric:tabular-nums;border-radius:9px}
+.kpi-strip{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px}
+.kpi-card{padding:10px 12px;border-radius:13px;background:var(--panel);border:1px solid var(--line);box-shadow:var(--shadow-inset);display:grid;gap:4px;text-align:center}
+.kpi-label{font-size:11px;font-weight:700;color:var(--muted)}
+.kpi-value{font-size:20px;font-weight:800;line-height:1.15;color:var(--text);font-variant-numeric:tabular-nums}
+.kpi-card.accent .kpi-value{color:var(--accent)}
+.kpi-card.ok .kpi-value{color:var(--ok)}
+@media(max-width:680px){.kpi-strip{grid-template-columns:repeat(2,minmax(0,1fr))}}
+.table-wrap{
+  border:1px solid var(--line);border-radius:16px;background:var(--input);
+  box-shadow:var(--shadow-inset);overflow:auto;max-height:290px;margin-bottom:12px;
+}
+table.data-table{width:100%;border-collapse:collapse;font-size:12px}
+table.data-table th{
+  position:sticky;top:0;z-index:2;background:var(--soft);color:var(--text);
+  font-weight:800;text-align:left;padding:9px 10px;border-bottom:1px solid var(--line);white-space:nowrap;
+}
+table.data-table td{padding:8px 10px;border-bottom:1px solid var(--line);vertical-align:middle}
+table.data-table tr:last-child td{border-bottom:0}
+table.data-table tbody tr{transition:background 140ms ease}
+table.data-table tbody tr:hover{background:var(--active)}
+.cell-ellipsis{max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.badge{
+  display:inline-flex;align-items:center;padding:2px 8px;border-radius:999px;font-size:11px;font-weight:700;
+  background:var(--active);color:var(--text);border:1px solid var(--line);white-space:nowrap;
+}
+.badge.dy{color:var(--accent)}.badge.xhs{color:var(--bad)}.badge.ok{color:var(--ok)}.badge.warn{color:var(--warn)}
+
+/* Collapsible Filter Drawer */
+details.drawer{
+  margin-top:12px;border:1px solid var(--line);border-radius:16px;
+  background:var(--soft);padding:0 14px;transition:background var(--ease);
+}
+details.drawer summary{
+  list-style:none;padding:12px 0;font-size:13px;font-weight:800;cursor:pointer;
+  display:flex;align-items:center;justify-content:space-between;color:var(--text);
+}
+details.drawer summary:after{content:"▾";font-size:13px;color:var(--muted);transition:transform var(--spring)}
+details.drawer[open] summary:after{transform:rotate(180deg)}
+.drawer-body{padding:4px 0 14px;display:grid;gap:12px;border-top:1px solid var(--line)}
+.check-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(175px,1fr));gap:8px 12px}
+.check-item{display:flex;align-items:center;gap:7px;font-size:12px;font-weight:600;margin:0;cursor:pointer}
+.check-item input[type="checkbox"],.check-item input[type="radio"]{width:15px;height:15px;margin:0;box-shadow:none;accent-color:var(--accent);flex:0 0 auto}
+.num-row{display:flex;align-items:center;gap:8px;flex-wrap:wrap;font-size:12px}
+.num-row input[type="number"]{width:74px;height:32px;padding:0 8px}
+.num-row input[type="datetime-local"]{width:185px;height:32px}
+.form-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}
+.form-grid .wide{grid-column:1/-1}
+
+/* Inline Progress Panel */
+.live-progress{
+  margin-top:12px;padding:12px 14px;border-radius:15px;background:var(--soft);
+  border:1px solid var(--line);display:grid;gap:8px;
+}
+.progress-track{height:9px;border-radius:999px;background:var(--input);box-shadow:var(--shadow-inset);overflow:hidden;position:relative}
+.progress-bar{
+  height:100%;width:0;border-radius:inherit;position:relative;
+  background:linear-gradient(90deg,var(--primary),var(--accent));
+  transition:width 420ms var(--spring);
+}
+.progress-bar.active:after{
+  content:"";position:absolute;inset:0;
+  background:linear-gradient(90deg,transparent,rgba(255,255,255,.45),transparent);
+  animation:shimmer 1.15s infinite;
+}
+.progress-meta{display:flex;justify-content:space-between;align-items:center;font-size:12px;color:var(--muted);gap:8px;flex-wrap:wrap}
+
+/* Inline Status & Task Cards */
+.card-compact{padding:16px 18px}
+.panel-head{display:flex;align-items:center;justify-content:space-between;gap:10px}
+.panel-title{font-size:15px;font-weight:800;margin:0}.panel-sub{font-size:11.5px;color:var(--muted);margin:4px 0 0;line-height:1.45}
+.count-badge{min-width:38px;height:32px;padding:0 10px;display:grid;place-items:center;border-radius:11px;background:var(--active);color:var(--text);font-size:16px;font-weight:800;box-shadow:var(--shadow-small)}
+.scroll-list{display:flex;flex-direction:column;gap:8px;margin-top:12px;max-height:220px;overflow:auto;padding:2px}
+.task-row{display:flex;align-items:flex-start;justify-content:space-between;gap:10px;padding:10px 11px;border:1px solid var(--line);border-radius:12px;background:var(--soft);font-size:12px;line-height:1.45}
+.task-main{min-width:0;flex:1}.task-title{display:block;font-weight:700;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.task-meta{display:block;color:var(--muted);margin-top:2px;font-size:11px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.state-dot{width:10px;height:10px;border-radius:50%;background:var(--muted);box-shadow:0 0 0 5px rgba(130,150,170,.14);flex:0 0 auto;margin-top:4px}
+.state-dot.running{background:var(--accent);animation:pulse 1.5s infinite}.state-dot.done{background:var(--ok)}.state-dot.error{background:var(--bad)}
+.results{display:none;gap:8px;flex-direction:column;max-height:240px;overflow:auto;margin-top:10px}.results.show{display:flex}
+.result{padding:10px 12px;border-radius:12px;background:var(--soft);border:1px solid var(--line);font-size:12px}
+.result.ok{border-left:3px solid var(--ok)}.result.fail{border-left:3px solid var(--bad)}
+.collection-status{margin-top:10px;padding:10px 12px;border-radius:12px;border:1px solid var(--line);background:var(--soft);font-size:12px;color:var(--muted)}
+.collection-status[hidden]{display:none}
+.collection-status[data-state="error"],.collection-status[data-state="verification_required"]{border-color:var(--bad);color:var(--bad)}
+
+/* Login Cards & Theme Cards */
+.login-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:12px;margin-bottom:14px}
+.login-card,.theme-card{
+  padding:15px;border-radius:16px;border:1px solid var(--line);background:var(--soft);
+  box-shadow:var(--shadow-small);display:grid;gap:8px;cursor:pointer;
+  transition:transform var(--spring),box-shadow var(--ease),border-color var(--ease);
+}
+.login-card:hover,.theme-card:hover{transform:translateY(-2px);box-shadow:var(--shadow-hover)}
+.theme-card.active{border-color:var(--accent);background:var(--active)}
+.subtabs{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:14px}
+.subpanel{display:none}.subpanel.active{display:block;animation:panel-in 240ms var(--spring)}
+
+/* Dialog & Modal */
+.settings-dialog{width:min(460px,calc(100vw - 32px));max-width:none;border:1px solid var(--line);border-radius:22px;background:var(--panel);color:var(--text);padding:22px;box-shadow:var(--shadow-hover)}
+.settings-dialog::backdrop{background:rgba(12,18,28,.38);backdrop-filter:blur(5px)}
+.dialog-heading{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:16px}
+.dialog-heading h2{font-size:20px;margin:0}.dialog-heading p{margin:0 0 4px;color:var(--muted);font-size:12px}
+.dialog-close{width:34px;height:34px;border-radius:10px;border:1px solid var(--line);background:var(--panel);color:var(--text);font-size:18px;cursor:pointer}
+.footnote{text-align:center;color:var(--muted);font-size:11px;margin-top:18px}
+.toast{
+  position:fixed;left:50%;bottom:24px;z-index:99;padding:10px 18px;border-radius:999px;
+  border:1px solid var(--line);background:var(--panel);color:var(--text);
+  box-shadow:var(--shadow-hover);backdrop-filter:blur(18px);-webkit-backdrop-filter:blur(18px);
+  font-size:12.5px;font-weight:700;opacity:0;pointer-events:none;
+  transform:translate(-50%,16px) scale(.96);transition:opacity var(--ease),transform var(--spring);
+}
+.toast.show{opacity:1;transform:translate(-50%,0) scale(1)}
+.toast.err{border-color:var(--bad);color:var(--bad)}
+
+@keyframes pulse{0%,100%{box-shadow:0 0 0 4px rgba(59,130,246,.22)}50%{box-shadow:0 0 0 9px rgba(59,130,246,.04)}}
+@keyframes shimmer{0%{transform:translateX(-110%)}100%{transform:translateX(220%)}}
+@keyframes panel-in{from{opacity:0;transform:translateY(6px) scale(.992)}to{opacity:1;transform:translateY(0) scale(1)}}
+@media(max-width:1180px){.workspace{grid-template-columns:1fr}}
+@media(max-width:860px){.app-layout{grid-template-columns:1fr}.side-nav{position:static}.nav-items{flex-direction:row;flex-wrap:wrap}.nav-liquid-pill{display:none}}
+@media(prefers-reduced-motion:reduce){*,*:before,*:after{animation:none!important;transition:none!important}}
+</style>
+</head>
+<body data-theme="neo">
+<main class="shell">
+  <header class="topbar">
+    <div class="brand">
+      <div class="mark">∞</div>
+      <div>
+        <h1>__APP_NAME__ · 统一采集中心</h1>
+        <p>抖音 + 小红书 + 公开链接 + 剪贴板 + AI CLI/MCP 一体化工作台</p>
+      </div>
+    </div>
+    <div class="top-actions">
+      <button class="pill-btn engine-pill" id="engineStatusPill" type="button" data-online="false" data-verify="false" title="点击跳转登录与引擎状态页">
+        <span class="led-dot"></span><span id="engineStatusText">引擎检测中</span>
+      </button>
+      <button class="pill-btn collector-switch" id="collectorToggle" type="button" role="switch" aria-checked="true" title="独立后台监控剪贴板；每条复制内容自动入队采集">
+        <span class="led-dot"></span><span id="collectorToggleText">剪贴板采集 开</span>
+      </button>
+      <button class="pill-btn" id="settingsButton" type="button" aria-haspopup="dialog" aria-controls="settingsDialog">快速设置</button>
+      <div class="theme-menu-wrap" id="themeMenuWrap">
+        <button class="pill-btn" id="themeButton" type="button" aria-haspopup="menu" aria-expanded="false" aria-label="切换视觉主题">自动·浅色拟态 ▾</button>
+        <div class="theme-popover" id="themePopover" hidden role="menu" aria-label="选择主题与昼夜模式">
+          <button class="theme-opt active" type="button" role="menuitem" data-theme-mode="auto"><strong>自动切换（北京时间）</strong><small>白天浅色 · 夜晚深色 · 按日轮换拟态/玻璃</small></button>
+          <button class="theme-opt" type="button" role="menuitem" data-theme-mode="light"><strong>浅色（纯净）</strong><small>清爽扁平高亮，专注图文浏览</small></button>
+          <button class="theme-opt" type="button" role="menuitem" data-theme-mode="dark"><strong>深色（纯净）</strong><small>低对比暗夜面板，柔和不刺眼</small></button>
+          <button class="theme-opt" type="button" role="menuitem" data-theme-mode="neo"><strong>浅色拟态</strong><small>柔光浮雕景深 · Silk Neo</small></button>
+          <button class="theme-opt" type="button" role="menuitem" data-theme-mode="neo-dark"><strong>深色拟态</strong><small>深空岩面质感 · Obsidian</small></button>
+          <button class="theme-opt" type="button" role="menuitem" data-theme-mode="glass"><strong>浅色玻璃</strong><small>冰蓝流光磨砂 · Frost Glass</small></button>
+          <button class="theme-opt" type="button" role="menuitem" data-theme-mode="glass-dark"><strong>深色玻璃</strong><small>极光透亮夜幕 · Midnight Glass</small></button>
+        </div>
+      </div>
+    </div>
+  </header>
+
+  <div class="alert-banner" id="globalEngineAlert">
+    <div><strong id="alertTitle">底层采集引擎离线</strong> <span id="alertBody" style="color:var(--muted)">公开单链接可直接使用；使用抖音/小红书搜索与主页发现前请先启动引擎或确认登录态。</span></div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap">
+      <button class="mini-btn" id="btnBannerStartDouyin" type="button">启动抖音引擎</button>
+      <button class="mini-btn" id="btnBannerPopBrowser" type="button" hidden>弹出并置顶验证窗口</button>
+      <button class="mini-btn" id="btnBannerResume" type="button" hidden>已完成验证，继续采集</button>
+      <button class="mini-btn" id="btnBannerVerify" type="button">前往登录/验证</button>
+    </div>
+  </div>
+
+  <div class="app-layout">
+    <aside class="side-nav" aria-label="采集入口">
+      <div class="nav-caption">功能导航</div>
+      <div class="nav-items" id="navItems" role="tablist" aria-orientation="vertical">
+        <div class="nav-liquid-pill" id="navLiquidPill"></div>
+        <button class="nav-item" id="tabSingle" type="button" role="tab" aria-selected="false" data-panel="singlePanel"><span>单作品采集</span><small>万能公开链接 + 智能提取</small></button>
+        <button class="nav-item" id="tabKeyword" type="button" role="tab" aria-selected="true" data-panel="keywordPanel"><span>关键词采集</span><small>词表管理 · 图文筛选</small></button>
+        <button class="nav-item" id="tabHomepage" type="button" role="tab" aria-selected="false" data-panel="homepagePanel"><span>主页采集</span><small>作者库 · 批量主页提取</small></button>
+        <button class="nav-item" id="tabArtworks" type="button" role="tab" aria-selected="false" data-panel="artworksPanel"><span>作品列表</span><small>当前/历史 · 剪贴板与AI记录</small></button>
+        <button class="nav-item" id="tabLogin" type="button" role="tab" aria-selected="false" data-panel="loginPanel"><span>平台登录</span><small>抖音 · 小红书 · B站会话</small></button>
+        <button class="nav-item" id="tabSettings" type="button" role="tab" aria-selected="false" data-panel="settingsPanel"><span>下载与软件设置</span><small>路径入库 · 模板通知 · AI 接入</small></button>
+      </div>
+      <p class="nav-tip">所有入口共享同一保存目录、本地去重账本与统一采集内核。</p>
+    </aside>
+
+    <section class="workspace">
+      <div style="min-width:0">
+        <!-- 1. 单作品采集 -->
+        <section class="surface work-panel" id="singlePanel" role="tabpanel" hidden>
+          <div class="eyebrow">Single & Batch Media</div>
+          <div class="panel-head-row">
+            <div><h2>单作品与批量链接采集</h2><p class="lead">粘贴小红书、抖音、B站或公开分享文案，立即解析并下载；遇到需登录或风控页面会自动启用内置浏览器（自动识别 Edge / Chrome / Chromium）兜底提取。</p></div>
+            <div class="seg-group" id="singlePlatformSeg">
+              <button class="seg-btn active" type="button" data-plat="douyin">抖音</button>
+              <button class="seg-btn" type="button" data-plat="xiaohongshu">小红书</button>
+            </div>
+          </div>
+          <label for="input">分享文本或作品链接（一行一条，支持批量解析）</label>
+          <textarea id="input" placeholder="例如：复制小红书、抖音或B站分享文案到这里，支持一次粘贴多条公开链接。"></textarea>
+          <div class="btn-row">
+            <button class="secondary" type="button" onclick="openDownloadDir()">打开保存目录</button>
+            <button class="primary" id="go" type="button">立即解析并下载</button>
+          </div>
+          <div class="quick-launch-card" style="margin-top:16px" aria-live="polite">
+            <div class="panel-head">
+              <div><p class="panel-title" style="font-size:13.5px">当前单作品任务进度</p><p class="panel-sub" id="statusSub">等待任务开始</p></div>
+              <div style="display:flex;align-items:center;gap:10px">
+                <button class="mini-btn" type="button" onclick="openArtworkView('history')">查看历史档案 →</button>
+                <span class="state-dot" id="stateDot"></span>
+              </div>
+            </div>
+            <div class="live-progress" style="margin-top:6px">
+              <div class="progress-track"><div class="progress-bar" id="progressBar"></div></div>
+              <div class="progress-meta"><span id="progressText">0 / 0</span><span id="successText">成功 0</span></div>
+            </div>
+            <div class="results" id="results"></div>
+          </div>
+        </section>
+
+        <!-- 2. 关键词采集 -->
+        <section class="surface work-panel active" id="keywordPanel" role="tabpanel">
+          <div class="eyebrow">Keyword Collection</div>
+          <div class="panel-head-row">
+            <div><h2>关键词矩阵采集</h2><p class="lead">直接输入关键词或勾选下方词表开跑；支持无水印直下、历史去重跳过与自动分类入库。</p></div>
+            <div class="seg-group" id="kwPlatformSeg">
+              <button class="seg-btn active" type="button" data-plat="douyin">抖音</button>
+              <button class="seg-btn" type="button" data-plat="xiaohongshu">小红书</button>
+            </div>
+          </div>
+
+          <div class="quick-launch-card" id="kwLaunchCard">
+            <div class="form-grid">
+              <div>
+                <label for="keywordValue">立即采集关键词（留空则按顺序采集下方已勾选关键词）</label>
+                <input id="keywordValue" type="text" maxlength="100" placeholder="输入单个关键词直接开跑；或勾选下方表格多词自动排队">
+              </div>
+              <div style="display:flex;gap:8px;align-items:end">
+                <div style="flex:1"><label for="kwBatchInput">快速添加到当前分组（逗号或空格分隔）</label><input id="kwBatchInput" type="text" placeholder="新词自动加入当前选中分组，点右侧添加"></div>
+                <button class="secondary" type="button" style="height:38px" onclick="kwAddFromInput()">添加词条</button>
+              </div>
+            </div>
+
+            <div class="param-chips">
+              <div class="param-chip"><span>目标套数 (0=全部)</span><input type="number" id="keywordCount" min="0" max="500" value="20"></div>
+              <div class="param-chip"><span>作品类型</span><select id="k_media_type" style="width:auto;height:30px;padding:0 8px;border-radius:9px;font-weight:700"><option value="image" selected>仅图文</option><option value="video">仅视频</option><option value="all">全部（图文+视频）</option></select></div>
+              <div class="param-chip" id="kwImgRangeChip"><span>图文张数</span><input type="number" id="minImages" min="0" max="50" value="4"><span>至</span><input type="number" id="maxImages" min="0" max="50" value="20"><span>张</span></div>
+              <div class="param-chip"><span>排序</span><select id="k_web_sort" style="width:auto;height:30px;padding:0 8px;border-radius:9px;font-weight:700"><option value="综合排序">综合排序</option><option value="最多点赞">最多点赞</option><option value="最新发布">最新发布</option></select></div>
+              <div class="param-chip"><span>发布时间</span><select id="k_web_publish_time" style="width:auto;height:30px;padding:0 8px;border-radius:9px;font-weight:700"><option value="不限">时间不限</option><option value="一天内">一天内</option><option value="一周内">一周内</option><option value="半年内">半年内</option></select></div>
+              <label class="param-chip" style="cursor:pointer"><input type="checkbox" id="k_direct_download" checked style="width:15px;height:15px;margin:0;accent-color:var(--accent)"> 提取直接下载</label>
+              <label class="param-chip" style="cursor:pointer"><input type="checkbox" id="k_skip_dup_chip" checked style="width:15px;height:15px;margin:0;accent-color:var(--accent)"> 已采去重</label>
+              <label class="param-chip" style="cursor:pointer"><input type="checkbox" id="k_auto_ingest_chip" checked style="width:15px;height:15px;margin:0;accent-color:var(--accent)"> 自动分类入库</label>
+            </div>
+
+            <div class="btn-row" style="margin-top:0">
+              <button class="primary" id="startKeyword" type="button">开始关键词采集</button>
+              <button class="secondary danger" type="button" onclick="stopKeywordCollection()">停止采集</button>
+              <button class="secondary" type="button" onclick="engineAction('bring_verify_browser',{platform:activeKwPlatform,topmost:false})">查看采集浏览器</button>
+              <button class="secondary" type="button" onclick="openDownloadDir()">打开作品保存目录</button>
+            </div>
+
+            <div class="kpi-strip" aria-label="关键词采集计数面板">
+              <div class="kpi-card"><span class="kpi-label">目标数量</span><strong class="kpi-value" id="kwKpiTarget">20</strong></div>
+              <div class="kpi-card"><span class="kpi-label">已扫描卡片</span><strong class="kpi-value" id="kwKpiCrawled">0</strong></div>
+              <div class="kpi-card accent"><span class="kpi-label">合格作品</span><strong class="kpi-value" id="kwKpiQualified">0</strong></div>
+              <div class="kpi-card ok"><span class="kpi-label">已下载落盘</span><strong class="kpi-value" id="kwKpiDownloaded">0</strong></div>
+            </div>
+
+            <div class="live-progress" style="margin-top:0">
+              <div class="progress-track"><div class="progress-bar" id="kwVisualBar"></div></div>
+              <div class="progress-meta">
+                <span id="kwProgressSummary">等待开始采集</span>
+                <div style="display:flex;gap:6px">
+                  <button class="mini-btn" type="button" onclick="openArtworkView('current')">当前采集列表</button>
+                  <button class="mini-btn" type="button" onclick="openArtworkView('history')">历史采集列表</button>
+                </div>
+              </div>
+            </div>
+            <p class="panel-sub" id="keywordCapability" style="margin:0">正在检测内置 Edge 采集核心…</p>
+            <div class="collection-status" id="keywordStatus" role="status" hidden style="margin:0"></div>
+          </div>
+
+          <div class="toolbar" style="margin-top:14px">
+            <select class="sort-select group-select" id="kwGroupFilter" data-filtered="false" onchange="onKwGroupChange(this.value)" title="按分组筛选"><option value="all">全部分组</option></select>
+            <button class="mini-btn" type="button" onclick="kwRenameGroupPrompt()" title="重命名当前分组或任一分组">重命名分组</button>
+            <button class="mini-btn" type="button" onclick="kwBatch('all')">全选本组</button>
+            <button class="mini-btn" type="button" onclick="kwBatch('invert')">反选</button>
+            <button class="mini-btn" type="button" onclick="kwBatch('none')">清空</button>
+            <input class="search-box" type="text" id="kwSearch" placeholder="搜索关键词、分组或备注…" oninput="refreshKeywords()">
+            <select class="sort-select" id="kwSortBy" onchange="refreshKeywords()" title="选择关键词排序规则">
+              <option value="seq">按序号</option>
+              <option value="keyword">按关键词</option>
+              <option value="last_count">按上次数量</option>
+              <option value="recorded_ids">按记录ID数</option>
+              <option value="last_time">按最近时间</option>
+              <option value="group">按分组名</option>
+            </select>
+            <button class="mini-btn" id="kwSortDirBtn" type="button" onclick="toggleKwSortDir()" title="切换升序/降序">↑ 升序</button>
+            <input type="file" id="kwFileInput" accept=".txt,.csv" hidden onchange="kwImportFile(this)">
+            <button class="mini-btn" type="button" onclick="$('kwFileInput').click()">导入(.txt/.csv)</button>
+            <button class="mini-btn" type="button" onclick="kwAssignGroupPrompt()">分配分组</button>
+            <button class="mini-btn danger" type="button" onclick="kwDeleteSelected()">删除选中</button>
+            <details class="more-menu" id="kwMoreMenu">
+              <summary>更多 ▾</summary>
+              <div class="more-pop">
+                <button type="button" onclick="kwRenameGroupPrompt();this.closest('details').removeAttribute('open')">重命名分组</button>
+                <button type="button" onclick="kwImportPreset();this.closest('details').removeAttribute('open')">导入江浙沪46词</button>
+                <button type="button" onclick="kwRemarkPrompt();this.closest('details').removeAttribute('open')">修改备注</button>
+                <button type="button" onclick="kwExport();this.closest('details').removeAttribute('open')">导出词表 (.csv)</button>
+              </div>
+            </details>
+          </div>
+          <div class="table-wrap">
+            <table class="data-table">
+              <thead><tr><th>选择</th><th>序号</th><th>平台</th><th>分组</th><th>关键词</th><th>上次提取</th><th>上次数量</th><th>记录ID</th><th>备注</th><th>上次时间</th><th>操作</th></tr></thead>
+              <tbody id="kwTableBody"><tr><td colspan="11" style="text-align:center;color:var(--muted)">正在加载关键词列表…</td></tr></tbody>
+            </table>
+          </div>
+        </section>
+
+        <!-- 3. 主页采集 -->
+        <section class="surface work-panel" id="homepagePanel" role="tabpanel" hidden>
+          <div class="eyebrow">Author Homepage</div>
+          <div class="panel-head-row">
+            <div><h2>作者主页采集</h2><p class="lead">按项目分组管理关注作者档案，粘贴或勾选抖音主页链接，一键抓取公开图文。</p></div>
+            <div class="seg-group" id="auPlatformSeg">
+              <button class="seg-btn active" type="button" data-plat="douyin">抖音</button>
+              <button class="seg-btn" type="button" data-plat="xiaohongshu" disabled title="小红书主页发现暂未开放，请使用小红书关键词采集" style="opacity:.48;cursor:not-allowed">小红书（暂未开放）</button>
+            </div>
+          </div>
+
+          <div class="quick-launch-card">
+            <div class="form-grid">
+              <div>
+                <label for="authorUrl">单条主页链接（立即提取；留空用已勾选第一条）</label>
+                <input id="authorUrl" type="url" placeholder="https://www.douyin.com/user/…">
+              </div>
+              <div style="display:flex;gap:8px;align-items:end">
+                <div style="flex:1"><label for="auBatchInput">批量添加到当前分组（粘贴多个主页地址）</label><input id="auBatchInput" type="text" placeholder="输入主页链接，点右侧保存进当前分组"></div>
+                <button class="secondary" type="button" style="height:38px" onclick="auAddFromInput()">添加主页</button>
+              </div>
+            </div>
+            <div class="param-chips">
+              <div class="param-chip"><span>每主页数量</span><input type="number" id="a_max_per_author" min="1" max="50" value="10"></div>
+              <div class="param-chip"><span>图文张数</span><input type="number" id="a_min_images" min="0" max="50" value="4"><span>至</span><input type="number" id="a_max_images" min="0" max="50" value="20"><span>张</span></div>
+              <label class="param-chip" style="cursor:pointer"><input type="checkbox" id="a_direct_download" checked style="width:15px;height:15px;margin:0;accent-color:var(--accent)"> 提取直接下载</label>
+            </div>
+            <div class="btn-row" style="margin-top:0">
+              <button class="primary" id="startHomepage" type="button">采集主页并下载图文</button>
+              <button class="secondary" type="button" onclick="openDownloadDir()">打开作品保存目录</button>
+            </div>
+            <p class="panel-sub" id="homepageCapability" style="margin:0">正在检测内置 Edge 采集核心…</p>
+            <div class="collection-status" id="homepageStatus" role="status" hidden style="margin:0"></div>
+          </div>
+
+          <div class="toolbar" style="margin-top:14px">
+            <select class="sort-select group-select" id="auGroupFilter" data-filtered="false" onchange="onAuGroupChange(this.value)" title="按分组筛选"><option value="all">全部分组</option></select>
+            <button class="mini-btn" type="button" onclick="auRenameGroupPrompt()" title="重命名当前分组或任一分组">重命名分组</button>
+            <button class="mini-btn" type="button" onclick="auBatch('all')">全选本组</button>
+            <button class="mini-btn" type="button" onclick="auBatch('invert')">反选</button>
+            <button class="mini-btn" type="button" onclick="auBatch('none')">清空</button>
+            <input class="search-box" type="text" id="auSearch" placeholder="搜索作者/分组/备注…" oninput="refreshAuthors()">
+            <select class="sort-select" id="auSortBy" onchange="refreshAuthors()"><option value="seq">按序号</option><option value="name">按作者名</option><option value="fans">按粉丝量</option><option value="works">按作品数</option><option value="publish_time">按最近发布</option><option value="group">按分组</option></select>
+            <button class="mini-btn" id="auSortDirBtn" type="button" onclick="toggleAuSortDir()" title="切换升序/降序">↑ 升序</button>
+            <input type="file" id="auFileInput" accept=".txt,.csv" hidden onchange="auImportFile(this)">
+            <button class="mini-btn" type="button" onclick="$('auFileInput').click()">导入主页(.txt)</button>
+            <button class="mini-btn" type="button" onclick="auMetaPrompt()">改分组/备注</button>
+            <button class="mini-btn danger" type="button" onclick="auDeleteSelected()">删除选中</button>
+          </div>
+          <div class="table-wrap">
+            <table class="data-table">
+              <thead><tr><th>选择</th><th>序号</th><th>平台</th><th>分组</th><th>作者</th><th>网址</th><th>粉丝</th><th>作品</th><th>备注</th><th>操作</th></tr></thead>
+              <tbody id="auTableBody"><tr><td colspan="10" style="text-align:center;color:var(--muted)">暂无保存的作者主页，可在上方粘贴添加或直接提取。</td></tr></tbody>
+            </table>
+          </div>
+        </section>
+
+        <!-- 4. 作品列表（统一资产库） -->
+        <section class="surface work-panel" id="artworksPanel" role="tabpanel" hidden>
+          <div class="eyebrow">Unified Artwork Library</div>
+          <div class="panel-head-row">
+            <div><h2>作品列表与统一历史记录</h2><p class="lead">汇总当前采集结果、剪贴板采集、AI 任务与历史档案，支持读取时间排序、多维度筛选及一键下载入库。</p></div>
+            <div class="seg-group" id="artViewSeg">
+              <button class="seg-btn active" type="button" data-mode="current">当前采集列表</button>
+              <button class="seg-btn" type="button" data-mode="history">历史采集列表</button>
+            </div>
+          </div>
+
+          <div class="toolbar">
+            <input class="search-box" type="text" id="artSearch" placeholder="按标题、关键词、作者搜索…" oninput="refreshArtworks()">
+            <select id="artTypeFilter" style="width:105px;height:34px" onchange="refreshArtworks()"><option value="all">全部类型</option><option value="图文">仅图文</option><option value="视频">仅视频</option><option value="AI任务">AI任务</option></select>
+            <select id="artSortBy" style="width:120px;height:34px" onchange="refreshArtworks()"><option value="collected_at" selected>按读取时间</option><option value="seq">默认序号</option><option value="likes">按点赞量</option><option value="favorites">按收藏量</option><option value="comments">按评论量</option><option value="image_count">按图片数</option><option value="publish_time">按发布时间</option></select>
+            <button class="mini-btn" type="button" onclick="artBatch('all')">全选</button>
+            <button class="mini-btn" type="button" onclick="artBatch('invert')">反选</button>
+            <button class="mini-btn" type="button" onclick="artExportCsv()">导出 CSV</button>
+            <button class="mini-btn danger" type="button" onclick="artDeleteSelected()">删除</button>
+          </div>
+
+          <details class="drawer" id="queueDrawer" style="margin-top:8px">
+            <summary><span>剪贴板与实时排队任务</span><span class="badge" id="waitingCount" style="margin-left:auto;margin-right:8px">0</span></summary>
+            <div class="drawer-body">
+              <div class="panel-sub" id="queueSub" style="margin:0">读取剪贴板实时队列与本地下载队</div>
+              <div class="scroll-list" id="queueList" style="max-height:160px;margin-top:4px"><div class="panel-sub">暂无排队或剪贴板待处理任务</div></div>
+            </div>
+          </details>
+
+          <details class="drawer">
+            <summary>多条件高级筛选与数值对比规则</summary>
+            <div class="drawer-body">
+              <div class="form-grid">
+                <div><label for="artIncludeKw">标题包含关键字（逗号分隔）</label><input type="text" id="artIncludeKw" placeholder="例如：团建,民宿"></div>
+                <div><label for="artExcludeKw">标题排除关键字（逗号分隔）</label><input type="text" id="artExcludeKw" placeholder="例如：广告,抽奖"></div>
+              </div>
+              <div class="num-row">
+                <span>点赞 ≥</span><input type="number" id="artMinLikes" min="0" value="0">
+                <span>收藏 ≥</span><input type="number" id="artMinFavorites" min="0" value="0">
+                <span>评论 ≥</span><input type="number" id="artMinComments" min="0" value="0">
+                <span>图片数 ≥</span><input type="number" id="artMinImages" min="0" value="0">
+                <button class="mini-btn" type="button" onclick="refreshArtworks()">应用筛选条件</button>
+              </div>
+            </div>
+          </details>
+
+          <div class="progress-meta" style="margin:10px 0 8px"><span id="artSummaryText">当前 0 条 · 历史 0 条 · 显示 0 条</span></div>
+          <div class="table-wrap" style="max-height:360px">
+            <table class="data-table">
+              <thead><tr><th>选择</th><th>序号</th><th>类型</th><th>来源 / 关键词</th><th>作者</th><th>作品标题</th><th>评 / 藏 / 赞</th><th>发布时间</th><th>读取时间</th><th>图数</th><th>状态</th><th>操作</th></tr></thead>
+              <tbody id="artTableBody"><tr><td colspan="12" style="text-align:center;color:var(--muted)">正在加载作品列表…</td></tr></tbody>
+            </table>
+          </div>
+
+          <div class="btn-row">
+            <button class="secondary" type="button" onclick="openDownloadDir()">打开作品保存目录</button>
+            <button class="secondary" type="button" onclick="ingestCheckedArtworks()">一键入库选中作品</button>
+            <button class="primary" type="button" onclick="downloadCheckedArtworks()">开始下载选中作品</button>
+          </div>
+        </section>
+
+        <!-- 5. 平台登录 -->
+        <section class="surface work-panel" id="loginPanel" role="tabpanel" hidden>
+          <div class="eyebrow">Built-in Browser Session</div>
+          <h2>多平台登录态与内置浏览器调度中心</h2>
+          <p class="lead">自动识别本机 Edge / Chrome / Chromium 持久化内核（未安装微软 Edge 时自动无缝切换 Chrome 或内置 Chromium）；扫码登录一次永久保存会话，遇到验证码自动居中置顶弹出提醒。</p>
+          <div class="login-grid">
+            <div class="login-card">
+              <strong>抖音桌面会话</strong>
+              <span style="font-size:12px;color:var(--muted)" id="loginDyInfo">用于抖音关键词搜索、主页发现与人机验证</span>
+              <div style="display:flex;gap:8px;flex-wrap:wrap">
+                <button class="mini-btn" type="button" onclick="engineAction('open_platform_login',{platform:'douyin'})">抖音登录 / 打开窗口</button>
+                <button class="mini-btn" type="button" onclick="engineAction('switch_platform',{platform:'douyin'})">激活抖音核心</button>
+              </div>
+            </div>
+            <div class="login-card">
+              <strong>小红书桌面会话</strong>
+              <span style="font-size:12px;color:var(--muted)" id="loginXhsInfo">用于小红书登录态与搜索笔记采集</span>
+              <div style="display:flex;gap:8px;flex-wrap:wrap">
+                <button class="mini-btn" type="button" onclick="engineAction('open_platform_login',{platform:'xiaohongshu'})">小红书登录 / 打开窗口</button>
+                <button class="mini-btn" type="button" onclick="engineAction('switch_platform',{platform:'xiaohongshu'})">激活小红书核心</button>
+              </div>
+            </div>
+            <div class="login-card">
+              <strong>浏览器窗口控制</strong>
+              <span style="font-size:12px;color:var(--muted)">登录或过完验证码后可一键收起，登录状态永久保留在本机档案中</span>
+              <div style="display:flex;gap:8px;flex-wrap:wrap">
+                <button class="mini-btn" type="button" onclick="engineAction('bring_verify_browser',{platform:activeEnginePlatform})">弹出 / 置顶浏览器</button>
+                <button class="mini-btn" type="button" onclick="engineAction('hide_browser',{})">收起浏览器</button>
+              </div>
+            </div>
+          </div>
+          <div class="collection-status" id="loginActionFeedback" hidden></div>
+        </section>
+
+        <!-- 7. 下载与软件设置 -->
+        <section class="surface work-panel" id="settingsPanel" role="tabpanel" hidden>
+          <div class="eyebrow">Download & App Preferences</div>
+          <h2>下载设置、归档规则与通知提醒</h2>
+          <p class="lead">仅保留 100% 实际生效的下载与工作台配置（路径/去重/自动入库/清晰度/命名/窗口与飞书通知）；视觉主题请直接点击右上角主题菜单。</p>
+
+          <div class="subtabs" id="settingSubTabs">
+            <button class="seg-btn active" type="button" data-sub="subPath">路径、去重与自动入库</button>
+            <button class="seg-btn" type="button" data-sub="subTitle">格式、节奏与命名模板</button>
+            <button class="seg-btn" type="button" data-sub="subTheme">窗口、通知与飞书提醒</button>
+            <button class="seg-btn" type="button" data-sub="subAi">AI 接入</button>
+          </div>
+
+          <div class="subpanel active" id="subPath">
+            <div class="form-grid">
+              <div class="wide"><label for="d_output_dir">作品保存根目录</label><input type="text" id="d_output_dir"></div>
+            </div>
+            <div class="check-grid" style="margin-top:12px">
+              <label class="check-item"><input type="checkbox" id="d_skip_downloaded_history" checked> 自动跳过已下载过的历史作品（去重）</label>
+              <label class="check-item"><input type="checkbox" id="d_down_teletex" checked> 下载图文作品</label>
+              <label class="check-item"><input type="checkbox" id="d_down_video"> 同时下载视频作品</label>
+            </div>
+            <div style="margin-top:14px;padding-top:12px;border-top:1px solid var(--line);display:grid;gap:10px">
+              <strong style="font-size:12.5px">本地素材自动分类入库（01月~12月平铺硬链接 · 主题合集 · 多维元数据 · 广告滤图）</strong>
+              <div class="check-grid">
+                <label class="check-item"><input type="checkbox" id="d_auto_ingest_material" checked> 采集下载后自动按本地规则分类入库</label>
+                <label class="check-item"><input type="checkbox" id="d_auto_ingest_copy_only" checked> 保留下载目录原件（复制入库，不删原目录）</label>
+                <label class="check-item"><input type="checkbox" id="d_write_metadata" checked> 自动生成并更新作品元数据（metadata.json）</label>
+              </div>
+              <div class="form-grid">
+                <div class="wide"><label for="d_auto_ingest_config_path">入库规则配置文件（config.json）</label><input type="text" id="d_auto_ingest_config_path" placeholder="D:\AICode\工具开发\projects\xhs-dl\config\config.json"></div>
+              </div>
+            </div>
+          </div>
+
+          <div class="subpanel" id="subTitle">
+            <div class="form-grid">
+              <div><label for="d_image_format">图片保存格式</label><select id="d_image_format"><option value="jpg" selected>JPG（推荐 · 全平台通用无 WebP）</option><option value="png">PNG（无损）</option><option value="keep">保持平台原格式（可能为 WebP）</option></select></div>
+              <div><label for="d_delay_mode">下载防频繁节奏</label><select id="d_delay_mode"><option value="auto">智能 · 随结果调节</option><option value="fast">快速 · 3–8 秒</option><option value="normal">标准 · 8–15 秒</option><option value="cautious">稳妥 · 35–55 秒</option><option value="slow">慢速 · 55–85 秒</option><option value="very-slow">极慢 · 110–160 秒</option></select></div>
+              <div class="wide"><label for="d_title_template">文件夹命名模板（支持：{comments} 评论 · {favorites} 收藏 · {likes} 点赞 · {title} 标题 · {author} 作者 · {publish_time} 发布日期）</label><input type="text" id="d_title_template" value="评{comments}-藏{favorites}-赞{likes}-{title}-{author}-{publish_time}">
+                <div class="btn-row" style="margin-top:6px;gap:6px">
+                  <button class="mini-btn" type="button" onclick="applyTitleTemplatePreset('评{comments}-藏{favorites}-赞{likes}-{title}-{author}-{publish_time}')">评藏赞+标题+作者+发布时间</button>
+                  <button class="mini-btn" type="button" onclick="applyTitleTemplatePreset('评{comments}-赞{likes}-{title}-{author}-{publish_time}')">评赞+标题+作者+发布时间</button>
+                  <button class="mini-btn" type="button" onclick="applyTitleTemplatePreset('{publish_datetime}_{author}_{title}')">旧版时间_作者_标题</button>
+                </div>
+              </div>
+            </div>
+            <div class="check-grid" style="margin-top:12px">
+              <label class="check-item"><input type="checkbox" id="d_set_file_time_to_publish" checked> 文件修改时间同步为作品发布时间</label>
+            </div>
+          </div>
+
+          <div class="subpanel" id="subTheme">
+            <div class="check-grid">
+              <label class="check-item"><input type="checkbox" id="sw_app_window_mode" checked> 优先以独立无地址栏桌面窗口打开</label>
+              <label class="check-item"><input type="checkbox" id="sw_minimize_to_tray"> 最小化隐藏任务栏偏好</label>
+            </div>
+            <div style="margin-top:14px;padding-top:12px;border-top:1px solid var(--line)">
+              <strong style="display:block;font-size:13px;margin-bottom:8px">验证置顶、桌面弹窗与飞书通知</strong>
+              <div class="check-grid">
+                <label class="check-item"><input type="checkbox" id="sw_auto_topmost_verify_window" checked> 遇到验证码/登录拦截时自动弹出并置顶验证浏览器</label>
+                <label class="check-item"><input type="checkbox" id="sw_notify_desktop_toast" checked> 发送电脑桌面气泡通知 + 提示音</label>
+                <label class="check-item"><input type="checkbox" id="sw_notify_feishu" checked> 发送飞书群消息通知</label>
+                <label class="check-item"><input type="checkbox" id="sw_notify_on_complete" checked> 采集任务结束时也发送完成通知</label>
+              </div>
+              <div class="btn-row" style="margin-top:10px">
+                <button class="mini-btn" type="button" onclick="engineAction('test_notification',{})">测试桌面 + 飞书通知</button>
+              </div>
+              <details class="drawer" id="feishuConfigDrawer" style="margin-top:10px">
+                <summary>飞书机器人连接配置（可选：群 Webhook 或 App ID / 密钥 / 群 ID）</summary>
+                <div class="drawer-body">
+                  <div class="form-grid">
+                    <div><label for="sw_notify_feishu_app_id">机器人 App ID（企业自建应用）</label><input type="text" id="sw_notify_feishu_app_id" placeholder="可选：cli_xxxxxxxxxx"></div>
+                    <div><label for="sw_notify_feishu_app_secret">机器人 App Secret（密钥）</label><input type="password" id="sw_notify_feishu_app_secret" placeholder="可选：应用密钥" autocomplete="off"></div>
+                    <div><label for="sw_notify_feishu_target">飞书群名称或群 ID（oc_xxx）</label><input type="text" id="sw_notify_feishu_target" value="素材采集通知群" placeholder="例如：素材采集通知群 或 oc_xxx"></div>
+                    <div><label for="sw_notify_feishu_webhook">或：飞书群自定义机器人 Webhook（免建企业应用）</label><input type="url" id="sw_notify_feishu_webhook" placeholder="可选：https://open.feishu.cn/open-apis/bot/v2/hook/..."></div>
+                  </div>
+                  <p class="panel-sub" style="margin:0">提示：个人用户只需在飞书群添加「自定义机器人」并粘贴 Webhook 地址即可（免建企业应用）；团队用户可填写 App ID + 密钥 + 群 ID/群名称；均留空则自动沿用本机默认配置。</p>
+                </div>
+              </details>
+            </div>
+            <div style="margin-top:14px;padding-top:12px;border-top:1px solid var(--line);display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap">
+              <span style="font-size:12px;color:var(--muted)">旧版历史档案迁移：如曾使用旧采集器积累了词表与作品档案，可在此手工导入合并</span>
+              <button class="mini-btn" type="button" onclick="migrateLegacyArchive()">导入旧版历史词库与档案</button>
+            </div>
+          </div>
+
+          <div class="subpanel" id="subAi">
+            <div style="display:grid;gap:12px">
+              <div class="quick-launch-card" style="margin:0">
+                <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap">
+                  <div>
+                    <strong style="font-size:13.5px">本机 AI 服务接口地址</strong>
+                    <div style="font-size:12px;color:var(--muted);margin-top:2px">仅监听本机回环 <code>http://127.0.0.1:5678</code>，无需 API Key；AI 发起的任务与结果自动同步在「作品列表 -> 历史采集列表」。</div>
+                  </div>
+                  <div style="display:flex;gap:8px;flex-wrap:wrap">
+                    <button class="mini-btn" type="button" onclick="copyAiText('http://127.0.0.1:5678','已复制本机接口地址')">复制地址</button>
+                    <a class="mini-btn" href="/api/openapi.json" target="_blank" rel="noreferrer" style="text-decoration:none">查看 OpenAPI</a>
+                  </div>
+                </div>
+              </div>
+
+              <div style="display:grid;gap:10px">
+                <strong style="font-size:13px">给 AI 下指令的快捷提示词（一键复制发给 Codex / Antigravity / Claude）</strong>
+                <div class="task-row" style="align-items:center">
+                  <div class="task-main">
+                    <span class="task-title">1. 抖音关键词搜图文并自动入库</span>
+                    <span class="task-meta" id="aiPromptKw" style="white-space:normal">使用本机万能采集器（http://127.0.0.1:5678）采集抖音关键词「安吉温泉团建」的 10 条图文作品并自动下载分类入库。</span>
+                  </div>
+                  <button class="mini-btn" type="button" onclick="copyAiSnippet('aiPromptKw')">复制提示词</button>
+                </div>
+                <div class="task-row" style="align-items:center">
+                  <div class="task-main">
+                    <span class="task-title">2. 批量链接下载与整理入库</span>
+                    <span class="task-meta" id="aiPromptLink" style="white-space:normal">把以下小红书/抖音链接提交给本机万能采集器 POST http://127.0.0.1:5678/api/v1/jobs 进行无水印下载并整理入库。</span>
+                  </div>
+                  <button class="mini-btn" type="button" onclick="copyAiSnippet('aiPromptLink')">复制提示词</button>
+                </div>
+                <div class="task-row" style="align-items:center">
+                  <div class="task-main">
+                    <span class="task-title">3. 查询最近采集历史与进度</span>
+                    <span class="task-meta" id="aiPromptHist" style="white-space:normal">查询本机万能采集器 http://127.0.0.1:5678/api/v1/workbench/artworks?mode=history&sort_by=collected_at&sort_dir=desc 并汇总最近采集的 10 条作品。</span>
+                  </div>
+                  <button class="mini-btn" type="button" onclick="copyAiSnippet('aiPromptHist')">复制提示词</button>
+                </div>
+              </div>
+
+              <div style="display:grid;gap:8px;padding-top:10px;border-top:1px solid var(--line)">
+                <div style="display:flex;justify-content:space-between;align-items:center;gap:8px">
+                  <strong style="font-size:13px">脚本 / HTTP 开发者调用示例</strong>
+                  <button class="mini-btn" type="button" onclick="copyAiSnippet('aiCurlExample')">复制示例命令</button>
+                </div>
+                <pre id="aiCurlExample" style="margin:0;padding:10px 12px;border-radius:12px;background:var(--input);border:1px solid var(--line);font-size:11.5px;overflow:auto;line-height:1.5">curl -X POST http://127.0.0.1:5678/api/v1/collections/keyword -H "Content-Type: application/json" -d "{\"platform\":\"douyin\",\"keyword\":\"安吉温泉团建\",\"count\":10,\"media_type\":\"image\",\"direct_download\":true}"</pre>
+              </div>
+            </div>
+          </div>
+
+          <div class="btn-row">
+            <button class="secondary" type="button" onclick="openDownloadDir()">打开保存目录</button>
+            <button class="primary" type="button" onclick="saveAllWorkbenchSettings(true)">保存全部设置到本地档案</button>
+          </div>
+        </section>
+      </div>
+    </section>
+  </div>
+  <p class="footnote">__APP_NAME__ V__APP_VERSION__ · 统一拟态 / 悬浮玻璃桌面工作台 · 本地闭环运行不泄露账号态</p>
+</main>
+
+<dialog class="settings-dialog" id="settingsDialog" aria-labelledby="settingsTitle">
+  <div class="dialog-heading">
+    <div><p>快速下载偏好</p><h2 id="settingsTitle">下载设置</h2></div>
+    <button class="dialog-close" id="settingsClose" type="button" aria-label="关闭设置">×</button>
+  </div>
+  <div style="display:grid;gap:12px">
+    <div><label for="outdir">保存位置</label><input id="outdir" type="text" autocomplete="off"></div>
+    <div><label for="mode">下载节奏</label><select id="mode"><option value="auto" selected>智能 · 随结果调节</option><option value="fast">快速 · 3–8 秒</option><option value="normal">标准 · 8–15 秒</option><option value="cautious">稳妥 · 35–55 秒</option><option value="slow">慢速 · 55–85 秒</option><option value="very-slow">极慢 · 110–160 秒</option></select></div>
+    <div><label for="format">图片格式</label><select id="format"><option value="jpg" selected>JPG（推荐 · 通用清晰）</option><option value="png">PNG（无损）</option><option value="keep">保持原格式（可能 WebP）</option></select></div>
+    <label class="check-item"><input type="checkbox" id="q_auto_ingest" checked> 下载后自动按01月~12月/主题入库</label>
+  </div>
+  <div class="btn-row"><button class="primary" id="settingsDone" type="button" style="height:40px">应用并保存</button></div>
+</dialog>
+<dialog class="settings-dialog" id="inputModal" aria-labelledby="inputModalTitle">
+  <div class="dialog-heading">
+    <div><p id="inputModalSub">分组与备注管理</p><h2 id="inputModalTitle">重命名分组</h2></div>
+    <button class="dialog-close" id="inputModalClose" type="button" aria-label="关闭弹窗">×</button>
+  </div>
+  <div style="display:grid;gap:12px">
+    <div id="inputModalSelectWrap" hidden><label id="inputModalSelectLabel" for="inputModalSelect">选择要操作的分组</label><select id="inputModalSelect"></select></div>
+    <div><label id="inputModalValueLabel" for="inputModalValue">新名称</label><input id="inputModalValue" type="text" autocomplete="off"></div>
+    <div id="inputModalRemarkWrap" hidden><label id="inputModalRemarkLabel" for="inputModalRemark">备注（留空不改）</label><input id="inputModalRemark" type="text" autocomplete="off"></div>
+  </div>
+  <div class="btn-row">
+    <button class="secondary" id="inputModalCancel" type="button" style="height:40px">取消</button>
+    <button class="primary" id="inputModalConfirm" type="button" style="height:40px">确认保存</button>
+  </div>
+</dialog>
+<div id="wbToast" class="toast" aria-live="polite"></div>
+
+<script>
+const THEME_KEY='xhs-dl-theme',THEME_VER_KEY='xhs-dl-theme-v2',OUTPUT_KEY='xhs-dl-output',MODE_KEY='xhs-dl-mode',FORMAT_KEY='xhs-dl-format',DEFAULT_OUTPUT=__DEFAULT_OUTPUT_JSON__,MIN_PROGRESS_MS=1100;
+const CSS_THEMES=['light','dark','neo','neo-dark','glass','glass-dark'];
+const THEME_MODES=['auto',...CSS_THEMES];
+const THEME_LABELS={'light':'浅色','dark':'深色','neo':'浅色拟态','neo-dark':'深色拟态','glass':'浅色玻璃','glass-dark':'深色玻璃'};
+let currentThemeMode='auto';
+const $=id=>document.getElementById(id);
+let activeJob=null,pollTimer=null,jobStartedAt=0,historyItems=[],historyOffset=0,historyTotal=0,collectorEnabled=true,collectorOnline=false;
+let wbKeywords=[],wbAuthors=[],wbArtworks=[],wbSettings={},activeKwPlatform='douyin',activeAuPlatform='douyin',activeSinglePlatform='douyin',activeArtView='current';
+let activeKwGroup='all',activeAuGroup='all',kwSortDir='asc',auSortDir='asc',kwGroups=[],auGroups=[],kwBatchQueueStop=false,activeKeywordRun=false;
+let collectionPollTimers={homepage:null,keyword:null},toastTimer=null,autoSaveTimer=null;
+let activeEnginePlatform='douyin',lastVerifyKey='',lastKwCounter='';
+
+function esc(v){return String(v==null?'':v).replace(/[&<>"']/g,ch=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]));}
+function showToast(msg,isErr=false){
+  const el=$('wbToast');if(!el||!msg)return;
+  el.textContent=msg;el.classList.toggle('err',!!isErr);el.classList.add('show');
+  if(toastTimer)clearTimeout(toastTimer);
+  toastTimer=setTimeout(()=>el.classList.remove('show'),3400);
+}
+async function api(url,method='GET',body=null,headers={}){
+  const opts={method,headers:{...headers}};
+  if(body!==null){opts.headers['Content-Type']='application/json';opts.body=JSON.stringify(body);}
+  const res=await fetch(url,opts);
+  const data=await res.json().catch(()=>({}));
+  if(!res.ok)throw new Error(data.error||('请求失败: '+res.status));
+  return data;
+}
+
+function resolveAutoTheme(now=new Date()){
+  const bjMs=now.getTime()+now.getTimezoneOffset()*60000+8*3600000;
+  const bj=new Date(bjMs);
+  const hour=bj.getUTCHours();
+  const dayIdx=Math.floor(bjMs/86400000);
+  const isDay=hour>=7&&hour<19;
+  const useGlass=(dayIdx%2)===0;
+  return useGlass?(isDay?'glass':'glass-dark'):(isDay?'neo':'neo-dark');
+}
+function applyTheme(mode,persist=true){
+  const nextMode=THEME_MODES.includes(mode)?mode:'auto';
+  currentThemeMode=nextMode;
+  const resolved=nextMode==='auto'?resolveAutoTheme():nextMode;
+  document.body.dataset.theme=resolved;
+  try{localStorage.setItem(THEME_KEY,nextMode);localStorage.setItem(THEME_VER_KEY,'2');}catch(_){}
+  const baseLabel=THEME_LABELS[resolved]||'浅色拟态';
+  $('themeButton').textContent=(nextMode==='auto'?'自动·'+baseLabel:baseLabel)+' ▾';
+  document.querySelectorAll('#themePopover [data-theme-mode]').forEach(el=>el.classList.toggle('active',el.dataset.themeMode===nextMode));
+  if(persist){
+    if(!wbSettings.software)wbSettings.software={};
+    wbSettings.software.theme=nextMode;
+    api('/api/v1/workbench/settings','POST',{software:{theme:nextMode}}).catch(()=>{});
+  }
+}
+(function initInitialTheme(){
+  let savedMode='auto';
+  try{
+    const ver=localStorage.getItem(THEME_VER_KEY);
+    const raw=localStorage.getItem(THEME_KEY);
+    savedMode=(ver==='2'&&raw&&THEME_MODES.includes(raw))?raw:'auto';
+  }catch(_){}
+  applyTheme(savedMode,false);
+  setInterval(()=>{if(currentThemeMode==='auto')applyTheme('auto',false);},60000);
+})();
+function toggleThemePopover(forceOpen){
+  const pop=$('themePopover'),btn=$('themeButton');
+  if(!pop||!btn)return;
+  const nextOpen=typeof forceOpen==='boolean'?forceOpen:pop.hidden;
+  pop.hidden=!nextOpen;
+  btn.setAttribute('aria-expanded',nextOpen?'true':'false');
+}
+$('themeButton').addEventListener('click',e=>{e.stopPropagation();toggleThemePopover();});
+document.querySelectorAll('#themePopover [data-theme-mode]').forEach(btn=>btn.addEventListener('click',()=>{
+  applyTheme(btn.dataset.themeMode,true);
+  toggleThemePopover(false);
+}));
+document.addEventListener('click',e=>{
+  const wrap=$('themeMenuWrap');
+  if(wrap&&!wrap.contains(e.target))toggleThemePopover(false);
+  document.querySelectorAll('details.more-menu[open]').forEach(m=>{if(!m.contains(e.target))m.removeAttribute('open');});
+});
+document.addEventListener('keydown',e=>{if(e.key==='Escape')toggleThemePopover(false);});
+
+const settingsDialog=$('settingsDialog');
+$('settingsButton').addEventListener('click',()=>settingsDialog.showModal());
+$('settingsClose').addEventListener('click',()=>settingsDialog.close());
+$('settingsDone').addEventListener('click',async()=>{
+  localStorage.setItem(OUTPUT_KEY,$('outdir').value.trim());
+  localStorage.setItem(MODE_KEY,$('mode').value);
+  localStorage.setItem(FORMAT_KEY,$('format').value);
+  $('d_output_dir').value=$('outdir').value.trim();
+  $('d_delay_mode').value=$('mode').value;
+  $('d_image_format').value=$('format').value;
+  if($('q_auto_ingest')&&$('d_auto_ingest_material'))$('d_auto_ingest_material').checked=$('q_auto_ingest').checked;
+  if($('k_auto_ingest_chip')&&$('d_auto_ingest_material'))$('k_auto_ingest_chip').checked=$('d_auto_ingest_material').checked;
+  await saveAllWorkbenchSettings(true);
+  settingsDialog.close();
+});
+settingsDialog.addEventListener('click',e=>{if(e.target===settingsDialog)settingsDialog.close();});
+$('outdir').value=localStorage.getItem(OUTPUT_KEY)||DEFAULT_OUTPUT;
+$('mode').value=localStorage.getItem(MODE_KEY)||'auto';
+$('format').value=localStorage.getItem(FORMAT_KEY)||'jpg';
+
+// Liquid sliding nav pill
+function moveNavPill(tabEl){
+  const pill=$('navLiquidPill');
+  if(!pill||!tabEl)return;
+  pill.style.opacity='1';
+  pill.style.height=tabEl.offsetHeight+'px';
+  pill.style.transform=`translate3d(0,${tabEl.offsetTop}px,0)`;
+}
+function activateNavTab(tabId){
+  const tabs=Array.from(document.querySelectorAll('.nav-item'));
+  tabs.forEach(btn=>{
+    const sel=btn.id===tabId;
+    btn.setAttribute('aria-selected',sel?'true':'false');
+    const panel=$(btn.dataset.panel);
+    if(panel){panel.hidden=!sel;panel.classList.toggle('active',sel);}
+    if(sel)requestAnimationFrame(()=>moveNavPill(btn));
+  });
+  try{localStorage.setItem('xhs-dl-active-tab',tabId);}catch(_){}
+  if(tabId==='tabArtworks')refreshArtworks();
+}
+document.querySelectorAll('.nav-item').forEach(btn=>btn.addEventListener('click',()=>activateNavTab(btn.id)));
+window.addEventListener('resize',()=>{const cur=document.querySelector('.nav-item[aria-selected="true"]');if(cur)moveNavPill(cur);});
+requestAnimationFrame(()=>moveNavPill($('tabKeyword')));
+
+// Sub-tabs & segmented toggles
+document.querySelectorAll('#settingSubTabs .seg-btn').forEach(btn=>btn.addEventListener('click',()=>{
+  document.querySelectorAll('#settingSubTabs .seg-btn').forEach(b=>b.classList.toggle('active',b===btn));
+  document.querySelectorAll('#settingsPanel .subpanel').forEach(p=>p.classList.toggle('active',p.id===btn.dataset.sub));
+}));
+document.querySelectorAll('#kwPlatformSeg .seg-btn').forEach(btn=>btn.addEventListener('click',()=>{
+  activeKwPlatform=btn.dataset.plat;activeKwGroup='all';
+  document.querySelectorAll('#kwPlatformSeg .seg-btn').forEach(b=>b.classList.toggle('active',b===btn));
+  refreshKeywords();
+}));
+document.querySelectorAll('#auPlatformSeg .seg-btn').forEach(btn=>btn.addEventListener('click',()=>{
+  activeAuPlatform=btn.dataset.plat;activeAuGroup='all';
+  document.querySelectorAll('#auPlatformSeg .seg-btn').forEach(b=>b.classList.toggle('active',b===btn));
+  refreshAuthors();
+}));
+document.querySelectorAll('#singlePlatformSeg .seg-btn').forEach(btn=>btn.addEventListener('click',()=>{
+  activeSinglePlatform=btn.dataset.plat;
+  document.querySelectorAll('#singlePlatformSeg .seg-btn').forEach(b=>b.classList.toggle('active',b===btn));
+}));
+document.querySelectorAll('#artViewSeg .seg-btn').forEach(btn=>btn.addEventListener('click',()=>{
+  activeArtView=btn.dataset.mode;
+  document.querySelectorAll('#artViewSeg .seg-btn').forEach(b=>b.classList.toggle('active',b===btn));
+  refreshArtworks();
+}));
+
+function openArtworkView(mode){
+  activeArtView=mode;
+  document.querySelectorAll('#artViewSeg .seg-btn').forEach(b=>b.classList.toggle('active',b.dataset.mode===mode));
+  activateNavTab('tabArtworks');
+}
+
+function syncMediaTypeUi(){
+  const mtype=($('k_media_type')&&$('k_media_type').value)||'image';
+  const chip=$('kwImgRangeChip');
+  if(chip){
+    const isVid=mtype==='video';
+    chip.style.opacity=isVid?'0.48':'1';
+    chip.title=isVid?'仅对图文作品生效':'';
+  }
+}
+
+// Workbench settings load/save
+function bindSettingFields(s){
+  if(!s)return;wbSettings=s;
+  const setVal=(id,val)=>{const el=$(id);if(!el)return;if(el.type==='checkbox')el.checked=!!val;else if(val!=null)el.value=val;};
+  const sg=s.single||{},kw=s.keyword||{},au=s.author||{},dl=s.download||{},sw=s.software||{};
+  Object.keys(sg).forEach(k=>setVal('s_'+k,sg[k]));
+  Object.keys(kw).forEach(k=>{
+    if(k==='max_per_keyword')setVal('keywordCount',kw[k]);
+    else if(k==='min_images')setVal('minImages',kw[k]);
+    else if(k==='max_images')setVal('maxImages',kw[k]);
+    else setVal('k_'+k,kw[k]);
+  });
+  const mtype=(kw.media_type&&['image','video','all'].includes(kw.media_type))?kw.media_type:(kw.type_video?'all':'image');
+  setVal('k_media_type',mtype);
+  syncMediaTypeUi();
+  Object.keys(au).forEach(k=>{
+    if(k==='mode'){document.querySelectorAll('input[name="a_mode"]').forEach(r=>r.checked=r.value===au[k]);}
+    else setVal('a_'+k,au[k]);
+  });
+  Object.keys(dl).forEach(k=>setVal('d_'+k,dl[k]));
+  if(dl.output_dir)$('outdir').value=dl.output_dir;
+  if(dl.delay_mode)$('mode').value=dl.delay_mode;
+  if(dl.image_format)$('format').value=dl.image_format;
+  if(dl.auto_ingest_material!=null){
+    if($('k_auto_ingest_chip'))$('k_auto_ingest_chip').checked=!!dl.auto_ingest_material;
+    if($('q_auto_ingest'))$('q_auto_ingest').checked=!!dl.auto_ingest_material;
+  }
+  if(dl.skip_downloaded_history!=null&&$('k_skip_dup_chip'))$('k_skip_dup_chip').checked=!!dl.skip_downloaded_history;
+  setVal('sw_app_window_mode',sw.app_window_mode);
+  setVal('sw_minimize_to_tray',sw.minimize_to_tray);
+  setVal('sw_auto_topmost_verify_window',sw.auto_topmost_verify_window!=null?sw.auto_topmost_verify_window:true);
+  setVal('sw_notify_desktop_toast',sw.notify_desktop_toast!=null?sw.notify_desktop_toast:true);
+  setVal('sw_notify_feishu',sw.notify_feishu!=null?sw.notify_feishu:true);
+  setVal('sw_notify_on_complete',sw.notify_on_complete!=null?sw.notify_on_complete:true);
+  if(sw.notify_feishu_target!=null)setVal('sw_notify_feishu_target',sw.notify_feishu_target);
+  if(sw.notify_feishu_app_id!=null)setVal('sw_notify_feishu_app_id',sw.notify_feishu_app_id);
+  if(sw.notify_feishu_app_secret!=null)setVal('sw_notify_feishu_app_secret',sw.notify_feishu_app_secret);
+  if(sw.notify_feishu_webhook!=null)setVal('sw_notify_feishu_webhook',sw.notify_feishu_webhook);
+  if(sw.theme&&THEME_MODES.includes(sw.theme)&&localStorage.getItem(THEME_VER_KEY)!=='2')applyTheme(sw.theme,false);
+}
+
+function applyTitleTemplatePreset(tmpl){
+  if($('d_title_template'))$('d_title_template').value=tmpl;
+  saveAllWorkbenchSettings(false);
+  showToast('已切换命名模板并自动保存');
+}
+
+function collectSettingsPatch(){
+  const gVal=id=>{const el=$(id);return el?(el.type==='checkbox'?el.checked:(el.type==='number'?Number(el.value||0):el.value)):undefined;};
+  const mtype=gVal('k_media_type')||'image';
+  return {
+    single:{...(wbSettings.single||{}),platform:activeSinglePlatform},
+    keyword:{...(wbSettings.keyword||{}),platform:activeKwPlatform,direct_download:gVal('k_direct_download'),media_type:mtype,type_video:mtype!=='image',max_per_keyword:gVal('keywordCount'),min_images:gVal('minImages'),max_images:gVal('maxImages'),web_sort:gVal('k_web_sort')||'综合排序',web_publish_time:gVal('k_web_publish_time')||'不限'},
+    author:{...(wbSettings.author||{}),platform:activeAuPlatform,direct_download:gVal('a_direct_download'),max_per_author:gVal('a_max_per_author'),min_images:gVal('a_min_images'),max_images:gVal('a_max_images')},
+    download:{...(wbSettings.download||{}),down_video:gVal('d_down_video'),down_teletex:gVal('d_down_teletex'),output_dir:gVal('d_output_dir')||$('outdir').value.trim(),skip_downloaded_history:gVal('d_skip_downloaded_history'),image_format:gVal('d_image_format'),delay_mode:gVal('d_delay_mode'),title_template:gVal('d_title_template'),set_file_time_to_publish:gVal('d_set_file_time_to_publish'),auto_ingest_material:gVal('d_auto_ingest_material'),auto_ingest_copy_only:gVal('d_auto_ingest_copy_only'),write_metadata:gVal('d_write_metadata'),auto_ingest_config_path:gVal('d_auto_ingest_config_path')},
+    software:{...(wbSettings.software||{}),theme:currentThemeMode||'auto',app_window_mode:gVal('sw_app_window_mode'),minimize_to_tray:gVal('sw_minimize_to_tray'),auto_topmost_verify_window:gVal('sw_auto_topmost_verify_window'),notify_desktop_toast:gVal('sw_notify_desktop_toast'),notify_feishu:gVal('sw_notify_feishu'),notify_on_complete:gVal('sw_notify_on_complete'),notify_feishu_target:gVal('sw_notify_feishu_target'),notify_feishu_app_id:gVal('sw_notify_feishu_app_id'),notify_feishu_app_secret:gVal('sw_notify_feishu_app_secret'),notify_feishu_webhook:gVal('sw_notify_feishu_webhook')}
+  };
+}
+
+async function saveAllWorkbenchSettings(notify){
+  try{
+    const updated=await api('/api/v1/workbench/settings','POST',collectSettingsPatch());
+    wbSettings=updated;
+    if(updated.download){
+      $('outdir').value=updated.download.output_dir||DEFAULT_OUTPUT;
+      $('mode').value=updated.download.delay_mode||'auto';
+      $('format').value=updated.download.image_format||'jpg';
+      if($('k_auto_ingest_chip'))$('k_auto_ingest_chip').checked=!!updated.download.auto_ingest_material;
+      if($('q_auto_ingest'))$('q_auto_ingest').checked=!!updated.download.auto_ingest_material;
+      if($('k_skip_dup_chip')&&updated.download.skip_downloaded_history!=null)$('k_skip_dup_chip').checked=!!updated.download.skip_downloaded_history;
+      localStorage.setItem(OUTPUT_KEY,$('outdir').value);
+      localStorage.setItem(MODE_KEY,$('mode').value);
+      localStorage.setItem(FORMAT_KEY,$('format').value);
+    }
+    if(notify)showToast('设置已保存到本机 workbench_hub.json');
+  }catch(e){if(notify)showToast('保存设置失败：'+e.message,true);}
+}
+
+function renderGroupSelect(selectId,groups,activeGrp){
+  const el=$(selectId);if(!el)return;
+  const total=(groups||[]).reduce((s,g)=>s+(g.count||0),0);
+  const opts=[{name:'all',label:`全部分组 (${total})`},...(groups||[]).map(g=>({name:g.name,label:`${g.name} (${g.count||0})`}))];
+  el.innerHTML=opts.map(o=>`<option value="${esc(o.name)}">${esc(o.label)}</option>`).join('');
+  el.value=opts.some(o=>o.name===activeGrp)?activeGrp:'all';
+  el.dataset.filtered=el.value!=='all'?'true':'false';
+}
+function onKwGroupChange(val){activeKwGroup=val||'all';refreshKeywords();}
+function onAuGroupChange(val){activeAuGroup=val||'all';refreshAuthors();}
+function updateStartKeywordLabel(){
+  const btn=$('startKeyword');if(!btn||btn.disabled)return;
+  const typed=($('keywordValue').value||'').trim();
+  const checkedCount=wbKeywords.filter(r=>r.checked).length;
+  btn.textContent=(!typed&&checkedCount>1)?`开始批量采集（已选 ${checkedCount} 个词）`:'开始关键词采集';
+}
+function kwQueryOpts(){
+  return {
+    filter_platform:activeKwPlatform,
+    filter_group:activeKwGroup,
+    search:$('kwSearch').value||'',
+    sort_by:($('kwSortBy')&&$('kwSortBy').value)||'seq',
+    sort_dir:kwSortDir
+  };
+}
+function renderKeywordTable(){
+  renderGroupSelect('kwGroupFilter',kwGroups,activeKwGroup);
+  const body=$('kwTableBody');
+  if(!wbKeywords.length){body.innerHTML='<tr><td colspan="11" style="text-align:center;color:var(--muted)">当前分组暂无关键词，可在下方添加或点击顶部“导入词库”。</td></tr>';updateStartKeywordLabel();return;}
+  body.innerHTML=wbKeywords.map(r=>`<tr>
+    <td><input type="checkbox" ${r.checked?'checked':''} onchange="kwToggle('${esc(r.id)}',this.checked)"></td>
+    <td>${esc(r.seq)}</td>
+    <td><span class="badge ${r.platform==='xiaohongshu'?'xhs':'dy'}">${r.platform==='xiaohongshu'?'小红书':'抖音'}</span></td>
+    <td><span class="badge">${esc(r.group||'默认分组')}</span></td>
+    <td><strong>${esc(r.keyword)}</strong></td>
+    <td><span class="badge ${r.last_extracted==='是'?'ok':''}">${esc(r.last_extracted)}</span></td><td>${esc(r.last_count)}</td><td>${esc(r.recorded_ids)}</td>
+    <td>${esc(r.remark)}</td><td class="cell-ellipsis">${esc(r.last_time)}</td>
+    <td><button class="mini-btn" type="button" onclick="kwRunSingle('${esc(r.keyword)}')">采集</button></td>
+  </tr>`).join('');
+  updateStartKeywordLabel();
+}
+function applyKwPayload(d){wbKeywords=d.items||[];kwGroups=d.groups||[];renderKeywordTable();}
+async function refreshKeywords(){
+  const q=new URLSearchParams({platform:activeKwPlatform,group:activeKwGroup,search:$('kwSearch').value||'',sort_by:($('kwSortBy')&&$('kwSortBy').value)||'seq',sort_dir:kwSortDir});
+  const d=await api('/api/v1/workbench/keywords?'+q.toString());applyKwPayload(d);
+}
+function toggleKwSortDir(){kwSortDir=kwSortDir==='asc'?'desc':'asc';$('kwSortDirBtn').textContent=kwSortDir==='asc'?'↑ 升序':'↓ 降序';refreshKeywords();}
+async function kwToggle(id,checked){const d=await api('/api/v1/workbench/keywords','POST',{op:'toggle',id,checked,...kwQueryOpts()});applyKwPayload(d);}
+async function kwBatch(mode){const d=await api('/api/v1/workbench/keywords','POST',{op:'batch_select',mode,platform:activeKwPlatform,group:activeKwGroup,...kwQueryOpts()});applyKwPayload(d);}
+async function kwAddFromInput(){
+  const t=$('kwBatchInput').value.trim();if(!t)return;
+  const targetGroup=(activeKwGroup&&activeKwGroup!=='all')?activeKwGroup:'默认分组';
+  const d=await api('/api/v1/workbench/keywords','POST',{op:'add',platform:activeKwPlatform,group:targetGroup,text:t.replace(/[,，\s]+/g,'\n'),...kwQueryOpts()});
+  applyKwPayload(d);$('kwBatchInput').value='';showToast(d.message||`已添加到分组「${targetGroup}」`);
+}
+const inputModal=$('inputModal');
+function openInputModal(opts){
+  return new Promise(resolve=>{
+    $('inputModalSub').textContent=opts.sub||'DIY 编辑';
+    $('inputModalTitle').textContent=opts.title||'输入内容';
+    $('inputModalValueLabel').textContent=opts.valueLabel||'新名称';
+    $('inputModalValue').value=opts.value||'';
+    $('inputModalValue').placeholder=opts.placeholder||'';
+    const selWrap=$('inputModalSelectWrap'),sel=$('inputModalSelect');
+    if(opts.options&&opts.options.length){
+      $('inputModalSelectLabel').textContent=opts.selectLabel||'选择分组';
+      sel.innerHTML=opts.options.map(o=>`<option value="${esc(o.value)}">${esc(o.label)}</option>`).join('');
+      if(opts.selectedValue&&opts.options.some(o=>o.value===opts.selectedValue))sel.value=opts.selectedValue;
+      selWrap.hidden=false;
+    }else{
+      selWrap.hidden=true;sel.innerHTML='';
+    }
+    const rmWrap=$('inputModalRemarkWrap'),rmEl=$('inputModalRemark');
+    if(opts.showRemark){
+      $('inputModalRemarkLabel').textContent=opts.remarkLabel||'备注（留空不改）';
+      rmEl.value=opts.remarkValue||'';
+      rmWrap.hidden=false;
+    }else{
+      rmWrap.hidden=true;rmEl.value='';
+    }
+    const cleanup=(ok)=>{
+      $('inputModalConfirm').onclick=null;$('inputModalCancel').onclick=null;$('inputModalClose').onclick=null;
+      $('inputModalValue').onkeydown=null;
+      inputModal.oncancel=null;
+      try{if(inputModal.open)inputModal.close();}catch(_){}
+      resolve(ok?{select:sel.value,value:$('inputModalValue').value,remark:rmEl.value}:null);
+    };
+    $('inputModalConfirm').onclick=()=>cleanup(true);
+    $('inputModalCancel').onclick=()=>cleanup(false);
+    $('inputModalClose').onclick=()=>cleanup(false);
+    inputModal.oncancel=e=>{e.preventDefault();cleanup(false);};
+    $('inputModalValue').onkeydown=e=>{if(e.key==='Enter'){e.preventDefault();cleanup(true);}};
+    inputModal.showModal();
+    requestAnimationFrame(()=>$('inputModalValue').focus());
+  });
+}
+inputModal.addEventListener('click',e=>{if(e.target===inputModal)$('inputModalCancel').click();});
+
+async function kwAssignGroupPrompt(){
+  const def=(activeKwGroup&&activeKwGroup!=='all')?activeKwGroup:'新项目分组';
+  const r=await openInputModal({sub:'关键词词表归类',title:'分配选中关键词到分组',valueLabel:'目标分组名称（将应用到当前已勾选的关键词）',value:def,placeholder:'例如：江浙沪秋景'});
+  if(!r||!r.value.trim())return;
+  const g=r.value.trim();
+  try{
+    const d=await api('/api/v1/workbench/keywords','POST',{op:'update_group',group:g,...kwQueryOpts()});
+    activeKwGroup=g;await refreshKeywords();showToast(d.message);
+  }catch(e){showToast(e.message,true);}
+}
+async function kwRenameGroupPrompt(){
+  if(!kwGroups||!kwGroups.length){showToast('当前平台暂无可重命名的分组',true);return;}
+  const pre=(activeKwGroup&&activeKwGroup!=='all')?activeKwGroup:kwGroups[0].name;
+  const r=await openInputModal({
+    sub:'关键词分组 DIY',title:'重命名关键词分组',
+    selectLabel:'选择要重命名的原分组',
+    options:kwGroups.map(g=>({value:g.name,label:`${g.name} (${g.count||0})`})),
+    selectedValue:pre,
+    valueLabel:'重命名后的新分组名',value:pre
+  });
+  if(!r||!r.select||!r.value.trim()||r.value.trim()===r.select)return;
+  const newGrp=r.value.trim();
+  try{
+    const d=await api('/api/v1/workbench/keywords','POST',{op:'rename_group',platform:activeKwPlatform,old_group:r.select,new_group:newGrp,...kwQueryOpts()});
+    activeKwGroup=newGrp;await refreshKeywords();showToast(d.message);
+  }catch(e){showToast(e.message,true);}
+}
+async function readTextSmart(file){
+  const buf=await file.arrayBuffer();
+  try{return new TextDecoder('utf-8',{fatal:true}).decode(buf);}
+  catch(_){try{return new TextDecoder('gbk').decode(buf);}catch(__){return await file.text();}}
+}
+async function kwImportFile(input){
+  const file=input.files&&input.files[0];if(!file)return;
+  try{
+    const text=await readTextSmart(file);
+    const stem=file.name.replace(/\.[^.]+$/,'').trim();
+    const targetGroup=(activeKwGroup&&activeKwGroup!=='all')?activeKwGroup:(stem||'导入分组');
+    const d=await api('/api/v1/workbench/keywords','POST',{op:'add',platform:activeKwPlatform,group:targetGroup,parse_group:true,text,...kwQueryOpts()});
+    activeKwGroup=targetGroup;await refreshKeywords();
+    showToast(d.message||`已从 ${file.name} 导入到分组「${targetGroup}」`);
+  }catch(e){showToast('导入失败：'+e.message,true);}
+  finally{input.value='';}
+}
+async function kwDeleteSelected(){const d=await api('/api/v1/workbench/keywords','POST',{op:'delete',...kwQueryOpts()});applyKwPayload(d);showToast(d.message||'已移除选中关键词');}
+async function kwSyncJianghu(){const d=await api('/api/v1/workbench/keywords','POST',{op:'sync_jianghu',...kwQueryOpts()});applyKwPayload(d);}
+async function kwImportPreset(){try{const d=await api('/api/v1/workbench/keywords','POST',{op:'import_jzh_preset',platform:activeKwPlatform,...kwQueryOpts()});activeKwGroup='江浙沪补缺';await refreshKeywords();showToast(d.message||'已导入江浙沪46词到「江浙沪补缺」分组');}catch(e){showToast('导入失败：'+e.message,true);}}
+async function kwRemarkPrompt(){
+  const r=await openInputModal({sub:'关键词备注 DIY',title:'修改选中关键词备注',valueLabel:'新备注内容',value:'默认'});
+  if(!r)return;
+  const d=await api('/api/v1/workbench/keywords','POST',{op:'update_remark',remark:r.value,...kwQueryOpts()});
+  applyKwPayload(d);showToast(d.message||'已更新备注');
+}
+function kwCopySelected(){const list=wbKeywords.filter(r=>r.checked).map(r=>r.keyword);if(!list.length){showToast('请先勾选至少一个关键词',true);return;}navigator.clipboard&&navigator.clipboard.writeText(list.join('\n'));showToast('已复制 '+list.length+' 个关键词');}
+function kwExport(){const list=wbKeywords.map(r=>`${r.group||'默认分组'},${r.keyword}`).join('\n');const a=document.createElement('a');a.href=URL.createObjectURL(new Blob(['\ufeff分组,关键词\n'+list],{type:'text/csv;charset=utf-8'}));a.download='keywords.csv';a.click();}
+function kwRunSingle(kw){$('keywordValue').value=kw;submitCollection('keyword');}
+
+// Authors CRUD & rendering
+function auQueryOpts(){
+  return {
+    filter_platform:activeAuPlatform,
+    filter_group:activeAuGroup,
+    search:$('auSearch').value||'',
+    sort_by:($('auSortBy')&&$('auSortBy').value)||'seq',
+    sort_dir:auSortDir
+  };
+}
+function renderAuthorTable(){
+  renderGroupSelect('auGroupFilter',auGroups,activeAuGroup);
+  const body=$('auTableBody');
+  if(!wbAuthors.length){body.innerHTML='<tr><td colspan="10" style="text-align:center;color:var(--muted)">当前分组暂无保存的主页作者，可在下方粘贴或点击“导入主页”。</td></tr>';return;}
+  body.innerHTML=wbAuthors.map(r=>`<tr>
+    <td><input type="checkbox" ${r.checked?'checked':''} onchange="auToggle('${esc(r.id)}',this.checked)"></td>
+    <td>${esc(r.seq)}</td>
+    <td><span class="badge ${r.platform==='xiaohongshu'?'xhs':'dy'}">${r.platform==='xiaohongshu'?'小红书':'抖音'}</span></td>
+    <td><span class="badge">${esc(r.group||'默认分组')}</span></td><td><strong>${esc(r.name)}</strong></td>
+    <td class="cell-ellipsis">${esc(r.url)}</td><td>${esc(r.fans)}</td><td>${esc(r.works_count)}</td><td>${esc(r.remark)}</td>
+    <td><button class="mini-btn" type="button" onclick="auRunSingle('${esc(r.url)}')">采集</button></td>
+  </tr>`).join('');
+}
+function applyAuPayload(d){wbAuthors=d.items||[];auGroups=d.groups||[];renderAuthorTable();}
+async function refreshAuthors(){
+  const q=new URLSearchParams({platform:activeAuPlatform,group:activeAuGroup,search:$('auSearch').value||'',sort_by:($('auSortBy')&&$('auSortBy').value)||'seq',sort_dir:auSortDir});
+  const d=await api('/api/v1/workbench/authors?'+q.toString());applyAuPayload(d);
+}
+function toggleAuSortDir(){auSortDir=auSortDir==='asc'?'desc':'asc';$('auSortDirBtn').textContent=auSortDir==='asc'?'↑ 升序':'↓ 降序';refreshAuthors();}
+async function auToggle(id,checked){const d=await api('/api/v1/workbench/authors','POST',{op:'toggle',id,checked,...auQueryOpts()});applyAuPayload(d);}
+async function auBatch(mode){const d=await api('/api/v1/workbench/authors','POST',{op:'batch_select',mode,platform:activeAuPlatform,group:activeAuGroup,...auQueryOpts()});applyAuPayload(d);}
+async function auAddFromInput(){
+  const t=$('auBatchInput').value.trim();if(!t)return;
+  const targetGroup=(activeAuGroup&&activeAuGroup!=='all')?activeAuGroup:'默认分组';
+  const d=await api('/api/v1/workbench/authors','POST',{op:'add',platform:activeAuPlatform,group:targetGroup,text:t,...auQueryOpts()});
+  applyAuPayload(d);$('auBatchInput').value='';showToast(d.message||`已添加到分组「${targetGroup}」`);
+}
+async function auImportFile(input){
+  const file=input.files&&input.files[0];if(!file)return;
+  try{
+    const text=await readTextSmart(file);
+    const stem=file.name.replace(/\.[^.]+$/,'').trim();
+    const targetGroup=(activeAuGroup&&activeAuGroup!=='all')?activeAuGroup:(stem||'导入主页');
+    const d=await api('/api/v1/workbench/authors','POST',{op:'add',platform:activeAuPlatform,group:targetGroup,text,...auQueryOpts()});
+    activeAuGroup=targetGroup;await refreshAuthors();showToast(d.message||`已导入到分组「${targetGroup}」`);
+  }catch(e){showToast('导入失败：'+e.message,true);}
+  finally{input.value='';}
+}
+async function auDeleteSelected(){const d=await api('/api/v1/workbench/authors','POST',{op:'delete',...auQueryOpts()});applyAuPayload(d);showToast(d.message||'已移除选中主页');}
+async function auMetaPrompt(){
+  const def=(activeAuGroup&&activeAuGroup!=='all')?activeAuGroup:'默认分组';
+  const r=await openInputModal({sub:'主页档案编辑',title:'修改选中主页分组与备注',valueLabel:'新分组名（留空不改）',value:def,showRemark:true,remarkLabel:'新备注（留空不改）',remarkValue:''});
+  if(!r)return;
+  const g=r.value.trim(),rm=r.remark.trim();
+  if(!g&&!rm)return;
+  const d=await api('/api/v1/workbench/authors','POST',{op:'update_meta',group:g||null,remark:rm||null,...auQueryOpts()});
+  if(g)activeAuGroup=g;
+  await refreshAuthors();showToast(d.message||'已更新分组/备注');
+}
+async function auRenameGroupPrompt(){
+  if(!auGroups||!auGroups.length){showToast('当前平台暂无可重命名的主页分组',true);return;}
+  const pre=(activeAuGroup&&activeAuGroup!=='all')?activeAuGroup:auGroups[0].name;
+  const r=await openInputModal({
+    sub:'主页分组 DIY',title:'重命名作者主页分组',
+    selectLabel:'选择要重命名的原分组',
+    options:auGroups.map(g=>({value:g.name,label:`${g.name} (${g.count||0})`})),
+    selectedValue:pre,
+    valueLabel:'重命名后的新分组名',value:pre
+  });
+  if(!r||!r.select||!r.value.trim()||r.value.trim()===r.select)return;
+  const newGrp=r.value.trim();
+  try{
+    const d=await api('/api/v1/workbench/authors','POST',{op:'rename_group',platform:activeAuPlatform,old_group:r.select,new_group:newGrp,...auQueryOpts()});
+    activeAuGroup=newGrp;await refreshAuthors();showToast(d.message);
+  }catch(e){showToast(e.message,true);}
+}
+function auRunSingle(url){$('authorUrl').value=url;submitCollection('homepage');}
+async function migrateLegacyArchive(){
+  try{
+    await kwSyncJianghu();await api('/api/v1/workbench/artworks','POST',{op:'sync_jianghu'});await Promise.all([refreshKeywords(),refreshArtworks()]);
+    showToast('旧版历史词库与作品档案已同步合并');
+  }catch(e){showToast('迁移失败：'+e.message,true);}
+}
+
+function copyAiText(text,msg){
+  if(!text)return;
+  navigator.clipboard&&navigator.clipboard.writeText(text);
+  showToast(msg||'已复制到剪贴板');
+}
+function copyAiSnippet(elId){
+  const el=$(elId);
+  if(el)copyAiText((el.textContent||'').trim(),'已复制到剪贴板，可直接粘贴给 AI');
+}
+
+// Artworks library
+async function refreshArtworks(){
+  const sortBy=($('artSortBy')&&$('artSortBy').value)||'collected_at';
+  const params=new URLSearchParams({
+    mode:activeArtView,search:$('artSearch').value||'',artwork_type:$('artTypeFilter').value||'all',
+    sort_by:sortBy,sort_dir:sortBy==='seq'?'asc':'desc',
+    include_kw:$('artIncludeKw').value||'',exclude_kw:$('artExcludeKw').value||'',
+    min_likes:$('artMinLikes').value||'0',min_favorites:($('artMinFavorites')&&$('artMinFavorites').value)||'0',min_comments:$('artMinComments').value||'0',min_images:$('artMinImages').value||'0'
+  });
+  const d=await api('/api/v1/workbench/artworks?'+params.toString());
+  wbArtworks=d.items||[];
+  $('artSummaryText').textContent=`当前 ${d.current_count||0} 条 · 历史 ${d.history_count||0} 条 · 显示 ${d.shown_count||0} 条`;
+  const body=$('artTableBody');
+  if(!wbArtworks.length){body.innerHTML='<tr><td colspan="12" style="text-align:center;color:var(--muted)">暂无符合条件的作品记录</td></tr>';return;}
+  body.innerHTML=wbArtworks.map(r=>{
+    const openPath=r.ingested_dir||r.save_path||'';
+    const stText=String(r.download_status||'已读取未下载');
+    const stCls=(stText.includes('已下载')||stText==='成功')?'ok':((stText.includes('失败')||stText.includes('验证'))?'warn':'');
+    const ingestBadge=r.ingest_status?` <span class="badge ${String(r.ingest_status).includes('已入库')?'ok':'warn'}">${esc(r.ingest_status)}</span>`:'';
+    const pubDate=String(r.publish_time||'').slice(0,10)||'—';
+    const colRaw=String(r.collected_at||'').trim();
+    const colShort=colRaw?colRaw.slice(5,16):'—';
+    const srcLabel=r.keyword||r.extract_type||'—';
+    const canDownload=r.artwork_type!=='AI任务'||!!r.url;
+    return `<tr>
+      <td><input type="checkbox" ${r.checked?'checked':''} onchange="artToggle('${esc(r.id)}',this.checked)"></td>
+      <td>${esc(r.seq)}</td>
+      <td><span class="badge">${esc(r.artwork_type)}</span></td>
+      <td class="cell-ellipsis" title="${esc(srcLabel)}">${esc(srcLabel)}</td><td>${esc(r.author)}</td>
+      <td class="cell-ellipsis" title="${esc(openPath||r.title)}">${esc(r.title)}</td>
+      <td style="white-space:nowrap;font-variant-numeric:tabular-nums">${esc(r.comments||0)} / ${esc(r.favorites||0)} / ${esc(r.likes||0)}</td>
+      <td style="white-space:nowrap">${esc(pubDate)}</td>
+      <td style="white-space:nowrap;font-variant-numeric:tabular-nums" title="${esc(colRaw||'未记录')}">${esc(colShort)}</td>
+      <td>${esc(r.image_count)}</td>
+      <td><span class="badge ${stCls}">${esc(stText)}</span>${ingestBadge}</td>
+      <td style="white-space:nowrap">${openPath?`<button class="mini-btn" type="button" data-open-dir="${esc(openPath)}">打开</button> `:''}${canDownload?`<button class="mini-btn" type="button" onclick="downloadOneArtwork('${esc(r.id)}','${esc(r.url)}',${openPath?1:0})">${openPath?'重下':'下载'}</button>`:'<span style="color:var(--muted)">—</span>'}</td>
+    </tr>`;
+  }).join('');
+}
+async function artToggle(id,checked){await api('/api/v1/workbench/artworks','POST',{op:'toggle',id,checked});refreshArtworks();}
+async function artBatch(mode){await api('/api/v1/workbench/artworks','POST',{op:'batch_select',mode});refreshArtworks();}
+async function artDeleteSelected(){await api('/api/v1/workbench/artworks','POST',{op:'delete'});refreshArtworks();}
+async function artExportCsv(){
+  const d=await api('/api/v1/workbench/artworks','POST',{op:'export_csv'});
+  const a=document.createElement('a');a.href=URL.createObjectURL(new Blob(['\ufeff'+(d.csv||'')],{type:'text/csv;charset=utf-8'}));a.download='artworks.csv';a.click();
+}
+async function downloadOneArtwork(id,url,forceRedownload){
+  if(!id&&!url)return;
+  showToast('正在直连高速下载该作品…');
+  try{
+    const res=await api('/api/v1/workbench/artworks','POST',{op:'download',ids:[String(id)],mode:activeArtView,force_redownload:!!forceRedownload,output_dir:$('outdir').value.trim()||DEFAULT_OUTPUT});
+    refreshArtworks();refreshDashboard();
+    if(res.downloaded_works>0){showToast(res.message||'下载完成');return;}
+    if(res.fallback_urls&&res.fallback_urls.length){$('input').value=res.fallback_urls.join('\n');activateNavTab('tabSingle');$('go').click();return;}
+    showToast(res.message||'未下载成功',true);
+  }catch(e){showToast('下载失败：'+e.message,true);}
+}
+async function downloadCheckedArtworks(){
+  const checkedIds=wbArtworks.filter(r=>r.checked).map(r=>String(r.id));
+  if(!checkedIds.length){showToast('请先在作品列表中勾选要下载的作品',true);return;}
+  showToast(`正在直连下载已选 ${checkedIds.length} 条作品…`);
+  try{
+    const res=await api('/api/v1/workbench/artworks','POST',{op:'download',ids:checkedIds,mode:activeArtView,output_dir:$('outdir').value.trim()||DEFAULT_OUTPUT});
+    refreshArtworks();refreshDashboard();
+    showToast(res.message||'批量下载完成',res.downloaded_works===0&&!(res.fallback_urls&&res.fallback_urls.length));
+    if(res.fallback_urls&&res.fallback_urls.length){
+      $('input').value=res.fallback_urls.join('\n');activateNavTab('tabSingle');$('go').click();
+    }
+  }catch(e){showToast('下载失败：'+e.message,true);}
+}
+async function ingestCheckedArtworks(){
+  const checkedIds=wbArtworks.filter(r=>r.checked).map(r=>String(r.id));
+  if(!checkedIds.length){showToast('请先勾选已下载的作品',true);return;}
+  showToast(`正在按本地规则分类入库已选 ${checkedIds.length} 条作品…`);
+  try{
+    const res=await api('/api/v1/workbench/artworks','POST',{op:'ingest',ids:checkedIds,mode:activeArtView});
+    refreshArtworks();refreshDashboard();
+    showToast(res.message||'入库完成');
+  }catch(e){showToast('入库失败：'+e.message,true);}
+}
+
+// Engine / Login
+async function engineAction(action,params){
+  const silent=!!(params&&params.silent);
+  const box=$('loginActionFeedback');
+  const pendingMsg='正在向底层引擎发送指令…';
+  if(!silent){
+    if(box){box.hidden=false;box.textContent=pendingMsg;}
+    showToast(pendingMsg);
+  }
+  try{
+    const res=await api('/api/v1/workbench/engine','POST',{action,params});
+    const okMsg=res.message||(res.status==='ok'?'底层指令执行完成':JSON.stringify(res));
+    if(box)box.textContent=okMsg;
+    if(!silent||(res.windows_focused&&res.windows_focused>0))showToast(okMsg);
+    setTimeout(()=>{refreshCollectionCapabilities();refreshArtworks();},900);
+    return res;
+  }catch(e){
+    const errMsg='操作提示：'+e.message;
+    if(box){box.hidden=false;box.textContent=errMsg;}
+    if(!silent)showToast(errMsg,true);
+    return null;
+  }
+}
+async function openLocalDir(pathStr){
+  try{await api('/api/v1/workbench/engine','POST',{action:'open_folder',params:{path:pathStr||$('outdir').value.trim()||DEFAULT_OUTPUT}});}
+  catch(e){showToast('打开目录失败：'+e.message,true);}
+}
+function openDownloadDir(){openLocalDir($('outdir').value.trim()||DEFAULT_OUTPUT);}
+document.addEventListener('click',e=>{
+  const btn=e.target&&e.target.closest?e.target.closest('[data-open-dir]'):null;
+  if(btn&&btn.dataset.openDir)openLocalDir(btn.dataset.openDir);
+});
+function stopKeywordCollection(){kwBatchQueueStop=true;activeKeywordRun=false;$('kwVisualBar')&&$('kwVisualBar').classList.remove('active');engineAction('stop_keyword',{});}
+$('btnBannerStartDouyin').addEventListener('click',()=>engineAction('start_engine',{platform:'douyin'}));
+$('btnBannerPopBrowser').addEventListener('click',()=>engineAction('bring_verify_browser',{platform:activeEnginePlatform}));
+$('btnBannerResume').addEventListener('click',()=>engineAction('resume_keyword',{}));
+$('btnBannerVerify').addEventListener('click',()=>activateNavTab('tabLogin'));
+$('engineStatusPill').addEventListener('click',()=>activateNavTab('tabLogin'));
+
+// Original single download & collection wiring
+const settings=()=>({
+  output_dir:$('outdir').value.trim()||DEFAULT_OUTPUT,
+  mode:$('mode').value,
+  image_format:$('format').value||'jpg',
+  title_template:($('d_title_template')&&$('d_title_template').value.trim())||'评{comments}-藏{favorites}-赞{likes}-{title}-{author}-{publish_time}',
+  set_file_time_to_publish:$('d_set_file_time_to_publish')?$('d_set_file_time_to_publish').checked:true,
+  auto_ingest_material:$('k_auto_ingest_chip')?$('k_auto_ingest_chip').checked:($('d_auto_ingest_material')?$('d_auto_ingest_material').checked:true),
+  skip_downloaded_history:$('k_skip_dup_chip')?$('k_skip_dup_chip').checked:($('d_skip_downloaded_history')?$('d_skip_downloaded_history').checked:true)
+});
+function setCollectionStatus(kind,task,err){
+  const box=$(kind+'Status');if(!box)return;
+  if(err){box.hidden=false;box.dataset.state='error';box.innerHTML=`<strong>无法开始：</strong>${esc(err)}`;return;}
+  if(!task){box.hidden=true;return;}
+  box.hidden=false;box.dataset.state=task.status||'queued';
+  box.innerHTML=`<strong>${esc(task.label||'发现任务')}：</strong>${esc(task.message||'正在处理')}`;
+}
+function updateKwKpis(kp,runningHint=false){
+  if(!kp||typeof kp!=='object')return;
+  const targetVal=kp.target!=null?kp.target:(Number($('keywordCount').value)||'全部');
+  const crawled=kp.crawled||0,qualified=kp.qualified||0,downloaded=kp.downloaded||0;
+  if($('kwKpiTarget'))$('kwKpiTarget').textContent=String(targetVal===0?'全部':targetVal);
+  if($('kwKpiCrawled'))$('kwKpiCrawled').textContent=String(crawled);
+  if($('kwKpiQualified'))$('kwKpiQualified').textContent=String(qualified);
+  if($('kwKpiDownloaded'))$('kwKpiDownloaded').textContent=String(downloaded);
+  const bar=$('kwVisualBar');if(!bar)return;
+  const activePhases=['starting','scanning','scanned','qualified','list_ready','downloading','crawling'];
+  const isActive=runningHint||activeKeywordRun||activePhases.includes(kp.phase);
+  bar.classList.toggle('active',isActive);
+  let pct=0;
+  if(kp.phase==='completed'){pct=100;}
+  else if(kp.phase==='downloading'){
+    const den=Math.max(1,Number(kp.qualified)||Number(targetVal)||1);
+    pct=Math.max(35,Math.round((downloaded/den)*100));
+  }else if(isActive){
+    const den=Math.max(1,Number(targetVal)||20);
+    pct=qualified>0?Math.min(75,Math.max(18,Math.round((qualified/den)*70))):(crawled>0?18:10);
+  }
+  bar.style.width=Math.min(100,pct)+'%';
+  if($('kwProgressSummary'))$('kwProgressSummary').textContent=kp.message||(isActive?'正在实时读取搜索页…':'等待开始采集');
+}
+async function pollCollection(kind,jobId){
+  try{
+    const t=await api('/api/v1/collections/jobs/'+encodeURIComponent(jobId));
+    setCollectionStatus(kind,t,null);refreshDashboard();
+    if(kind==='keyword'){
+      if(t.keyword_progress)updateKwKpis(t.keyword_progress,true);
+      refreshArtworks();
+    }
+    if(['completed','completed_zero','partial','cancelled','error','unknown','accepted','verification_required','login_required'].includes(t.status)){
+      if(kind==='keyword'){
+        activeKeywordRun=false;
+        const bar=$('kwVisualBar');
+        if(bar){bar.classList.remove('active');if(t.status==='completed')bar.style.width='100%';}
+        refreshKeywords();refreshArtworks();refreshDashboard();
+        showToast(t.message||'关键词采集已结束',t.status!=='completed'&&t.status!=='accepted');
+      }
+      return t;
+    }
+    await new Promise(resolve=>setTimeout(resolve,1000));
+    return await pollCollection(kind,jobId);
+  }catch(e){
+    await new Promise(resolve=>setTimeout(resolve,1500));
+    return await pollCollection(kind,jobId);
+  }
+}
+async function runSingleKeywordJob(keyword){
+  const rawCount=$('keywordCount').value;
+  const numCount=rawCount===''?20:Number(rawCount);
+  const allResults=numCount===0;
+  const mediaType=($('k_media_type')&&$('k_media_type').value)||'image';
+  const req={
+    platform:activeKwPlatform,
+    keyword,
+    count:allResults?0:Math.max(1,Math.min(500,numCount)),
+    all_results:allResults,
+    min_images:Number($('minImages').value)||0,
+    max_images:Number($('maxImages').value)||20,
+    media_type:mediaType,
+    allow_video:mediaType!=='image',
+    no_filter:false,
+    direct_download:!!($('k_direct_download')&&$('k_direct_download').checked),
+    web_sort:($('k_web_sort')&&$('k_web_sort').value)||'综合排序',
+    web_publish_time:($('k_web_publish_time')&&$('k_web_publish_time').value)||'不限',
+    ...settings()
+  };
+  activeKeywordRun=true;
+  updateKwKpis({target:allResults?'全部':req.count,crawled:0,qualified:0,downloaded:0,phase:'starting',message:`正在打开 ${activeKwPlatform==='xiaohongshu'?'小红书':'抖音'} 搜索：【${keyword}】`},true);
+  setCollectionStatus('keyword',{status:'discovering',label:`采集：${keyword}`,message:'正在连接采集内核并检索搜索列表…'},null);
+  const task=await api('/api/v1/collections/keyword','POST',req);
+  return await pollCollection('keyword',task.job_id);
+}
+async function ensureEngineOnline(platform){
+  const cap=await api('/api/v1/collections/capabilities').catch(()=>null);
+  if(cap&&cap.status==='online'&&(cap.engine_mode==='native-playwright'||cap.active_platform===platform))return true;
+  if(cap&&cap.status!=='online'){
+    const platName=platform==='xiaohongshu'?'小红书':'抖音';
+    showToast(`正在唤醒内置${platName}浏览器引擎…`);
+    await api('/api/v1/workbench/engine','POST',{action:'start_engine',params:{platform}}).catch(()=>{});
+    for(let i=0;i<30;i++){
+      await new Promise(r=>setTimeout(r,1000));
+      const next=await api('/api/v1/collections/capabilities').catch(()=>null);
+      if(next&&next.status==='online'){
+        await refreshCollectionCapabilities();
+        return true;
+      }
+    }
+    throw new Error('采集引擎未能就绪，请前往「平台登录」检查');
+  }
+  return true;
+}
+async function submitCollection(kind){
+  const btn=$(kind==='homepage'?'startHomepage':'startKeyword');
+  if(kind==='homepage'){
+    const profile_url=($('authorUrl').value||'').trim()||(wbAuthors.find(a=>a.checked)||{}).url||'';
+    if(!profile_url){setCollectionStatus(kind,null,'请填写或勾选一个作者主页链接');showToast('请先填写或勾选主页链接',true);return;}
+    btn.disabled=true;
+    setCollectionStatus(kind,{status:'queued',label:'准备引擎',message:'正在检查引擎状态并连接采集流程…'},null);
+    try{
+      await ensureEngineOnline('douyin');
+      const req={
+        profile_url,
+        max_works:Math.max(1,Math.min(50,Number(($('a_max_per_author')||{}).value)||10)),
+        min_images:Number(($('a_min_images')||{}).value)||4,
+        max_images:Number(($('a_max_images')||{}).value)||20,
+        direct_download:!!($('a_direct_download')?$('a_direct_download').checked:true),
+        ...settings()
+      };
+      showToast('已启动作者主页采集');
+      const task=await api('/api/v1/collections/homepage','POST',req);
+      await pollCollection('homepage',task.job_id);
+    }catch(e){setCollectionStatus(kind,null,e.message);showToast(e.message,true);}
+    finally{btn.disabled=false;}
+    return;
+  }
+  const typed=($('keywordValue').value||'').trim();
+  const targets=typed?[typed]:wbKeywords.filter(k=>k.checked).map(k=>k.keyword);
+  if(!targets.length){setCollectionStatus('keyword',null,'请填写关键词或在上方表格勾选至少一个关键词');showToast('请先输入或勾选至少一个关键词',true);return;}
+  $('kwLaunchCard')&&$('kwLaunchCard').scrollIntoView({behavior:'smooth',block:'nearest'});
+  kwBatchQueueStop=false;btn.disabled=true;
+  try{
+    await ensureEngineOnline(activeKwPlatform);
+    for(let idx=0;idx<targets.length;idx++){
+      if(kwBatchQueueStop)break;
+      const kw=targets[idx];
+      const prefix=targets.length>1?`批量队列 ${idx+1}/${targets.length} · `:'';
+      showToast(`${prefix}已启动采集：【${kw}】`);
+      const finalTask=await runSingleKeywordJob(kw);
+      if(finalTask&&['verification_required','login_required','cancelled'].includes(finalTask.status))break;
+    }
+  }catch(e){
+    activeKeywordRun=false;$('kwVisualBar')&&$('kwVisualBar').classList.remove('active');
+    setCollectionStatus('keyword',null,e.message);showToast('采集未能启动：'+e.message,true);
+  }finally{
+    activeKeywordRun=false;btn.disabled=false;updateStartKeywordLabel();
+  }
+}
+$('startHomepage').addEventListener('click',()=>submitCollection('homepage'));
+$('startKeyword').addEventListener('click',()=>submitCollection('keyword'));
+
+async function submitSingleViaEngine(overrideText){
+  const raw=(overrideText||$('input').value||'').trim();
+  const match=raw.match(/https?:\/\/[^\s<>"']+/i);
+  const url=match?match[0].replace(/[),.;!?，。；！？]+$/,''):'';
+  if(!url){showToast('请先输入有效作品链接',true);$('input').focus();return;}
+  $('stateDot').className='state-dot running';
+  $('statusSub').textContent='直连遇到风控或登录限制，正自动切内置 Edge 深度提取…';
+  $('progressBar').classList.add('active');$('progressBar').style.width='45%';
+  try{
+    const res=await api('/api/v1/workbench/engine','POST',{
+      action:'extract_single',
+      params:{
+        platform:activeSinglePlatform,
+        url,
+        direct_download:true,
+        wait_seconds:45
+      }
+    });
+    $('progressBar').classList.remove('active');
+    const ok=res.success!==false&&res.status!=='error';
+    $('progressBar').style.width=ok?'100%':'0%';
+    $('stateDot').className='state-dot '+(ok?'done':'error');
+    const msg=res.message||(ok?'内置 Edge 单作品提取已完成':'提取未完成');
+    $('statusSub').textContent=msg;
+    const resEl=$('results');resEl.classList.add('show');
+    resEl.innerHTML=`<div class="result ${ok?'ok':'fail'}" style="display:flex;justify-content:space-between;align-items:center;gap:8px"><div style="min-width:0;flex:1"><strong>${esc(res.title||url)}</strong><div style="color:var(--muted);font-size:11px;margin-top:2px">${esc(msg)}</div></div>${res.save_dir?`<button class="mini-btn" type="button" data-open-dir="${esc(res.save_dir)}">打开</button>`:''}</div>`;
+    showToast(msg,!ok);
+    refreshArtworks();refreshDashboard();
+  }catch(e){
+    $('progressBar').classList.remove('active');$('progressBar').style.width='0%';
+    $('stateDot').className='state-dot error';$('statusSub').textContent=e.message;
+    showToast('单作品提取失败：'+e.message,true);
+  }
+}
+
+$('go').addEventListener('click',async()=>{
+  const text=$('input').value.trim();if(!text){$('input').focus();return;}
+  $('go').disabled=true;$('go').textContent='解析下载中…';
+  $('results').innerHTML='';$('results').classList.remove('show');
+  $('progressBar').classList.add('active');$('stateDot').className='state-dot running';
+  $('statusSub').textContent='正在直连高速解析并下载…';jobStartedAt=Date.now();
+  try{
+    const d=await api('/api/jobs','POST',{text,...settings()});
+    activeJob=d.job_id;if(pollTimer)clearTimeout(pollTimer);pollJob(d.job_id,text);
+  }catch(e){
+    $('go').disabled=false;$('go').textContent='立即解析并下载';
+    $('progressBar').classList.remove('active');$('stateDot').className='state-dot error';$('statusSub').textContent=e.message;
+  }
+});
+
+async function pollJob(id,origText){
+  try{
+    const j=await api('/api/jobs/'+id);
+    const total=Math.max(1,j.total||1),done=j.done||0;
+    $('progressBar').style.width=Math.max(8,Math.round((done/total)*100))+'%';
+    $('progressText').textContent=done+' / '+(j.total||0);
+    $('successText').textContent='成功 '+(j.success||0)+(j.skipped?' · 跳过 '+j.skipped:'');
+    const resEl=$('results');
+    if(j.items&&j.items.length){
+      resEl.classList.add('show');
+      resEl.innerHTML=j.items.map(it=>`<div class="result ${it.success?'ok':'fail'}" style="display:flex;justify-content:space-between;align-items:center;gap:8px"><div style="min-width:0;flex:1"><strong>${esc(it.title||it.note_id||'作品')}</strong><div style="color:var(--muted);font-size:11px;margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(it.save_dir||it.error||(it.deduplicated?'本地已存在':'完成'))}</div></div>${it.save_dir?`<button class="mini-btn" type="button" data-open-dir="${esc(it.save_dir)}">打开</button>`:''}</div>`).join('');
+    }
+    if(j.status==='completed'||j.status==='error'){
+      const needFallback=(j.status==='error'||(j.total===1&&(j.success||0)===0&&!(j.items&&j.items[0]&&j.items[0].deduplicated)))&&origText&&/douyin\.com|xiaohongshu\.com|xhslink\.com/i.test(origText);
+      const wait=Math.max(0,MIN_PROGRESS_MS-(Date.now()-jobStartedAt));
+      setTimeout(async()=>{
+        if(needFallback){
+          await submitSingleViaEngine(origText);
+          $('go').disabled=false;$('go').textContent='立即解析并下载';
+          return;
+        }
+        $('go').disabled=false;$('go').textContent='立即解析并下载';
+        $('progressBar').classList.remove('active');
+        $('progressBar').style.width=j.status==='completed'?'100%':'0%';
+        $('stateDot').className='state-dot '+(j.status==='completed'?'done':'error');
+        $('statusSub').textContent=j.status==='completed'?'本次任务已完成':(j.error||'执行出错');
+        refreshDashboard();refreshArtworks();
+      },wait);
+      return;
+    }
+    pollTimer=setTimeout(()=>pollJob(id,origText),500);
+  }catch(_){pollTimer=setTimeout(()=>pollJob(id,origText),900);}
+}
+
+async function refreshCollectionCapabilities(){
+  try{
+    const d=await api('/api/v1/collections/capabilities');
+    const pill=$('engineStatusPill'),txt=$('engineStatusText'),banner=$('globalEngineAlert');
+    const online=d.status==='online';
+    activeEnginePlatform=d.active_platform||'douyin';
+    pill.dataset.online=online?'true':'false';
+    pill.dataset.verify=d.verification_required?'true':'false';
+    if($('btnBannerStartDouyin'))$('btnBannerStartDouyin').hidden=online;
+    if($('btnBannerPopBrowser'))$('btnBannerPopBrowser').hidden=!d.verification_required;
+    if($('btnBannerResume'))$('btnBannerResume').hidden=!d.verification_required;
+    if(!online){
+      lastVerifyKey='';
+      txt.textContent='底层引擎离线';banner.classList.add('show');
+      $('alertTitle').textContent='江湖原生会话引擎离线';
+      $('alertBody').textContent='公开链接可直接在本页高速下载；若需抖音/小红书搜索列表与主页发现，可点右侧“启动抖音引擎”静默拉起。';
+    }else if(d.verification_required){
+      txt.textContent='等待人机验证';banner.classList.add('show');
+      $('alertTitle').textContent='平台触发人机验证（需要人工辅助）';
+      $('alertBody').textContent='已自动尝试弹出并置顶验证浏览器；请完成滑块/扫码后点击右侧“已完成验证，继续采集”。';
+      const vKey=(d.keyword_progress&&(d.keyword_progress.job_id||d.keyword_progress.keyword))||'verify';
+      if(vKey!==lastVerifyKey){
+        lastVerifyKey=vKey;
+        showToast('触发人机验证：正在弹出并置顶验证浏览器窗口，请人工完成验证',true);
+        engineAction('bring_verify_browser',{platform:activeEnginePlatform,silent:true});
+      }
+    }else{
+      lastVerifyKey='';
+      txt.textContent=d.engine_mode==='native-playwright'?'内置双核引擎就绪':((activeEnginePlatform==='xiaohongshu'?'小红书':'抖音')+'引擎在线');banner.classList.remove('show');
+    }
+    const chLabel=d.browser_channel==='chrome'?'Chrome':(d.browser_channel==='chromium'?'Chromium':'Edge');
+    const kwMsg=online?(d.verification_required?'内置浏览器等待人机验证。':(d.engine_mode==='native-playwright'?`内置 ${chLabel} 持久化引擎在线（自动适配 Edge / Chrome / Chromium · 抖音 / 小红书随时开采），采集后自动下载入库。`:`底层引擎在线（${activeEnginePlatform==='xiaohongshu'?'小红书':'抖音'}），采集作品将自动送入统一下载队列。`)):'底层引擎离线（公开单链接仍可直接使用）。';
+    $('keywordCapability').textContent=kwMsg;$('homepageCapability').textContent=kwMsg;
+    const kp=d.keyword_progress;
+    const isStaleVerifyKp=kp&&(kp.phase==='verification'||kp.status==='verification_required')&&!d.verification_required;
+    if(kp&&typeof kp==='object'&&!isStaleVerifyKp){
+      updateKwKpis(kp,d.busy===true);
+      const counter=`${kp.qualified||0}:${kp.downloaded||0}:${kp.crawled||0}`;
+      if(lastKwCounter&&counter!==lastKwCounter)refreshArtworks();
+      lastKwCounter=counter;
+    }else if(!activeKeywordRun&&$('kwKpiTarget')){
+      const c=Number($('keywordCount').value);
+      $('kwKpiTarget').textContent=c===0?'全部':String(c||20);
+    }
+  }catch(_){}
+}
+
+const SOURCE_ZH={'downloader-history':'历史',clipboard:'剪贴板',web:'工作台',keyword:'关键词',homepage:'主页',api:'接口',ai:'AI'};
+const STATUS_ZH={completed:'已完成',running:'进行中',queued:'排队中',pending:'等待中',error:'失败',accepted:'已受理'};
+function renderTaskList(el,rows,emptyText){
+  if(!rows||!rows.length){el.innerHTML=`<div class="panel-sub">${esc(emptyText)}</div>`;return;}
+  el.innerHTML=rows.slice(0,30).map(r=>{
+    const src=SOURCE_ZH[r.source]||r.source||'';
+    const st=STATUS_ZH[r.status]||r.status||'';
+    const tag=[src,st].filter(Boolean).join(' · ');
+    const openBtn=r.save_dir?`<button class="mini-btn" type="button" data-open-dir="${esc(r.save_dir)}">打开</button>`:'';
+    return `<div class="task-row"><div class="task-main"><span class="task-title">${esc(r.title||r.note_id||r.job_id||'任务')}</span><span class="task-meta">${esc(r.completed_at||r.url||r.save_dir||st||'')}</span></div><div style="display:flex;align-items:center;gap:6px">${openBtn}<span class="badge ${r.status==='completed'?'ok':(r.status==='error'?'bad':'')}">${esc(tag)}</span></div></div>`;
+  }).join('');
+}
+
+async function refreshDashboard(){
+  try{
+    const d=await api('/api/v1/jobs?limit=40&history_offset=0');
+    const c=d.collector||{};
+    collectorEnabled=!!c.enabled;collectorOnline=!!c.online;
+    const tog=$('collectorToggle');
+    tog.setAttribute('aria-checked',collectorEnabled?'true':'false');
+    $('collectorToggleText').textContent=collectorOnline?(collectorEnabled?'剪贴板采集 开':'剪贴板采集 关'):(collectorEnabled?'启动剪贴板开':'剪贴板 离线');
+    const waitNum=(d.counts&&d.counts.waiting)||0;
+    if($('waitingCount'))$('waitingCount').textContent=waitNum;
+    if($('queueDrawer')&&waitNum>0)$('queueDrawer').open=true;
+    if($('queueList'))renderTaskList($('queueList'),[...(d.waiting||[]),...(d.queue||[])],'暂无排队或剪贴板待处理任务');
+  }catch(_){}
+}
+
+$('collectorToggle').addEventListener('click',async()=>{
+  try{await api('/api/v1/collector','POST',{enabled:!collectorEnabled});refreshDashboard();}catch(e){showToast(e.message,true);}
+});
+
+(async function initWorkbench(){
+  const qs=new URLSearchParams(window.location.search||'');
+  const qTheme=qs.get('theme'),qTab=qs.get('tab');
+  const tabMap={single:'tabSingle',keyword:'tabKeyword',homepage:'tabHomepage',artworks:'tabArtworks',tasks:'tabArtworks',login:'tabLogin',settings:'tabSettings'};
+  if(qTheme&&THEME_MODES.includes(qTheme))applyTheme(qTheme,false);
+  try{const s=await api('/api/v1/workbench/settings');bindSettingFields(s);}catch(_){}
+  if(qTheme&&THEME_MODES.includes(qTheme))applyTheme(qTheme,false);
+  if(qTab&&tabMap[qTab]){activateNavTab(tabMap[qTab]);}
+  else{
+    let savedTab='';
+    try{savedTab=localStorage.getItem('xhs-dl-active-tab')||'';}catch(_){}
+    activateNavTab(savedTab&&$(savedTab)?savedTab:'tabKeyword');
+  }
+  $('keywordValue')&&$('keywordValue').addEventListener('input',updateStartKeywordLabel);
+  function triggerAutoSave(){if(autoSaveTimer)clearTimeout(autoSaveTimer);autoSaveTimer=setTimeout(()=>saveAllWorkbenchSettings(false),400);}
+  ['keywordCount','minImages','maxImages','k_media_type','k_web_sort','k_web_publish_time','k_direct_download','a_direct_download','a_max_per_author','a_min_images','a_max_images'].forEach(id=>{
+    const el=$(id);
+    if(el)el.addEventListener('change',()=>{
+      if(id==='keywordCount'&&!activeKeywordRun&&$('kwKpiTarget')){$('kwKpiTarget').textContent=Number(el.value)===0?'全部':String(Number(el.value)||20);}
+      if(id==='k_media_type')syncMediaTypeUi();
+      triggerAutoSave();
+    });
+  });
+  $('k_auto_ingest_chip')&&$('k_auto_ingest_chip').addEventListener('change',()=>{
+    if($('d_auto_ingest_material'))$('d_auto_ingest_material').checked=$('k_auto_ingest_chip').checked;
+    if($('q_auto_ingest'))$('q_auto_ingest').checked=$('k_auto_ingest_chip').checked;
+    triggerAutoSave();
+  });
+  $('d_auto_ingest_material')&&$('d_auto_ingest_material').addEventListener('change',()=>{
+    if($('k_auto_ingest_chip'))$('k_auto_ingest_chip').checked=$('d_auto_ingest_material').checked;
+    if($('q_auto_ingest'))$('q_auto_ingest').checked=$('d_auto_ingest_material').checked;
+  });
+  $('k_skip_dup_chip')&&$('k_skip_dup_chip').addEventListener('change',()=>{
+    if($('d_skip_downloaded_history'))$('d_skip_downloaded_history').checked=$('k_skip_dup_chip').checked;
+    triggerAutoSave();
+  });
+  $('d_skip_downloaded_history')&&$('d_skip_downloaded_history').addEventListener('change',()=>{
+    if($('k_skip_dup_chip'))$('k_skip_dup_chip').checked=$('d_skip_downloaded_history').checked;
+  });
+  document.querySelectorAll('#settingsPanel input,#settingsPanel select').forEach(el=>el.addEventListener('change',triggerAutoSave));
+  const bindEnter=(id,fn)=>{const el=$(id);if(el)el.addEventListener('keydown',e=>{if(e.key==='Enter'){e.preventDefault();fn();}});};
+  bindEnter('keywordValue',()=>submitCollection('keyword'));
+  bindEnter('kwBatchInput',()=>kwAddFromInput());
+  bindEnter('authorUrl',()=>submitCollection('homepage'));
+  bindEnter('auBatchInput',()=>auAddFromInput());
+  ['artIncludeKw','artExcludeKw','artMinLikes','artMinFavorites','artMinComments','artMinImages'].forEach(id=>bindEnter(id,()=>refreshArtworks()));
+  await Promise.allSettled([refreshKeywords(),refreshAuthors(),refreshArtworks(),refreshDashboard(),refreshCollectionCapabilities()]);
+  setInterval(refreshDashboard,2500);
+  setInterval(refreshCollectionCapabilities,2500);
+})();
+</script>
+</body>
+</html>
+"""

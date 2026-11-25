@@ -134,7 +134,7 @@ def _url_identity(url):
         if match:
             return "xhs-id:" + match.group(1).lower()
         return "xhs-url:" + path
-    if host in {"douyin.com", "www.douyin.com"}:
+    if host in {"douyin.com", "www.douyin.com", "iesdouyin.com", "www.iesdouyin.com"}:
         match = re.search(r"/(?:video|note)/(\d+)", path)
         if match:
             return "douyin-id:" + match.group(1)
@@ -159,6 +159,8 @@ def _record_keys(item):
     if identity:
         keys.add(identity)
         if identity.startswith("xhs-id:"):
+            keys.add("id:" + identity.split(":", 1)[1])
+        elif identity.startswith("douyin-id:"):
             keys.add("id:" + identity.split(":", 1)[1])
     return keys
 

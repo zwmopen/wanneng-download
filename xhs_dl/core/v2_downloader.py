@@ -17,7 +17,7 @@ from typing import Callable, List, Optional, Tuple
 
 from .downloader import DELAY_MODES, extract_urls_from_text
 from .models import DownloadResult, NoteResult
-from .media_names import convert_image_file, media_filename, media_sort_key
+from .media_names import convert_image_file, media_filename, media_sort_key, normalize_stat_count
 from xhs_dl.storage import add_history, download_claim
 
 logger = logging.getLogger(__name__)
@@ -271,8 +271,8 @@ class LocalCliEngine:
     def _rename_note_folder(cls, note_dir: Path, files: List[Path], metadata: dict):
         if not metadata:
             return note_dir, files
-        comments = cls._safe_name(metadata.get("评论数量") or "未知", 16)
-        likes = cls._safe_name(metadata.get("点赞数量") or "未知", 16)
+        comments = normalize_stat_count(metadata.get("评论数量"), limit=16)
+        likes = normalize_stat_count(metadata.get("点赞数量"), limit=16)
         title = cls._safe_name(metadata.get("作品标题") or "未命名笔记")
         author = cls._safe_name(metadata.get("作者昵称") or "未知作者", 32)
         desired = note_dir.parent / f"评{comments}-赞{likes}-{title}-{author}"
@@ -300,8 +300,8 @@ class LocalCliEngine:
 
     @classmethod
     def _expected_note_dir(cls, output_dir: Path, metadata: dict) -> Path:
-        comments = cls._safe_name(metadata.get("评论数量") or "未知", 16)
-        likes = cls._safe_name(metadata.get("点赞数量") or "未知", 16)
+        comments = normalize_stat_count(metadata.get("评论数量"), limit=16)
+        likes = normalize_stat_count(metadata.get("点赞数量"), limit=16)
         title = cls._safe_name(metadata.get("作品标题") or "未命名笔记")
         author = cls._safe_name(metadata.get("作者昵称") or "未知作者", 32)
         return output_dir / f"评{comments}-赞{likes}-{title}-{author}"
