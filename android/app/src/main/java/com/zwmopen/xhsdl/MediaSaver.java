@@ -16,6 +16,7 @@ import java.io.InputStream;
 import java.io.OutputStream;
 import java.net.HttpURLConnection;
 import java.net.URL;
+import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
 import java.util.Locale;
 
@@ -28,8 +29,12 @@ public final class MediaSaver {
     }
 
     public int save(NoteData note, String rootFolder, String treeUri, String imageFormat, Progress progress) throws IOException {
+        return save(note, rootFolder, treeUri, imageFormat, "", progress);
+    }
+
+    public int save(NoteData note, String rootFolder, String treeUri, String imageFormat, String proxyWorkerUrl, Progress progress) throws IOException {
         if (treeUri != null && !treeUri.trim().isEmpty()) {
-            return saveToTree(note, Uri.parse(treeUri), imageFormat, progress);
+            return saveToTree(note, Uri.parse(treeUri), imageFormat, proxyWorkerUrl, progress);
         }
         String relative = Environment.DIRECTORY_DOWNLOADS + "/" + cleanFolder(rootFolder) + "/" + note.folderName() + "/";
         int completed = 0;
@@ -38,7 +43,7 @@ public final class MediaSaver {
             String fileName = note.mediaFileName(i, item, imageFormat);
             String mime = outputMime(item, imageFormat);
             if (!exists(fileName, relative)) {
-                writeFromNetwork(item.url, fileName, mime, relative, note.referer, imageFormat, item.mimeType);
+                writeFromNetwork(item.url, fileName, mime, relative, note.referer, imageFormat, item.mimeType, proxyWorkerUrl);
             }
             completed++;
             if (progress != null) progress.onMedia(completed, note.media.size());
@@ -47,7 +52,7 @@ public final class MediaSaver {
         return completed;
     }
 
-    private int saveToTree(NoteData note, Uri treeUri, String imageFormat, Progress progress) throws IOException {
+    private int saveToTree(NoteData note, Uri treeUri, String imageFormat, String proxyWorkerUrl, Progress progress) throws IOException {
         Uri root = DocumentsContract.buildDocumentUriUsingTree(
                 treeUri, DocumentsContract.getTreeDocumentId(treeUri));
         Uri noteDirectory = findOrCreateDirectory(root, note.folderName());
@@ -59,7 +64,7 @@ public final class MediaSaver {
                 Uri destination = DocumentsContract.createDocument(
                         context.getContentResolver(), noteDirectory, outputMime(item, imageFormat), fileName);
                 if (destination == null) throw new IOException("无法在所选目录创建媒体文件");
-                writeTreeNetwork(item.url, destination, note.referer, imageFormat, item.mimeType);
+                writeTreeNetwork(item.url, destination, note.referer, imageFormat, item.mimeType, proxyWorkerUrl);
             }
             completed++;
             if (progress != null) progress.onMedia(completed, note.media.size());
@@ -106,7 +111,7 @@ public final class MediaSaver {
         return null;
     }
 
-    private void writeTreeNetwork(String source, Uri destination, String referer, String imageFormat, String originalMime) throws IOException {
+    private static HttpURLConnection openMediaConnection(String source, String referer, String proxyWorkerUrl) throws IOException {
         HttpURLConnection connection = (HttpURLConnection) new URL(source).openConnection();
         connection.setConnectTimeout(20000);
         connection.setReadTimeout(60000);
@@ -114,7 +119,29 @@ public final class MediaSaver {
         connection.setRequestProperty("Referer", referer);
         connection.connect();
         int status = connection.getResponseCode();
-        if (status < 200 || status >= 400) throw new IOException("媒体下载失败：HTTP " + status);
+        if (status == 403 && proxyWorkerUrl != null && !proxyWorkerUrl.trim().isEmpty()) {
+            connection.disconnect();
+            String base = proxyWorkerUrl.trim();
+            String sep = base.contains("?") ? "&" : "?";
+            String proxyType = (referer != null && referer.contains("weibo")) ? "weibo" : "douyin";
+            String proxied = base + sep + "proxyurl=" + URLEncoder.encode(source, "UTF-8")
+                    + "&type=" + proxyType + "&download=true";
+            connection = (HttpURLConnection) new URL(proxied).openConnection();
+            connection.setConnectTimeout(25000);
+            connection.setReadTimeout(60000);
+            connection.setRequestProperty("User-Agent", USER_AGENT);
+            connection.connect();
+            status = connection.getResponseCode();
+        }
+        if (status < 200 || status >= 400) {
+            connection.disconnect();
+            throw new IOException("媒体下载失败：HTTP " + status);
+        }
+        return connection;
+    }
+
+    private void writeTreeNetwork(String source, Uri destination, String referer, String imageFormat, String originalMime, String proxyWorkerUrl) throws IOException {
+        HttpURLConnection connection = openMediaConnection(source, referer, proxyWorkerUrl);
         validateMediaResponse(connection);
         try (InputStream input = connection.getInputStream();
              OutputStream output = context.getContentResolver().openOutputStream(destination, "w")) {
@@ -129,15 +156,8 @@ public final class MediaSaver {
         }
     }
 
-    private void writeFromNetwork(String source, String name, String mime, String relative, String referer, String imageFormat, String originalMime) throws IOException {
-        HttpURLConnection connection = (HttpURLConnection) new URL(source).openConnection();
-        connection.setConnectTimeout(20000);
-        connection.setReadTimeout(60000);
-        connection.setRequestProperty("User-Agent", USER_AGENT);
-        connection.setRequestProperty("Referer", referer);
-        connection.connect();
-        int status = connection.getResponseCode();
-        if (status < 200 || status >= 400) throw new IOException("媒体下载失败：HTTP " + status);
+    private void writeFromNetwork(String source, String name, String mime, String relative, String referer, String imageFormat, String originalMime, String proxyWorkerUrl) throws IOException {
+        HttpURLConnection connection = openMediaConnection(source, referer, proxyWorkerUrl);
         validateMediaResponse(connection);
         Uri destination = create(name, mime, relative);
         try (InputStream input = connection.getInputStream();

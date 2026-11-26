@@ -41,6 +41,10 @@ final class MainViewController: UIViewController, WKScriptMessageHandler, WKNavi
         emit("folder", payload: ["name": DownloadStore.shared.currentFolderName])
         emit("version", payload: ["value": versionText])
         emit("format", payload: ["value": UserDefaults.standard.string(forKey: "imageFormat") ?? "jpg"])
+        emit("cloudFallback", payload: [
+            "douyinWorker": UserDefaults.standard.string(forKey: "cfDouyinWorkerURL") ?? "",
+            "proxyWorker": UserDefaults.standard.string(forKey: "cfProxyWorkerURL") ?? ""
+        ])
         runCabledDiagnosticsIfRequested()
     }
 
@@ -67,8 +71,14 @@ final class MainViewController: UIViewController, WKScriptMessageHandler, WKNavi
             emit("format", payload: ["value": selected])
         case "checkUpdate":
             checkUpdate()
+        case "saveCloudFallback":
+            let douyinWorker = (body["douyinWorker"] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            let proxyWorker = (body["proxyWorker"] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            UserDefaults.standard.set(douyinWorker, forKey: "cfDouyinWorkerURL")
+            UserDefaults.standard.set(proxyWorker, forKey: "cfProxyWorkerURL")
+            emit("cloudFallback", payload: ["douyinWorker": douyinWorker, "proxyWorker": proxyWorker, "saved": true])
         case "openProject":
-            if let url = URL(string: "https://github.com/zwmopen/xhs-dl") { UIApplication.shared.openURL(url) }
+            if let url = URL(string: "https://github.com/zwmopen/wanneng-download") { UIApplication.shared.openURL(url) }
         default:
             break
         }
@@ -150,6 +160,8 @@ final class MainViewController: UIViewController, WKScriptMessageHandler, WKNavi
             parser.fetch(url, in: view, completion: handleResult)
         case .xiaohongshu:
             XhsParser().fetch(url, completion: handleResult)
+        case .cnVideo(let subplatform):
+            CnShortVideoParser().fetch(url, subplatform: subplatform, completion: handleResult)
         case .none:
             handleResult(nil, AppFailure.invalidURL)
         }

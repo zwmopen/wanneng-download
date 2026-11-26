@@ -15,10 +15,40 @@ struct NoteData {
     let likes: String
     let topics: [String]
     let media: [MediaItem]
+    let customReferer: String?
+
+    init(
+        sourceURL: URL,
+        noteID: String,
+        title: String,
+        body: String,
+        author: String,
+        comments: String,
+        likes: String,
+        topics: [String],
+        media: [MediaItem],
+        customReferer: String? = nil
+    ) {
+        self.sourceURL = sourceURL
+        self.noteID = noteID
+        self.title = title
+        self.body = body
+        self.author = author
+        self.comments = comments
+        self.likes = likes
+        self.topics = topics
+        self.media = media
+        self.customReferer = customReferer
+    }
 
     var referer: String {
+        if let customReferer = customReferer, !customReferer.isEmpty {
+            return customReferer
+        }
         let host = sourceURL.host?.lowercased() ?? ""
-        return host.contains("douyin.com") ? "https://www.douyin.com/" : "https://www.xiaohongshu.com/"
+        return (host.contains("douyin.com") || host.contains("iesdouyin.com"))
+            ? "https://www.douyin.com/"
+            : "https://www.xiaohongshu.com/"
     }
 
     var folderName: String {

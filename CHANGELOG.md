@@ -8,6 +8,9 @@
   - 新增支持快手、微博视频、今日头条、豆包 AI 视频、即梦 AI 视频、皮皮虾、皮皮搞笑、最右，统一落盘格式、文案输出与历史去重。
 - **桌面壳白屏修复（`desktop_shell/UniversalCollectorShell.cs`, `app.py`）**：
   - 过滤 `about:blank` 预加载触发的 `NavigationCompleted`，仅在真正加载 `http://127.0.0.1:5678/` 成功后再隐藏启动遮罩，失败时提供清晰提示与重试按钮；`code_stamp` 同步覆盖 `xhs_dl/core/*.py`。
+- **手机端同步升级（Android V1.4.0 · iOS V0.4.0）与 Cloudflare Workers 云端兜底（`cloudflare_workers/`）**：
+  - Android & iOS 同步接入抖音免 Cookie 原画秒解（三层链路：本地直解 → Cloudflare Worker 兜底 → 内置 WebView 兜底）、8 大国内与 AI 视频平台解析、403 防盗链 Worker 自动转发重试及设置页可配置入口。
+  - 新增 `cloudflare_workers/`（`wanneng-douyin-api` + 带域白名单的 `wanneng-media-proxy`）及 `deploy.cmd` 一键部署脚本；桌面端同步支持 `CF_SV_PROXY_URL` 403 自动转发兜底。
 - **界面重构与减法瘦身（`ui_template.py`, `toolbox_store.py`）**：
   - 全屏自适应布局吃满视口高度；左侧导航底部收敛唯一「打开作品保存目录」入口；单作品页移除多余平台切换按钮，展示全部支持平台徽章并支持整段带废话分享文本自动提取。
   - 解锁主页采集的 **小红书** 平台入口；排队抽屉默认折叠且全面替换为可读中文任务标题，消灭 32 位哈希乱码；作品列表拆清「来源」列与「关键词 / 采集方式」列，默认隐藏纯调度空壳行并严谨区分 `0` 与未返回字段。

@@ -11,7 +11,7 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 public final class UpdateChecker {
-    private static final String RELEASES = "https://api.github.com/repos/zwmopen/xhs-dl/releases?per_page=20";
+    private static final String RELEASES = "https://api.github.com/repos/zwmopen/wanneng-download/releases?per_page=20";
     private static final Pattern ANDROID_ASSET = Pattern.compile("android-v(\\d+(?:\\.\\d+)+)\\.apk$", Pattern.CASE_INSENSITIVE);
 
     private UpdateChecker() {}

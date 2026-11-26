@@ -50,12 +50,12 @@ jobs:
           rm -rf package
           mkdir -p package/Payload
           ditto "$app_path" "package/Payload/RedSweetPotatoDownload.app"
-          (cd package && /usr/bin/zip -qry ../universal-downloader-ios-v0.3.2-altstore.ipa Payload)
+          (cd package && /usr/bin/zip -qry ../universal-downloader-ios-v0.4.0-altstore.ipa Payload)
           python3 - <<'PY'
           import plistlib
           import zipfile
 
-          ipa = "universal-downloader-ios-v0.3.2-altstore.ipa"
+          ipa = "universal-downloader-ios-v0.4.0-altstore.ipa"
           with zipfile.ZipFile(ipa) as archive:
               names = archive.namelist()
               assert "Payload/RedSweetPotatoDownload.app/RedSweetPotatoDownload" in names
@@ -65,15 +65,15 @@ jobs:
               assert info["CFBundleExecutable"] == "RedSweetPotatoDownload"
               assert info["CFBundleDisplayName"] == "万能下载器"
               assert info["CFBundleIdentifier"] == "com.zwmopen.redsweetpotatodownload"
-              assert info["CFBundleShortVersionString"] == "0.3.2"
+              assert info["CFBundleShortVersionString"] == "0.4.0"
               assert info["MinimumOSVersion"] == "12.0"
           print("IPA structure verified")
           PY
-          shasum -a 256 universal-downloader-ios-v0.3.2-altstore.ipa > universal-downloader-ios-v0.3.2-altstore.ipa.sha256
+          shasum -a 256 universal-downloader-ios-v0.4.0-altstore.ipa > universal-downloader-ios-v0.4.0-altstore.ipa.sha256
       - name: Upload unsigned IPA
         uses: actions/upload-artifact@v4
         with:
-          name: universal-downloader-ios-v0.3.2-altstore
+          name: universal-downloader-ios-v0.4.0-altstore
           path: |
-            ios/universal-downloader-ios-v0.3.2-altstore.ipa
-            ios/universal-downloader-ios-v0.3.2-altstore.ipa.sha256
+            ios/universal-downloader-ios-v0.4.0-altstore.ipa
+            ios/universal-downloader-ios-v0.4.0-altstore.ipa.sha256

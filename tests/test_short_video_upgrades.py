@@ -227,3 +227,48 @@ def test_desktop_shell_filters_about_blank_and_watches_core_dir():
     assert "_navigatedToApp" in cs
     assert "args.IsSuccess" in cs
     assert 'Path.Combine(_projectRoot, "xhs_dl", "core")' in cs
+
+
+def test_cloudflare_workers_and_desktop_403_proxy_fallback(monkeypatch, tmp_path):
+    from xhs_dl.core.cn_short_video_downloader import CnMediaItem, CnShortVideoEngine
+
+    root = Path(__file__).resolve().parents[1]
+    assert (root / "cloudflare_workers" / "douyin-parser" / "workers.js").is_file()
+    assert (root / "cloudflare_workers" / "media-proxy" / "worker.js").is_file()
+    assert (root / "cloudflare_workers" / "deploy.cmd").is_file()
+
+    monkeypatch.setenv("CF_SV_PROXY_URL", "https://proxy.example.workers.dev")
+    seen_urls = []
+
+    class FakeResp:
+        def __init__(self, status_code, content=b""):
+            self.status_code = status_code
+            self._content = content
+            self.headers = {"Content-Type": "video/mp4"}
+
+        def raise_for_status(self):
+            if self.status_code >= 400:
+                raise RuntimeError(f"HTTP {self.status_code}")
+
+        def iter_content(self, chunk_size=131072):
+            yield self._content
+
+        def close(self):
+            pass
+
+    def fake_get(url, **kwargs):
+        seen_urls.append(url)
+        if "proxy.example.workers.dev" in url:
+            return FakeResp(200, b"\x00" * 300)
+        return FakeResp(403)
+
+    monkeypatch.setattr("xhs_dl.core.cn_short_video_downloader.requests.get", fake_get)
+    dest = tmp_path / "video.mp4"
+    out = CnShortVideoEngine()._download_media(
+        CnMediaItem(url="https://cdn.example/video.mp4", kind="video", extension="mp4", referer="https://weibo.com/"),
+        dest,
+    )
+    assert out.is_file()
+    assert len(seen_urls) == 2
+    assert "proxy.example.workers.dev" in seen_urls[1]
+    assert "type=weibo" in seen_urls[1]

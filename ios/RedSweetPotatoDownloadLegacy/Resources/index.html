@@ -57,14 +57,14 @@
   <div class="orb one"></div><div class="orb two"></div>
   <main class="app">
     <header>
-      <div class="mark">薯</div>
-      <div><h1>万能下载器</h1><div class="subtitle">当前支持小红书 / 抖音 · 原始媒体直存 · 无需登录</div></div>
+      <div class="mark">∞</div>
+      <div><h1>万能下载器</h1><div class="subtitle">小红书 / 抖音原画 / 快手 / 微博 / 豆包 / 即梦 · 无需登录</div></div>
       <button class="iconbtn" onclick="showSettings()" aria-label="设置">⚙︎</button>
     </header>
 
     <section class="card">
       <div class="row between"><div class="eyebrow">粘贴分享内容</div><span class="detected" id="detected">等待链接</span></div>
-      <textarea id="input" placeholder="把小红书或抖音分享文字、链接粘贴到这里……" oninput="detect()"></textarea>
+      <textarea id="input" placeholder="直接粘贴整段分享文案或链接：支持小红书、抖音原画秒解、快手、微博、今日头条、豆包 AI、即梦 AI、皮皮虾/最右……" oninput="detect()"></textarea>
       <div class="actions">
         <button class="button soft" onclick="send('paste')">只粘贴</button>
         <button class="button" onclick="send('pasteAndCollect')">粘贴并采集</button>
@@ -113,6 +113,17 @@
       </div>
 
       <div class="section">
+        <h3>云端兜底与 403 转发（Cloudflare Workers）</h3>
+        <p>可选填写个人 Cloudflare Workers 地址：本机直连失败或遇到 403 防盗链时自动切入云端兜底。</p>
+        <div class="stack">
+          <input id="cfDouyinWorker" type="url" placeholder="抖音解析 Worker：https://wanneng-douyin-api.xxx.workers.dev" style="width:100%;padding:11px;border-radius:12px;border:1px solid rgba(81,113,126,.22);background:rgba(255,255,255,.7);font:13px -apple-system;color:var(--ink)">
+          <input id="cfProxyWorker" type="url" placeholder="403 转发 Worker：https://wanneng-media-proxy.xxx.workers.dev" style="width:100%;padding:11px;border-radius:12px;border:1px solid rgba(81,113,126,.22);background:rgba(255,255,255,.7);font:13px -apple-system;color:var(--ink)">
+          <button class="button" onclick="saveCloudFallback()">保存云端兜底配置</button>
+          <div class="update" id="cloudSaved"></div>
+        </div>
+      </div>
+
+      <div class="section">
         <h3>检测更新</h3><p>只检查官方 GitHub 发布页，不会静默安装。</p>
         <button class="button" onclick="send('checkUpdate')">检测更新</button>
         <div class="update" id="update"></div>
@@ -151,11 +162,22 @@
     function backdrop(e){if(e.target.id==='settings')hideSettings();}
     function theme(name){ document.body.className=name==='glass'?'glass':''; localStorage.theme=name; document.getElementById('neo').className=name==='neo'?'active':'';document.getElementById('glass').className=name==='glass'?'active':''; }
     function format(name){ send('setImageFormat',{value:name}); ['jpg','png','keep'].forEach(function(x){document.getElementById(x).className=x===name?'active':'';}); }
+    function saveCloudFallback(){
+      send('saveCloudFallback',{
+        douyinWorker:document.getElementById('cfDouyinWorker').value||'',
+        proxyWorker:document.getElementById('cfProxyWorker').value||''
+      });
+    }
     window.nativeEvent=function(name,p){
       if(name==='input'){document.getElementById('input').value=p.text||'';detect();}
       if(name==='folder'){document.getElementById('folder').textContent=p.name;}
       if(name==='version'){document.getElementById('version').textContent=p.value;}
       if(name==='format'){['jpg','png','keep'].forEach(function(x){document.getElementById(x).className=x===(p.value||'jpg')?'active':'';});}
+      if(name==='cloudFallback'){
+        document.getElementById('cfDouyinWorker').value=p.douyinWorker||'';
+        document.getElementById('cfProxyWorker').value=p.proxyWorker||'';
+        if(p.saved){document.getElementById('cloudSaved').textContent='已保存云端兜底配置';}
+      }
       if(name==='running'){document.getElementById('collect').disabled=!!p.value;document.getElementById('collect').textContent=p.value?'采集中…':'开始采集';}
       if(name==='status'){document.getElementById('statusTitle').textContent=p.title||'';document.getElementById('statusDetail').textContent=p.detail||'';document.getElementById('bar').style.width=((p.progress||0)*100)+'%';document.getElementById('results').textContent=(p.results||[]).join('\n');}
       if(name==='update'){document.getElementById('update').textContent=p.message||'';}

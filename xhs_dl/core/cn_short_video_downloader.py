@@ -559,6 +559,20 @@ class CnShortVideoEngine:
             media=[CnMediaItem(url=video_url, kind="video", extension="mp4", referer="https://jimeng.jianying.com/")],
         )
 
+    @staticmethod
+    def _cf_proxy_url() -> str:
+        env_url = os.environ.get("CF_SV_PROXY_URL", "").strip()
+        if env_url:
+            return env_url
+        try:
+            hub_file = Path.home() / ".xhs-dl" / "workbench_hub.json"
+            if hub_file.is_file():
+                data = json.loads(hub_file.read_text(encoding="utf-8"))
+                return str(((data.get("settings") or {}).get("software") or {}).get("cf_proxy_worker_url") or "").strip()
+        except Exception:
+            pass
+        return ""
+
     # ---------- 统一下载与落盘 ----------
     def _download_media(self, item: CnMediaItem, destination: Path) -> Path:
         partial = destination.with_name(destination.name + ".part")
@@ -575,6 +589,20 @@ class CnShortVideoEngine:
                 stream=True,
                 proxies=self._proxies(),
             )
+            if getattr(resp, "status_code", None) == 403:
+                proxy_base = self._cf_proxy_url()
+                if proxy_base:
+                    resp.close()
+                    sep = "&" if "?" in proxy_base else "?"
+                    proxy_type = "weibo" if "weibo" in (item.referer or "") else "douyin"
+                    proxied = f"{proxy_base}{sep}proxyurl={urlencode({'u': item.url})[2:]}&type={proxy_type}&download=true"
+                    resp = requests.get(
+                        proxied,
+                        headers={"User-Agent": DESKTOP_UA},
+                        timeout=(15, max(30, self.timeout)),
+                        stream=True,
+                        proxies=self._proxies(),
+                    )
             resp.raise_for_status()
             ctype = resp.headers.get("Content-Type", "").lower()
             if ctype.startswith(("text/html", "application/json")):

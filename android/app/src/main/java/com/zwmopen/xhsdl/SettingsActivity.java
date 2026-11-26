@@ -51,6 +51,8 @@ public final class SettingsActivity extends Activity {
     private Spinner formatSpinner;
     private EditText defaultFolder;
     private Switch automaticUpdates;
+    private EditText cfDouyinWorkerInput;
+    private EditText cfProxyWorkerInput;
     private TextView customFolderLabel;
     private Button updateButton;
 
@@ -139,7 +141,31 @@ public final class SettingsActivity extends Activity {
         save.setOnClickListener(v -> saveSettings());
         storage.addView(save, top(14));
 
-        LinearLayout about = section("关于万能下载器", "当前手机端支持小红书 / 抖音公开作品；不要求账号，不读取浏览器 Cookie，也不把链接交给第三方解析站。", root);
+        LinearLayout cloud = section("云端兜底与 403 转发（Cloudflare Workers）", "可选配置个人 Cloudflare Workers 地址：本机直连失败或遇到 403 防盗链时自动切入云端兜底。", root);
+        cloud.addView(label("抖音云端解析 Worker 地址（可选）", 13, text, true), top(10));
+        cfDouyinWorkerInput = new EditText(this);
+        cfDouyinWorkerInput.setText(preferences.getString("cf_douyin_worker_url", ""));
+        cfDouyinWorkerInput.setHint("https://wanneng-douyin-api.<你的子域>.workers.dev");
+        cfDouyinWorkerInput.setTextColor(text);
+        cfDouyinWorkerInput.setHintTextColor(muted);
+        cfDouyinWorkerInput.setPadding(dp(14), dp(11), dp(14), dp(11));
+        cfDouyinWorkerInput.setBackground(round(soft, 13, accent, 1));
+        cloud.addView(cfDouyinWorkerInput, top(6));
+
+        cloud.addView(label("403 防盗链转发 Worker 地址（可选）", 13, text, true), top(12));
+        cfProxyWorkerInput = new EditText(this);
+        cfProxyWorkerInput.setText(preferences.getString("cf_proxy_worker_url", ""));
+        cfProxyWorkerInput.setHint("https://wanneng-media-proxy.<你的子域>.workers.dev");
+        cfProxyWorkerInput.setTextColor(text);
+        cfProxyWorkerInput.setHintTextColor(muted);
+        cfProxyWorkerInput.setPadding(dp(14), dp(11), dp(14), dp(11));
+        cfProxyWorkerInput.setBackground(round(soft, 13, accent, 1));
+        cloud.addView(cfProxyWorkerInput, top(6));
+        Button saveCloud = primaryButton("保存设置");
+        saveCloud.setOnClickListener(v -> saveSettings());
+        cloud.addView(saveCloud, top(14));
+
+        LinearLayout about = section("关于万能下载器", "当前手机端支持小红书 / 抖音原画秒解 / 快手 / 微博 / 今日头条 / 豆包 AI / 即梦 AI / 皮皮虾 / 最右；不要求账号，也不读取浏览器 Cookie。", root);
         about.addView(infoRow("设计思路", "内容清楚、操作克制；默认拟态悬浮，备用克制玻璃；下载结果与历史留在你的设备。"), top(12));
         Button guide = secondaryButton("使用说明与安全边界");
         guide.setOnClickListener(v -> showGuide());
@@ -148,7 +174,7 @@ public final class SettingsActivity extends Activity {
         updateButton.setOnClickListener(v -> checkUpdate());
         about.addView(updateButton, top(10));
         Button repository = quietButton("打开项目与历史版本");
-        repository.setOnClickListener(v -> openUrl("https://github.com/zwmopen/xhs-dl"));
+        repository.setOnClickListener(v -> openUrl("https://github.com/zwmopen/wanneng-download"));
         about.addView(repository, top(8));
 
         TextView footer = label("设置只保存在本机 · 不做云同步", 11, muted, false);
@@ -227,11 +253,15 @@ public final class SettingsActivity extends Activity {
 
     private void saveSettings() {
         String folder = defaultFolder.getText().toString().trim();
+        String cfDouyin = cfDouyinWorkerInput != null ? cfDouyinWorkerInput.getText().toString().trim() : "";
+        String cfProxy = cfProxyWorkerInput != null ? cfProxyWorkerInput.getText().toString().trim() : "";
         preferences.edit()
                 .putString("mode", MODE_VALUES[modeSpinner.getSelectedItemPosition()])
                 .putString("image_format", FORMAT_VALUES[formatSpinner.getSelectedItemPosition()])
                 .putString("folder", folder.isEmpty() ? "万能下载器" : folder)
                 .putBoolean("auto_update", automaticUpdates.isChecked())
+                .putString("cf_douyin_worker_url", cfDouyin)
+                .putString("cf_proxy_worker_url", cfProxy)
                 .apply();
         customFolderLabel.setText(folderSummary());
         Toast.makeText(this, "设置已保存", Toast.LENGTH_SHORT).show();

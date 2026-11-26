@@ -594,24 +594,46 @@ class DouyinBrowserEngine:
             raise RuntimeError("抖音公开页面已打开，但没有取得当前作品媒体；请稍后重试。")
         return payload
 
+    @staticmethod
+    def _cf_proxy_url():
+        env_url = os.environ.get("CF_SV_PROXY_URL", "").strip()
+        if env_url:
+            return env_url
+        try:
+            hub_file = Path.home() / ".xhs-dl" / "workbench_hub.json"
+            if hub_file.is_file():
+                data = json.loads(hub_file.read_text(encoding="utf-8"))
+                return str(((data.get("settings") or {}).get("software") or {}).get("cf_proxy_worker_url") or "").strip()
+        except Exception:
+            pass
+        return ""
+
     def _download_media(self, media, destination):
         destination = Path(destination)
         partial = destination.with_name(destination.name + ".part")
         response = None
         size = 0
         try:
+            req_headers = {
+                "User-Agent": (
+                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                    "AppleWebKit/537.36 Chrome/134.0.0.0 Safari/537.36"
+                ),
+                "Referer": "https://www.douyin.com/",
+            }
             response = requests.get(
                 media.url,
                 timeout=(20, 75),
                 stream=True,
-                headers={
-                    "User-Agent": (
-                        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-                        "AppleWebKit/537.36 Chrome/134.0.0.0 Safari/537.36"
-                    ),
-                    "Referer": "https://www.douyin.com/",
-                },
+                headers=req_headers,
             )
+            if getattr(response, "status_code", None) == 403:
+                proxy_base = self._cf_proxy_url()
+                if proxy_base:
+                    response.close()
+                    sep = "&" if "?" in proxy_base else "?"
+                    proxied = f"{proxy_base}{sep}proxyurl={urlencode({'u': media.url})[2:]}&type=douyin&download=true"
+                    response = requests.get(proxied, timeout=(20, 75), stream=True, headers={"User-Agent": req_headers["User-Agent"]})
             response.raise_for_status()
             content_type = response.headers.get("Content-Type", "").lower()
             if content_type.startswith(("text/", "application/json")):

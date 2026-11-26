@@ -69,6 +69,21 @@ final class DownloadStore {
     ) {
         guard index < media.count else { completion(nil); return }
         let item = media[index]
+        downloadItem(media[index], index: index, media: media, folder: folder, referer: referer, note: note, imageFormat: imageFormat, viaProxy: false, progress: progress, completion: completion)
+    }
+
+    private func downloadItem(
+        _ item: MediaItem,
+        index: Int,
+        media: [MediaItem],
+        folder: URL,
+        referer: String,
+        note: NoteData,
+        imageFormat: String,
+        viaProxy: Bool,
+        progress: @escaping (Int, Int) -> Void,
+        completion: @escaping (Error?) -> Void
+    ) {
         let destination = folder.appendingPathComponent(
             note.mediaFileName(index: index, item: item, imageFormat: imageFormat)
         )
@@ -77,11 +92,31 @@ final class DownloadStore {
             download(media, index: index + 1, folder: folder, referer: referer, note: note, imageFormat: imageFormat, progress: progress, completion: completion)
             return
         }
-        var request = URLRequest(url: item.url, timeoutInterval: 75)
+        var requestURL = item.url
+        if viaProxy {
+            let proxyBase = (UserDefaults.standard.string(forKey: "cfProxyWorkerURL") ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            let sep = proxyBase.contains("?") ? "&" : "?"
+            let proxyType = referer.contains("weibo") ? "weibo" : "douyin"
+            let enc = item.url.absoluteString.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? ""
+            guard !proxyBase.isEmpty, let proxied = URL(string: "\(proxyBase)\(sep)proxyurl=\(enc)&type=\(proxyType)&download=true") else {
+                completion(URLError(.badServerResponse)); return
+            }
+            requestURL = proxied
+        }
+        var request = URLRequest(url: requestURL, timeoutInterval: 75)
         request.setValue("Mozilla/5.0 (iPhone; CPU iPhone OS 12_5 like Mac OS X)", forHTTPHeaderField: "User-Agent")
-        request.setValue(referer, forHTTPHeaderField: "Referer")
+        if !viaProxy {
+            request.setValue(referer, forHTTPHeaderField: "Referer")
+        }
         URLSession.shared.downloadTask(with: request) { temporaryURL, response, error in
             if let error = error { completion(error); return }
+            if let http = response as? HTTPURLResponse, http.statusCode == 403, !viaProxy {
+                let proxyBase = (UserDefaults.standard.string(forKey: "cfProxyWorkerURL") ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+                if !proxyBase.isEmpty {
+                    self.downloadItem(item, index: index, media: media, folder: folder, referer: referer, note: note, imageFormat: imageFormat, viaProxy: true, progress: progress, completion: completion)
+                    return
+                }
+            }
             if let http = response as? HTTPURLResponse, !(200..<400).contains(http.statusCode) {
                 completion(URLError(.badServerResponse)); return
             }

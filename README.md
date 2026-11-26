@@ -124,9 +124,10 @@ copy config.example.json config\config.json
 
 | 端 | 目录 / 版本 | 能力范围 | 说明 |
 |---|---|---|---|
-| **Windows 桌面 & Web & CLI** | **v4.1.0** | Patchright 反检测、双平台接口直听、小红书多图实况与主页、12+ 公开平台下载、剪贴板守护、硬链接归档、飞书通知、AI API | 正式可用 |
-| **Android** | `android/` (V1.3.2) | 小红书、抖音分享解析与公开下载、拟态/玻璃双主题 | 可用源码 & APK 构建配置 |
-| **iOS** | `ios/` (V0.3.2) | 小红书、抖音公开下载、兼容 iOS 12+ / Files 目录 | 未签名源码（含 GitHub macOS CI 配置） |
+| **Windows 桌面 & Web & CLI** | **v4.2.0** | Patchright 反检测、抖音免 Cookie 原画秒解、8 大国内/AI 视频平台、双平台接口直听、小红书实况与主页、12+ 公开平台、剪贴板守护、硬链接归档、飞书通知、AI API | 正式可用 |
+| **Android** | `android/` (V1.4.0) | 小红书、抖音原画秒解、快手/微博/头条/豆包/即梦等 8 大平台 + Cloudflare Workers 云端兜底/403 转发 | 可用源码 & Release APK |
+| **iOS** | `ios/` (V0.4.0) | 小红书、抖音原画秒解、8 大国内/AI 平台 + Cloudflare Workers 云端兜底/403 转发、兼容 iOS 12+ | 未签名源码（含 GitHub macOS CI 配置） |
+| **Cloudflare Workers** | `cloudflare_workers/` | 抖音免 Cookie 云端解析（`wanneng-douyin-api`）+ 403 防盗链流式转发（`wanneng-media-proxy`），一键 `deploy.cmd` 部署 | 手机端/公网免费兜底 |
 | **AI Skill** | `skills/universal-downloader` | 供 Codex / Claude / Antigravity / OpenClaw 自动调用的标准化技能包 | 正式可用 |
 
 ---

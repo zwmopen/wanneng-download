@@ -121,7 +121,7 @@ public final class MainActivity extends Activity {
         TextView title = text("万能下载器", 30, TEXT, true);
         title.setTypeface(Typeface.create("serif", Typeface.NORMAL));
         brand.addView(title);
-        brand.addView(text("小红书 / 抖音 · 手机直存 · 无需登录", 12, MUTED, false));
+        brand.addView(text("小红书 / 抖音原画秒解 / 快手 / 微博 / 豆包 / 即梦 · 手机直存", 12, MUTED, false));
         header.addView(brand, new LinearLayout.LayoutParams(0, -2, 1));
         String theme = preferences.getString("theme", "neo");
         Button themeButton = secondaryButton("neo".equals(theme) ? "克制玻璃" : "拟态悬浮");
@@ -142,7 +142,7 @@ public final class MainActivity extends Activity {
         input.setTextSize(15);
         input.setTextColor(TEXT);
         input.setHintTextColor(MUTED);
-        input.setHint("把小红书或抖音分享内容粘贴到这里……");
+        input.setHint("直接粘贴任意分享文案或链接：支持小红书、抖音原画、快手、微博、今日头条、豆包 AI、即梦 AI、皮皮虾/最右……");
         input.setGravity(Gravity.TOP | Gravity.START);
         input.setPadding(dp(16), dp(15), dp(16), dp(15));
         input.setMinHeight(dp(176));
@@ -262,18 +262,25 @@ public final class MainActivity extends Activity {
         HistoryStore history = new HistoryStore(this);
         String rootFolder = preferences.getString("folder", "万能下载器");
         String treeUri = preferences.getString("download_tree_uri", "");
+        String cfDouyinUrl = preferences.getString("cf_douyin_worker_url", "");
+        String cfProxyUrl = preferences.getString("cf_proxy_worker_url", "");
         for (int i = 0; i < urls.size(); i++) {
             int index = i;
             String url = urls.get(i);
             try {
                 postStatus("正在解析第 " + (i + 1) + " 条", url, percent(i, urls.size()));
                 NoteData note;
-                if ("douyin".equals(PlatformRouter.detect(url))) {
-                    note = new DouyinParser().fetch(this, url);
-                } else {
+                String platform = PlatformRouter.detect(url);
+                if ("douyin".equals(platform)) {
+                    note = new DouyinParser().fetch(this, url, cfDouyinUrl);
+                } else if ("cn_video".equals(platform)) {
+                    note = new CnShortVideoParser().fetch(url);
+                } else if ("xhs".equals(platform)) {
                     note = new XhsParser().fetch(url);
+                } else {
+                    throw new IllegalArgumentException("暂不支持该平台链接：" + url);
                 }
-                saver.save(note, rootFolder, treeUri, preferences.getString("image_format", "jpg"), (done, total) ->
+                saver.save(note, rootFolder, treeUri, preferences.getString("image_format", "jpg"), cfProxyUrl, (done, total) ->
                         postStatus("正在保存 · " + note.title,
                                 "媒体 " + done + " / " + total, percent(index, urls.size())));
                 history.add(note);

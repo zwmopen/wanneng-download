@@ -3,7 +3,7 @@ import Foundation
 final class UpdateChecker {
     func check(completion: @escaping (String?, URL?, Error?) -> Void) {
         let current = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "0.1.0"
-        guard let url = URL(string: "https://api.github.com/repos/zwmopen/xhs-dl/releases?per_page=20") else {
+        guard let url = URL(string: "https://api.github.com/repos/zwmopen/wanneng-download/releases?per_page=20") else {
             completion(nil, nil, AppFailure.invalidURL); return
         }
         var request = URLRequest(url: url, timeoutInterval: 12)
