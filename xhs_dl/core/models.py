@@ -27,6 +27,8 @@ class NoteResult:
     engine: str = ""
     media_format: str = ""
     deduplicated: bool = False
+    failure_stage: str = ""
+    http_status: int = 0
 
 
 @dataclass
@@ -34,6 +36,7 @@ class DownloadResult:
     """批量下载结果"""
     results: List[NoteResult] = field(default_factory=list)
     output_dir: str = ""
+    pause_reason: str = ""
 
     @property
     def success_count(self) -> int:

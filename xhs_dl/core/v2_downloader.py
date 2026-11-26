@@ -216,6 +216,8 @@ class LocalCliEngine:
                 note_id=note_id,
                 error=detail or f"本地引擎未生成媒体文件（退出码 {completed.returncode}）",
                 engine="local-cli",
+                failure_stage="media_write" if metadata else "note_detail",
+                http_status=self._http_status(detail),
             )
 
         note_dirs = [p.parent for p in selected_files]
@@ -337,12 +339,26 @@ class LocalCliEngine:
         return renamed
 
     @staticmethod
+    def _http_status(text: str) -> int:
+        match = re.search(r"(?i)\b(?:HTTP(?:/[0-9.]+)?\s+(?:error\s+)?|status(?:[ _]code)?\s*[:=]?\s*)([45]\d{2})\b", text)
+        return int(match.group(1)) if match else 0
+
+    @staticmethod
     def _last_useful_line(text: str) -> str:
         lines = [
             line.strip()
             for line in text.splitlines()
             if line.strip() and not line.strip().startswith(METADATA_MARKER)
         ]
+        # HTTP diagnostics precede the generic “获取数据失败” summary.
+        for line in reversed(lines):
+            clean = re.sub(r"""https?://[^\s"'<>]+""", "[作品链接]", line)
+            if LocalCliEngine._http_status(clean) or (
+                ("网络异常" in clean or "请求失败" in clean)
+                and re.search(r"(?i)timeout|timed out|connection|dns|超时|连接", clean)
+            ):
+                return clean[:300]
+        lines = [re.sub(r"""https?://[^\s"'<>]+""", "[作品链接]", line) for line in lines]
         # The CLI prints a generic aggregate summary after its per-item error.
         # Prefer the actual failed item so the bridge/UI can explain the cause.
         for line in reversed(lines):

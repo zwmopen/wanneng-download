@@ -69,6 +69,19 @@ def classify_failure(error):
     return "unknown"
 
 
+def blocking_failure_kind(error, http_status=0):
+    """Stop when the platform explicitly limits or requires access verification."""
+    message = str(error or "").lower()
+    if http_status == 429 or classify_failure(message) == "throttle":
+        return "rate_limit"
+    if http_status in {401, 403, 461, 471} or any(marker in message for marker in (
+        "login required", "captcha", "verification required", "需要登录", "跳转登录",
+        "验证码", "安全验证", "请完成验证", "访问受限",
+    )):
+        return "access_required"
+    return ""
+
+
 def _retry_after_seconds(error):
     message = str(error or "")
     match = re.search(r"(?im)^\s*retry[-_ ]after\s*[:=]\s*(.+?)\s*$", message)

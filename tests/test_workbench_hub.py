@@ -1608,3 +1608,66 @@ def test_web_queue_updates_existing_workbench_download_status(monkeypatch, tmp_p
     assert row["download_status"] == "已下载 1 张图"
     assert row["image_count"] == 1
     assert row["likes"] == 7 and row["author"] == "作者"
+
+
+def test_xhs_cli_keeps_http_failure_and_removes_original_link():
+    from xhs_dl.core.v2_downloader import LocalCliEngine
+
+    error = LocalCliEngine._last_useful_line(
+        "网络异常，https://www.xiaohongshu.com/explore/689ea05d000000001c034d78?xsec_token=example "
+        "请求失败: HTTP Error 429\n689ea05d000000001c034d78 获取数据失败"
+    )
+    assert LocalCliEngine._http_status(error) == 429
+    assert "xsec_token" not in error
+
+
+def test_web_pause_and_recovery_keep_work_ids_without_share_parameters(monkeypatch, tmp_path):
+    from xhs_dl.core.models import DownloadResult, NoteResult
+    from xhs_dl.core.unified_downloader import UnifiedDownloader
+
+    monkeypatch.setenv("XHS_DL_WORKBENCH_FILE", str(tmp_path / "workbench.json"))
+    monkeypatch.setenv("XHS_DL_AUTO_SYNC_JIANGHU", "0")
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path))
+    monkeypatch.setattr(web_app, "WEB_HISTORY_FILE", tmp_path / "history.json")
+    monkeypatch.setattr(web_app, "WEB_HISTORY", [])
+    first_id = "111111111111111111111111"
+    next_id = "222222222222222222222222"
+    first = f"https://www.xiaohongshu.com/explore/{first_id}?xsec_token=example"
+    following = f"https://www.xiaohongshu.com/explore/{next_id}?xsec_token=example"
+    toolbox_store.record_discovered_artworks(
+        [{"id": first_id, "url": first}, {"id": next_id, "url": following}],
+        platform="xiaohongshu",
+    )
+    calls = []
+
+    class RateLimited:
+        def download_one(self, url, output_dir):
+            calls.append(url)
+            return NoteResult(url=url, error="HTTP 429", http_status=429, failure_stage="note_detail")
+
+    result = UnifiedDownloader(output_dir=str(tmp_path), engines={"xhs": RateLimited()},
+                               adaptive=True, pause_on_barrier=True).download([first, following])
+    assert calls == [first] and result.pause_reason == "rate_limit"
+
+    class Download:
+        def __init__(self, on_progress, **kwargs):
+            self.on_progress = on_progress
+
+        def download(self, urls):
+            self.on_progress(result.results[0], 1, 2)
+            return DownloadResult(results=result.results, output_dir=str(tmp_path), pause_reason=result.pause_reason)
+
+    monkeypatch.setattr(web_app, "UnifiedDownloader", Download)
+    job_id, queued_id = "a" * 32, "b" * 32
+    monkeypatch.setattr(web_app, "JOBS", {
+        job_id: {"job_id": job_id, "status": "queued", "items": [], "total": 2,
+                 "targets": [web_app._download_work_ref(first), web_app._download_work_ref(following)]},
+        queued_id: {"job_id": queued_id, "status": "queued", "items": [], "total": 1,
+                    "targets": [web_app._download_work_ref(following)]},
+    })
+    web_app._run_job(job_id, [first, following], str(tmp_path), (0, 0), "jpg")
+    assert web_app.JOBS[job_id]["status"] == web_app.JOBS[queued_id]["status"] == "paused"
+    summary = next(row for row in web_app.WEB_HISTORY if row["job_id"] == job_id)
+    assert "xsec_token" not in (tmp_path / "history.json").read_text(encoding="utf-8")
+    assert web_app._retry_workbench_urls(summary, "failed") == [first]
+    assert web_app._retry_workbench_urls(summary, "remaining") == [following]

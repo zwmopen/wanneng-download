@@ -7,7 +7,7 @@ from pathlib import Path
 from .douyin_downloader import DouyinBrowserEngine
 from .generic_downloader import YtDlpEngine
 from .models import DownloadResult, NoteResult
-from .pacing import AdaptiveRetryPolicy
+from .pacing import AdaptiveRetryPolicy, blocking_failure_kind
 from .platforms import detect_platform
 from xhs_dl.storage import download_claim
 from .v2_downloader import LocalCliEngine
@@ -25,6 +25,7 @@ class UnifiedDownloader:
         max_images=15,
         engines=None,
         adaptive=False,
+        pause_on_barrier=False,
     ):
         self.output_dir = output_dir
         self.delay = delay
@@ -37,6 +38,7 @@ class UnifiedDownloader:
         self._owned_engines = []
         self._reuse_browser = False
         self.adaptive = bool(adaptive)
+        self.pause_on_barrier = pause_on_barrier
         self.retry_policy = AdaptiveRetryPolicy()
 
     def _engine(self, platform):
@@ -94,6 +96,7 @@ class UnifiedDownloader:
         result = DownloadResult(output_dir=str(root.resolve()))
         try:
             for index, url in enumerate(unique, 1):
+                barrier = ""
                 platform = detect_platform(url)
                 with download_claim(url) as existing:
                     if existing:
@@ -116,8 +119,11 @@ class UnifiedDownloader:
                                     item = engine.download_one(url, root)
                                 except Exception as exc:
                                     item = NoteResult(url=url, error=str(exc), engine=platform)
+                                if self.pause_on_barrier and not item.success:
+                                    barrier = blocking_failure_kind(item.error, item.http_status)
                                 if (
-                                    not self.adaptive
+                                    barrier
+                                    or not self.adaptive
                                     or item.success
                                     or not self.retry_policy.should_retry(
                                         item.error, retries_done=retries_done
@@ -131,6 +137,9 @@ class UnifiedDownloader:
                 result.results.append(item)
                 if self.on_progress:
                     self.on_progress(item, index, len(unique))
+                if barrier:
+                    result.pause_reason = barrier
+                    break
                 if index < len(unique) and not item.deduplicated:
                     if self.adaptive:
                         time.sleep(

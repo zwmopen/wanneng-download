@@ -28,6 +28,8 @@ except ImportError:  # pragma: no cover - package launch from an alternate cwd
     from collector_paths import load_json_config, resolve_paths
 
 from xhs_dl.core.downloader import DELAY_MODES, extract_urls_from_text
+from xhs_dl.core.pacing import blocking_failure_kind, classify_failure
+from xhs_dl.core.platforms import detect_platform
 from xhs_dl import __version__
 from xhs_dl.branding import APP_NAME
 from xhs_dl.core.unified_downloader import UnifiedDownloader
@@ -442,6 +444,7 @@ def _queue_collection_links(task, links):
             "mode": mode,
             "image_format": image_format,
             "source": task.get("kind", "collection"),
+            "targets": [_download_work_ref(url) for url in clean_links],
             "collection_task_id": task.get("job_id"),
         }
     threading.Thread(
@@ -947,12 +950,53 @@ toolbox_store.set_native_resume_callback(_resume_native_paused_job)
 
 
 
+def _download_work_ref(url):
+    """Persist the work identifier, never temporary share parameters."""
+    try:
+        parsed = urlsplit(url)
+        platform = detect_platform(url)
+    except ValueError:
+        return None
+    if parsed.scheme not in {"http", "https"} or parsed.username is not None or parsed.password is not None:
+        return None
+    path = parsed.path.rstrip("/")
+    note_id = path.rsplit("/", 1)[-1].lower()
+    if platform == "xhs" and re.fullmatch(r"[0-9a-f]{24}", note_id) and path.startswith(("/explore/", "/discovery/item/", "/user/profile/")):
+        return {"platform": "xiaohongshu", "id": note_id}
+    if platform == "douyin" and re.fullmatch(r"[0-9]{8,}", note_id) and path.startswith(("/note/", "/video/")):
+        return {"platform": "douyin", "id": note_id}
+    return None
+
+
+def _retry_workbench_urls(job, scope):
+    if scope == "remaining":
+        refs = job.get("pending_refs") or []
+    else:
+        refs = [item.get("work_ref") for item in job.get("items", [])
+                if not item.get("success") and not item.get("deduplicated")]
+    if not any(refs):
+        return []
+    state = toolbox_store.load_state(TOOLBOX_BRIDGE_DIR)
+    urls = {}
+    for row in state["artworks"]:
+        link = row.get("url") or ""
+        ref = _download_work_ref(link)
+        if ref and ref["platform"] == row.get("platform") and ref["id"] == str(row.get("id")):
+            urls[(ref["platform"], ref["id"])] = link
+    return [urls[key] for key in dict.fromkeys((ref["platform"], ref["id"]) for ref in refs if ref) if key in urls]
+
+
 def _item_payload(item):
+    error = re.sub(r"""https?://[^\s"'<>]+""", "[作品链接]", item.error)
     return {
         "success": item.success,
         "deduplicated": item.deduplicated,
         "title": item.title,
-        "error": item.error,
+        "error": error,
+        "failure_kind": (blocking_failure_kind(error, item.http_status) or classify_failure(error)) if error else "",
+        "failure_stage": item.failure_stage,
+        "http_status": item.http_status,
+        "work_ref": _download_work_ref(item.url),
         "image_count": item.image_count,
         "image_success": item.image_success,
         "save_dir": item.save_dir,
@@ -961,8 +1005,9 @@ def _item_payload(item):
     }
 
 
-def _job_summary(job):
-    """Return the small, safe shape used by the queue and history panels."""
+def _job_summary(job, *, include_all_items=False):
+    """Keep full identifiers in history and limit the live dashboard preview."""
+    items = job.get("items") or []
     return {
         "job_id": job.get("job_id", ""),
         "status": job.get("status", ""),
@@ -976,17 +1021,11 @@ def _job_summary(job):
         "output_dir": job.get("output_dir", ""),
         "error": job.get("error", ""),
         "workbench_sync_error": job.get("workbench_sync_error", ""),
-        "items": [
-            {
-                "success": item.get("success", False),
-                "deduplicated": item.get("deduplicated", False),
-                "title": item.get("title", ""),
-                "error": item.get("error", ""),
-                "image_success": item.get("image_success", 0),
-            }
-            for item in (job.get("items") or [])[-8:]
-            if isinstance(item, dict)
-        ],
+        "pause_reason": job.get("pause_reason", ""),
+        "pending_refs": job.get("pending_refs") or [],
+        "mode": job.get("mode", "auto"),
+        "image_format": job.get("image_format", "jpg"),
+        "items": [item for item in (items if include_all_items else items[-8:]) if isinstance(item, dict)],
     }
 
 
@@ -1279,7 +1318,7 @@ def _dashboard_payload(limit=50, history_offset=0):
         if job.get("status") == "running"
     ]
     with WEB_HISTORY_LOCK:
-        web_history = copy.deepcopy(list(reversed(WEB_HISTORY[-limit:])))
+        web_history = [_job_summary(job) for job in reversed(WEB_HISTORY[-limit:])]
 
     collector = _collector_snapshot()
     downloads, download_count = _download_history(limit, history_offset)
@@ -1449,13 +1488,13 @@ def _openapi_document():
                 "AcceptedJob": {
                     "type": "object",
                     "required": ["job_id", "status", "total"],
-                    "properties": {"job_id": {"type": "string"}, "status": {"type": "string", "enum": ["queued", "running", "completed", "error"]}, "total": {"type": "integer", "minimum": 0}, "deduplicated": {"type": "boolean"}},
+                    "properties": {"job_id": {"type": "string"}, "status": {"type": "string", "enum": ["queued", "running", "completed", "error", "paused"]}, "total": {"type": "integer", "minimum": 0}, "deduplicated": {"type": "boolean"}},
                 },
                 "JobStatus": {
                     "type": "object",
                     "required": ["job_id", "status", "total"],
                     "properties": {
-                        "job_id": {"type": "string"}, "status": {"type": "string", "enum": ["queued", "running", "completed", "error"]},
+                        "job_id": {"type": "string"}, "status": {"type": "string", "enum": ["queued", "running", "completed", "error", "paused"]},
                         "created_at": {"type": "number"}, "finished_at": {"type": "number"}, "total": {"type": "integer", "minimum": 0},
                         "done": {"type": "integer", "minimum": 0}, "success": {"type": "integer", "minimum": 0}, "failed": {"type": "integer", "minimum": 0}, "skipped": {"type": "integer", "minimum": 0},
                         "items": {"type": "array", "items": {"type": "object", "properties": {"success": {"type": "boolean"}, "deduplicated": {"type": "boolean"}, "note_id": {"type": "string"}, "title": {"type": "string"}, "error": {"type": "string"}, "save_dir": {"type": "string"}, "image_success": {"type": "integer"}}, "additionalProperties": True}}, "error": {"type": "string"}, "output_dir": {"type": "string"},
@@ -1512,7 +1551,7 @@ def _save_web_history():
 def _record_web_history(job):
     if not job:
         return
-    summary = _job_summary(job)
+    summary = _job_summary(job, include_all_items=True)
     with WEB_HISTORY_LOCK:
         WEB_HISTORY[:] = [
             value for value in WEB_HISTORY if value.get("job_id") != summary["job_id"]
@@ -1535,7 +1574,7 @@ def _run_job(job_id, urls, output_dir, delay, image_format, adaptive=False):
     with JOB_CONDITION:
         while True:
             job = JOBS.get(job_id)
-            if job is None:
+            if job is None or job.get("status") != "queued":
                 return
             running = any(
                 value.get("status") == "running"
@@ -1563,28 +1602,42 @@ def _run_job(job_id, urls, output_dir, delay, image_format, adaptive=False):
             on_progress=on_progress,
             image_format=image_format,
             adaptive=adaptive,
+            pause_on_barrier=True,
         )
         result = downloader.download(urls)
         try:
             toolbox_store.record_queued_artwork_downloads(result.results, bridge_dir=TOOLBOX_BRIDGE_DIR)
         except OSError:
             _update_job(job_id, workbench_sync_error="素材已保存，作品列表状态写入失败")
-        _update_job(
-            job_id,
-            status="completed",
-            finished_at=time.time(),
-            done=result.total,
-            success=result.success_count,
-            failed=result.fail_count,
-            skipped=result.skipped_count,
-            output_dir=result.output_dir,
-        )
+        paused_jobs = []
+        with JOBS_LOCK:
+            finished_at = time.time()
+            job = JOBS[job_id]
+            job.update(
+                status="paused" if result.pause_reason else "completed",
+                pause_reason=result.pause_reason,
+                pending_refs=(job.get("targets") or [])[result.total:] if result.pause_reason else [],
+                finished_at=finished_at,
+                done=result.total,
+                success=result.success_count,
+                failed=result.fail_count,
+                skipped=result.skipped_count,
+                output_dir=result.output_dir,
+            )
+            if result.pause_reason:
+                for queued in JOBS.values():
+                    if queued["status"] == "queued":
+                        queued.update(status="paused", pause_reason=result.pause_reason,
+                                      finished_at=finished_at, pending_refs=queued.get("targets") or [])
+                        paused_jobs.append(copy.deepcopy(queued))
+        for queued in paused_jobs:
+            _record_web_history(queued)
     except Exception as exc:
         _update_job(job_id, status="error", finished_at=time.time(), error=str(exc))
     finally:
         with JOBS_LOCK:
             finished = copy.deepcopy(JOBS.get(job_id))
-        if finished and finished.get("status") in {"completed", "error"}:
+        if finished and finished.get("status") in {"completed", "error", "paused"}:
             _record_web_history(finished)
         with JOB_CONDITION:
             JOB_CONDITION.notify_all()
@@ -2150,6 +2203,27 @@ class Handler(BaseHTTPRequestHandler):
         if not isinstance(body, dict):
             self._json({"error": "请求内容必须是 JSON 对象"}, 400)
             return
+        source_job_id = body.get("retry_job_id")
+        if source_job_id is not None:
+            scope = body.get("retry_scope", "failed")
+            if not isinstance(source_job_id, str) or not re.fullmatch(r"[0-9a-f]{32}", source_job_id) or not isinstance(scope, str) or scope not in {"failed", "remaining"}:
+                self._json({"error": "重试任务参数无效"}, 400)
+                return
+            with JOBS_LOCK:
+                source_job = copy.deepcopy(JOBS.get(source_job_id))
+            if source_job is None:
+                with WEB_HISTORY_LOCK:
+                    source_job = copy.deepcopy(next((j for j in WEB_HISTORY if j.get("job_id") == source_job_id), None))
+            if not source_job or source_job.get("status") not in {"paused", "completed", "error"}:
+                self._json({"error": "原任务仍在运行或没有可恢复的记录"}, 409)
+                return
+            retry_urls = _retry_workbench_urls(source_job, scope)
+            if not retry_urls:
+                self._json({"error": "作品列表里没有可用于此任务的原始链接"}, 409)
+                return
+            body = {"urls": retry_urls, "output_dir": source_job.get("output_dir"),
+                    "mode": "cautious", "image_format": source_job.get("image_format") or "jpg"}
+
         text = body.get("text", "")
         supplied_urls = body.get("urls")
         if not isinstance(text, str):
@@ -2232,6 +2306,7 @@ class Handler(BaseHTTPRequestHandler):
                     "output_dir": output_dir,
                     "mode": mode,
                     "image_format": image_format,
+                    "targets": [_download_work_ref(url) for url in urls],
                 }
                 if idempotency_key:
                     JOB_IDEMPOTENCY[idempotency_key] = {
@@ -2245,7 +2320,7 @@ class Handler(BaseHTTPRequestHandler):
             self._json({"error": "Idempotency-Key 已用于不同的请求内容"}, 409)
             return
         if duplicate is not None:
-            status_code = 200 if duplicate.get("status") in {"completed", "error"} else 202
+            status_code = 200 if duplicate.get("status") in {"completed", "error", "paused"} else 202
             self._json(
                 {"job_id": duplicate.get("job_id", ""), "status": duplicate.get("status", "queued"), "total": duplicate.get("total", len(urls)), "deduplicated": True},
                 status_code,

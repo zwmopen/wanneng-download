@@ -339,7 +339,7 @@ details.drawer[open] summary:after{transform:rotate(180deg)}
 .result{padding:10px 12px;border-radius:12px;background:var(--soft);border:1px solid var(--line);font-size:12px}
 .result.ok{border-left:3px solid var(--ok)}.result.fail{border-left:3px solid var(--bad)}
 .collection-status{margin-top:10px;padding:10px 12px;border-radius:12px;border:1px solid var(--line);background:var(--soft);font-size:12px;color:var(--muted)}
-.collection-status[hidden]{display:none}
+.collection-status[hidden],#downloadRecovery[hidden]{display:none}
 .collection-status[data-state="error"],.collection-status[data-state="verification_required"]{border-color:var(--bad);color:var(--bad)}
 
 /* Login Cards & Theme Cards */
@@ -454,6 +454,10 @@ details.drawer[open] summary:after{transform:rotate(180deg)}
             <div class="live-progress" style="margin-top:6px">
               <div class="progress-track"><div class="progress-bar" id="progressBar"></div></div>
               <div class="progress-meta"><span id="progressText">已处理 0 / 0</span><span id="successText">成功 0 · 跳过 0 · 失败 0</span></div>
+            </div>
+            <div class="btn-row" id="downloadRecovery" style="margin-top:8px" hidden>
+              <button class="mini-btn" type="button" id="retryFailedDownload">仅重试失败项</button>
+              <button class="mini-btn" type="button" id="resumeRemainingDownload">下载剩余未处理</button>
             </div>
             <div class="results" id="results"></div>
           </div>
@@ -1928,7 +1932,6 @@ $('go').addEventListener('click',async()=>{
   $('statusSub').textContent='正在提交下载任务…';
   try{
     const d=await api('/api/jobs','POST',{text,...settings()});
-    try{sessionStorage.setItem(DOWNLOAD_JOB_KEY,d.job_id);}catch(_){}
     trackDownloadJob(d.job_id);
   }catch(e){
     $('go').disabled=false;$('go').textContent='立即解析并下载';
@@ -1938,22 +1941,26 @@ $('go').addEventListener('click',async()=>{
 
 function trackDownloadJob(id){
   activeJob=id;
+  $('downloadRecovery').hidden=true;
+  try{sessionStorage.setItem(DOWNLOAD_JOB_KEY,id);}catch(_){}
   if(pollTimer)clearTimeout(pollTimer);
   $('go').disabled=true;
   pollJob(id);
 }
-function stopTrackingDownload(){
+function stopTrackingDownload(clearSaved=false){
   activeJob=null;
   $('go').disabled=false;
   $('go').textContent='立即解析并下载';
   $('progressBar').classList.remove('active');
-  try{sessionStorage.removeItem(DOWNLOAD_JOB_KEY);}catch(_){}
+  if(clearSaved){try{sessionStorage.removeItem(DOWNLOAD_JOB_KEY);}catch(_){}}
 }
 function downloadItemDescription(item){
   const engineNames={'local-cli':'小红书本地 CLI','douyin-edge':'抖音 Edge','yt-dlp':'yt-dlp','history':'本地历史'};
   if(item.deduplicated)return '本地已存在';
+  const stages={note_detail:'读取详情',media_write:'保存素材'};
   const message=item.error||item.save_dir||(item.success?'素材已保存':'未下载成功');
-  return [engineNames[item.engine],message].filter(Boolean).join(' · ');
+  const http=item.http_status?'HTTP '+item.http_status:'';
+  return [engineNames[item.engine],stages[item.failure_stage],http,message].filter(Boolean).join(' · ');
 }
 async function pollJob(id){
   try{
@@ -1973,12 +1980,15 @@ async function pollJob(id){
         return `<div class="result ${state}" style="display:flex;justify-content:space-between;align-items:center;gap:8px"><div style="min-width:0;flex:1"><strong>${esc(title)}</strong><div title="${esc(description)}" style="color:var(--muted);font-size:11px;margin-top:2px;overflow-wrap:anywhere">${esc(description)}</div></div>${it.save_dir?`<button class="mini-btn" type="button" data-open-dir="${esc(it.save_dir)}">打开</button>`:''}</div>`;
       }).join('');
     }
-    if(j.status==='completed'||j.status==='error'){
+    if(['completed','error','paused'].includes(j.status)){
       stopTrackingDownload();
-      $('stateDot').className='state-dot '+(j.status==='error'||failed?'error':'done');
-      $('statusSub').textContent=j.status==='error'?(j.error||'任务执行失败'):
-        (failed?(success||skipped?'任务结束，部分作品下载失败':'任务结束，全部下载失败'):
-          (j.workbench_sync_error||'任务处理完毕'));
+      $('stateDot').className='state-dot '+(j.status!=='completed'||failed?'error':'done');
+      $('statusSub').textContent=j.status==='paused'?
+        (j.pause_reason==='rate_limit'?'平台限制请求频率，已暂停下载':'平台要求登录或验证，已暂停下载'):
+        (j.status==='error'?(j.error||'任务执行失败'):
+          (failed?(success||skipped?'任务结束，部分作品下载失败':'任务结束，全部下载失败'):
+            (j.workbench_sync_error||'任务处理完毕')));
+      showDownloadRecovery(id,j);
       refreshDashboard();refreshArtworks();
       return;
     }
@@ -1992,7 +2002,7 @@ async function pollJob(id){
   }catch(e){
     if(activeJob!==id)return;
     if(e.status===404){
-      stopTrackingDownload();
+      stopTrackingDownload(true);
       $('statusSub').textContent='该任务已不在运行，查看历史档案核对结果';
       return;
     }
@@ -2000,6 +2010,33 @@ async function pollJob(id){
     pollTimer=setTimeout(()=>pollJob(id),1500);
   }
 }
+
+function showDownloadRecovery(id,job){
+  const failed=$('retryFailedDownload'), remaining=$('resumeRemainingDownload');
+  failed.hidden=!(job.items||[]).some(item=>item.work_ref&&!item.success&&!item.deduplicated);
+  remaining.hidden=!(job.pending_refs||[]).some(Boolean);
+  failed.dataset.jobId=remaining.dataset.jobId=id;
+  $('downloadRecovery').hidden=failed.hidden&&remaining.hidden;
+}
+async function recoverDownload(event,scope){
+  const button=event.currentTarget;
+  const id=button.dataset.jobId;
+  if(!id||activeJob)return;
+  const buttons=[$('retryFailedDownload'),$('resumeRemainingDownload')];
+  buttons.forEach(el=>el.disabled=true);
+  try{
+    const result=await api('/api/jobs','POST',{retry_job_id:id,retry_scope:scope},
+      {'Idempotency-Key':`workbench-recovery-${id}-${scope}`});
+    trackDownloadJob(result.job_id);
+  }catch(e){showToast(e.message,true);}
+  finally{buttons.forEach(el=>el.disabled=false);}
+}
+$('retryFailedDownload').addEventListener('click',event=>recoverDownload(event,'failed'));
+$('resumeRemainingDownload').addEventListener('click',event=>recoverDownload(event,'remaining'));
+$('queueList').addEventListener('click',event=>{
+  const button=event.target.closest('[data-download-job]');
+  if(button){activateNavTab('tabSingle');trackDownloadJob(button.dataset.downloadJob);}
+});
 
 async function refreshCollectionCapabilities(){
   try{
@@ -2066,7 +2103,7 @@ async function refreshCollectionCapabilities(){
 }
 
 const SOURCE_ZH={'downloader-history':'历史',clipboard:'剪贴板',web:'工作台',keyword:'关键词',homepage:'主页',api:'接口',ai:'AI'};
-const STATUS_ZH={completed:'已完成',running:'进行中',queued:'排队中',pending:'等待中',error:'失败',accepted:'已受理'};
+const STATUS_ZH={completed:'已完成',running:'进行中',queued:'排队中',pending:'等待中',paused:'已暂停',error:'失败',accepted:'已受理'};
 function renderTaskList(el,rows,emptyText){
   if(!rows||!rows.length){el.innerHTML=`<div class="panel-sub">${esc(emptyText)}</div>`;return;}
   el.innerHTML=rows.slice(0,30).map(r=>{
@@ -2075,7 +2112,8 @@ function renderTaskList(el,rows,emptyText){
     const processed=r.total?`已处理 ${r.done||0}/${r.total} · 成功 ${r.success||0} · 失败 ${r.failed||0}`:'';
     const tag=[src,st,processed].filter(Boolean).join(' · ');
     const openBtn=r.save_dir?`<button class="mini-btn" type="button" data-open-dir="${esc(r.save_dir)}">打开</button>`:'';
-    return `<div class="task-row"><div class="task-main"><span class="task-title">${esc(r.title||r.note_id||r.job_id||'任务')}</span><span class="task-meta">${esc(r.completed_at||r.url||r.save_dir||st||'')}</span></div><div style="display:flex;align-items:center;gap:6px">${openBtn}<span class="badge ${r.status==='completed'?'ok':(r.status==='error'?'bad':'')}">${esc(tag)}</span></div></div>`;
+    const jobBtn=/^[0-9a-f]{32}$/.test(r.job_id||'')?`<button class="mini-btn" type="button" data-download-job="${esc(r.job_id)}">查看进度</button>`:'';
+    return `<div class="task-row"><div class="task-main"><span class="task-title">${esc(r.title||r.note_id||r.job_id||'任务')}</span><span class="task-meta">${esc(r.completed_at||r.url||r.save_dir||st||'')}</span></div><div style="display:flex;align-items:center;gap:6px">${openBtn}${jobBtn}<span class="badge ${r.status==='completed'?'ok':(r.status==='error'?'bad':'')}">${esc(tag)}</span></div></div>`;
   }).join('');
 }
 
@@ -2088,9 +2126,10 @@ async function refreshDashboard(){
     tog.setAttribute('aria-checked',collectorEnabled?'true':'false');
     $('collectorToggleText').textContent=collectorOnline?(collectorEnabled?'剪贴板采集 开':'剪贴板采集 关'):(collectorEnabled?'启动剪贴板开':'剪贴板 离线');
     const liveTasks=[...(d.running||[]),...(d.waiting||d.queue||[])];
+    const recovery=(d.web_history||[]).filter(job=>job.status==='paused'||job.failed>0).slice(0,5);
     if($('waitingCount'))$('waitingCount').textContent=liveTasks.length;
     if($('queueDrawer')&&liveTasks.length)$('queueDrawer').open=true;
-    if($('queueList'))renderTaskList($('queueList'),liveTasks,'暂无运行或排队中的任务');
+    if($('queueList'))renderTaskList($('queueList'),[...liveTasks,...recovery],'暂无运行、排队或待处理的下载任务');
   }catch(_){}
 }
 

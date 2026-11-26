@@ -30,26 +30,29 @@ async def run(url, work_path, folder_name, max_images=15):
         download_record=False,
         author_archive=False,
         language="zh_CN",
+        max_retry=0,
         cookie=cookie,
     ) as client:
         # 前置熔断预检：若配置了 max_images，先仅提取元数据 (download=False) 校验图片总数
         if max_images and max_images > 0:
             preview_items = await client.extract(url, download=False)
-            if preview_items:
-                preview = preview_items[0]
-                img_urls = preview.get("下载地址", [])
-                if isinstance(img_urls, str):
-                    img_urls = [u for u in img_urls.split() if u]
-                note_type = preview.get("作品类型", "")
-                if note_type != "视频" and len(img_urls) > max_images:
-                    preview["_intercepted"] = True
-                    preview["_intercept_reason"] = f"图片数量超限 ({len(img_urls)}张 > {max_images}张)，触发前置熔断拦截，跳过下载"
-                    print(
-                        f"[前置拦截] 作品《{preview.get('作品标题', '')}》图片共 {len(img_urls)} 张，超过上限 {max_images} 张，前置熔断拒绝下载！",
-                        file=sys.stderr,
-                    )
-                    print(MARKER + json.dumps(preview, ensure_ascii=False, default=str))
-                    return
+            if not preview_items or not preview_items[0]:
+                print(MARKER + "{}")
+                return
+            preview = preview_items[0]
+            img_urls = preview.get("下载地址", [])
+            if isinstance(img_urls, str):
+                img_urls = [u for u in img_urls.split() if u]
+            note_type = preview.get("作品类型", "")
+            if note_type != "视频" and len(img_urls) > max_images:
+                preview["_intercepted"] = True
+                preview["_intercept_reason"] = f"图片数量超限 ({len(img_urls)}张 > {max_images}张)，触发前置熔断拦截，跳过下载"
+                print(
+                    f"[前置拦截] 作品《{preview.get('作品标题', '')}》图片共 {len(img_urls)} 张，超过上限 {max_images} 张，前置熔断拒绝下载！",
+                    file=sys.stderr,
+                )
+                print(MARKER + json.dumps(preview, ensure_ascii=False, default=str))
+                return
 
         items = await client.extract(url, download=True)
     payload = items[0] if items else {}
