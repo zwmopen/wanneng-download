@@ -396,19 +396,7 @@ details.drawer[open] summary:after{transform:rotate(180deg)}
       <button class="pill-btn collector-switch" id="collectorToggle" type="button" role="switch" aria-checked="true" title="独立后台监控剪贴板；每条复制内容自动入队采集">
         <span class="led-dot"></span><span id="collectorToggleText">剪贴板采集 开</span>
       </button>
-      <button class="pill-btn" id="settingsButton" type="button" aria-haspopup="dialog" aria-controls="settingsDialog">快速设置</button>
-      <div class="theme-menu-wrap" id="themeMenuWrap">
-        <button class="pill-btn" id="themeButton" type="button" aria-haspopup="menu" aria-expanded="false" aria-label="切换视觉主题">自动·浅色拟态 ▾</button>
-        <div class="theme-popover" id="themePopover" hidden role="menu" aria-label="选择主题与昼夜模式">
-          <button class="theme-opt active" type="button" role="menuitem" data-theme-mode="auto"><strong>自动切换（北京时间）</strong><small>白天浅色 · 夜晚深色 · 按日轮换拟态/玻璃</small></button>
-          <button class="theme-opt" type="button" role="menuitem" data-theme-mode="light"><strong>浅色（纯净）</strong><small>清爽扁平高亮，专注图文浏览</small></button>
-          <button class="theme-opt" type="button" role="menuitem" data-theme-mode="dark"><strong>深色（纯净）</strong><small>低对比暗夜面板，柔和不刺眼</small></button>
-          <button class="theme-opt" type="button" role="menuitem" data-theme-mode="neo"><strong>浅色拟态</strong><small>柔光浮雕景深 · Silk Neo</small></button>
-          <button class="theme-opt" type="button" role="menuitem" data-theme-mode="neo-dark"><strong>深色拟态</strong><small>深空岩面质感 · Obsidian</small></button>
-          <button class="theme-opt" type="button" role="menuitem" data-theme-mode="glass"><strong>浅色玻璃</strong><small>冰蓝流光磨砂 · Frost Glass</small></button>
-          <button class="theme-opt" type="button" role="menuitem" data-theme-mode="glass-dark"><strong>深色玻璃</strong><small>极光透亮夜幕 · Midnight Glass</small></button>
-        </div>
-      </div>
+      <button class="pill-btn" id="themeButton" type="button" aria-label="切换视觉主题" title="点击切换下一主题（自动切换 / 浅色拟态 / 深色拟态 / 浅色玻璃 / 深色玻璃）">主题：自动切换</button>
     </div>
   </header>
 
@@ -535,7 +523,7 @@ details.drawer[open] summary:after{transform:rotate(180deg)}
 
           <div class="toolbar" style="margin-top:14px">
             <select class="sort-select group-select" id="kwGroupFilter" data-filtered="false" onchange="onKwGroupChange(this.value)" title="按分组筛选"><option value="all">全部分组</option></select>
-            <button class="mini-btn" type="button" onclick="kwRenameGroupPrompt()" title="重命名当前分组或任一分组">重命名分组</button>
+            <button class="mini-btn" type="button" onclick="openGroupManager('keywords')" title="新建、重命名或删除分组">分组管理</button>
             <button class="mini-btn" type="button" onclick="kwBatch('all')">全选本组</button>
             <button class="mini-btn" type="button" onclick="kwBatch('invert')">反选</button>
             <button class="mini-btn" type="button" onclick="kwBatch('none')">清空</button>
@@ -556,7 +544,7 @@ details.drawer[open] summary:after{transform:rotate(180deg)}
             <details class="more-menu" id="kwMoreMenu">
               <summary>更多 ▾</summary>
               <div class="more-pop">
-                <button type="button" onclick="kwRenameGroupPrompt();this.closest('details').removeAttribute('open')">重命名分组</button>
+                <button type="button" onclick="openGroupManager('keywords');this.closest('details').removeAttribute('open')">分组管理</button>
                 <button type="button" onclick="kwImportPreset();this.closest('details').removeAttribute('open')">导入江浙沪46词</button>
                 <button type="button" onclick="kwRemarkPrompt();this.closest('details').removeAttribute('open')">修改备注</button>
                 <button type="button" onclick="kwExport();this.closest('details').removeAttribute('open')">导出词表 (.csv)</button>
@@ -585,8 +573,8 @@ details.drawer[open] summary:after{transform:rotate(180deg)}
           <div class="quick-launch-card">
             <div class="form-grid">
               <div>
-                <label for="authorUrl">单条主页链接（立即提取；留空用已勾选第一条）</label>
-                <input id="authorUrl" type="url" placeholder="https://www.douyin.com/user/…">
+                <label for="authorUrl">单条主页链接（支持抖音 / 小红书；留空用已勾选第一条）</label>
+                <input id="authorUrl" type="url" placeholder="https://www.douyin.com/user/… 或 https://www.xiaohongshu.com/user/profile/…">
               </div>
               <div style="display:flex;gap:8px;align-items:end">
                 <div style="flex:1"><label for="auBatchInput">批量添加到当前分组（粘贴多个主页地址）</label><input id="auBatchInput" type="text" placeholder="输入主页链接，点右侧保存进当前分组"></div>
@@ -608,7 +596,7 @@ details.drawer[open] summary:after{transform:rotate(180deg)}
 
           <div class="toolbar" style="margin-top:14px">
             <select class="sort-select group-select" id="auGroupFilter" data-filtered="false" onchange="onAuGroupChange(this.value)" title="按分组筛选"><option value="all">全部分组</option></select>
-            <button class="mini-btn" type="button" onclick="auRenameGroupPrompt()" title="重命名当前分组或任一分组">重命名分组</button>
+            <button class="mini-btn" type="button" onclick="openGroupManager('authors')" title="新建、重命名或删除主页分组">分组管理</button>
             <button class="mini-btn" type="button" onclick="auBatch('all')">全选本组</button>
             <button class="mini-btn" type="button" onclick="auBatch('invert')">反选</button>
             <button class="mini-btn" type="button" onclick="auBatch('none')">清空</button>
@@ -645,6 +633,8 @@ details.drawer[open] summary:after{transform:rotate(180deg)}
             <select id="artSortBy" style="width:120px;height:34px" onchange="refreshArtworks()"><option value="collected_at" selected>按读取时间</option><option value="seq">默认序号</option><option value="likes">按点赞量</option><option value="favorites">按收藏量</option><option value="comments">按评论量</option><option value="image_count">按图片数</option><option value="publish_time">按发布时间</option></select>
             <button class="mini-btn" type="button" onclick="artBatch('all')">全选</button>
             <button class="mini-btn" type="button" onclick="artBatch('invert')">反选</button>
+            <button class="mini-btn" type="button" onclick="artBatch('none')">清空</button>
+            <button class="mini-btn" type="button" onclick="artResetFilters()">重置筛选</button>
             <button class="mini-btn" type="button" onclick="artExportCsv()">导出 CSV</button>
             <button class="mini-btn danger" type="button" onclick="artDeleteSelected()">删除</button>
           </div>
@@ -719,6 +709,20 @@ details.drawer[open] summary:after{transform:rotate(180deg)}
                 <button class="mini-btn" type="button" onclick="engineAction('hide_browser',{})">收起浏览器</button>
               </div>
             </div>
+            <div class="login-card">
+              <strong>多账号浏览器档案（防限流一键切换）</strong>
+              <span style="font-size:12px;color:var(--muted)">不同档案隔离 Cookie 与指纹会话，高频采集切备用号不串号</span>
+              <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
+                <select id="profileSelect" style="flex:1;min-width:130px;height:34px"><option value="default">默认主账号</option></select>
+                <button class="mini-btn" type="button" onclick="switchBrowserProfile()">切换档案</button>
+                <button class="mini-btn" type="button" onclick="createBrowserProfile()">新建档案</button>
+                <button class="mini-btn danger" type="button" onclick="deleteBrowserProfile()">删除</button>
+              </div>
+            </div>
+            <div class="login-card" style="grid-column:1 / -1">
+              <strong>反检测内核与采集规则自检</strong>
+              <div id="engineRuleHealthBox" style="font-size:12px;color:var(--muted);line-height:1.6">正在检测内核驱动与接口规则状态…</div>
+            </div>
           </div>
           <div class="collection-status" id="loginActionFeedback" hidden></div>
         </section>
@@ -738,7 +742,7 @@ details.drawer[open] summary:after{transform:rotate(180deg)}
 
           <div class="subpanel active" id="subPath">
             <div class="form-grid">
-              <div class="wide"><label for="d_output_dir">作品保存根目录</label><input type="text" id="d_output_dir"></div>
+              <div class="wide"><label for="d_output_dir">作品保存根目录</label><div style="display:flex;gap:8px;align-items:center"><input type="text" id="d_output_dir" style="flex:1"><button class="secondary" type="button" style="height:38px" onclick="pickFolderInto('d_output_dir')">浏览选择…</button></div></div>
             </div>
             <div class="check-grid" style="margin-top:12px">
               <label class="check-item"><input type="checkbox" id="d_skip_downloaded_history" checked> 自动跳过已下载过的历史作品（去重）</label>
@@ -753,7 +757,7 @@ details.drawer[open] summary:after{transform:rotate(180deg)}
                 <label class="check-item"><input type="checkbox" id="d_write_metadata" checked> 自动生成并更新作品元数据（metadata.json）</label>
               </div>
               <div class="form-grid">
-                <div class="wide"><label for="d_auto_ingest_config_path">入库规则配置文件（config.json）</label><input type="text" id="d_auto_ingest_config_path" placeholder="D:\AICode\工具开发\projects\xhs-dl\config\config.json"></div>
+                <div class="wide"><label for="d_auto_ingest_config_path">入库规则配置文件（config.json）</label><div style="display:flex;gap:8px;align-items:center"><input type="text" id="d_auto_ingest_config_path" placeholder="config/config.json" style="flex:1"><button class="secondary" type="button" style="height:38px" onclick="openConfigFileEditor()">打开编辑</button></div></div>
               </div>
             </div>
           </div>
@@ -762,12 +766,23 @@ details.drawer[open] summary:after{transform:rotate(180deg)}
             <div class="form-grid">
               <div><label for="d_image_format">图片保存格式</label><select id="d_image_format"><option value="jpg" selected>JPG（推荐 · 全平台通用无 WebP）</option><option value="png">PNG（无损）</option><option value="keep">保持平台原格式（可能为 WebP）</option></select></div>
               <div><label for="d_delay_mode">下载防频繁节奏</label><select id="d_delay_mode"><option value="auto">智能 · 随结果调节</option><option value="fast">快速 · 3–8 秒</option><option value="normal">标准 · 8–15 秒</option><option value="cautious">稳妥 · 35–55 秒</option><option value="slow">慢速 · 55–85 秒</option><option value="very-slow">极慢 · 110–160 秒</option></select></div>
-              <div class="wide"><label for="d_title_template">文件夹命名模板（支持：{comments} 评论 · {favorites} 收藏 · {likes} 点赞 · {title} 标题 · {author} 作者 · {publish_time} 发布日期）</label><input type="text" id="d_title_template" value="评{comments}-藏{favorites}-赞{likes}-{title}-{author}-{publish_time}">
+              <div class="wide"><label for="d_title_template">文件夹命名模板（可点下方占位符拼接 DIY，或手动输入）</label><input type="text" id="d_title_template" value="评{comments}-藏{favorites}-赞{likes}-{title}-{author}-{publish_time}" oninput="updateTitleTemplatePreview()">
                 <div class="btn-row" style="margin-top:6px;gap:6px">
-                  <button class="mini-btn" type="button" onclick="applyTitleTemplatePreset('评{comments}-藏{favorites}-赞{likes}-{title}-{author}-{publish_time}')">评藏赞+标题+作者+发布时间</button>
-                  <button class="mini-btn" type="button" onclick="applyTitleTemplatePreset('评{comments}-赞{likes}-{title}-{author}-{publish_time}')">评赞+标题+作者+发布时间</button>
-                  <button class="mini-btn" type="button" onclick="applyTitleTemplatePreset('{publish_datetime}_{author}_{title}')">旧版时间_作者_标题</button>
+                  <button class="mini-btn" type="button" onclick="insertTemplateToken('{comments}')">+评论{comments}</button>
+                  <button class="mini-btn" type="button" onclick="insertTemplateToken('{favorites}')">+收藏{favorites}</button>
+                  <button class="mini-btn" type="button" onclick="insertTemplateToken('{likes}')">+点赞{likes}</button>
+                  <button class="mini-btn" type="button" onclick="insertTemplateToken('{title}')">+标题{title}</button>
+                  <button class="mini-btn" type="button" onclick="insertTemplateToken('{author}')">+作者{author}</button>
+                  <button class="mini-btn" type="button" onclick="insertTemplateToken('{publish_time}')">+发布日期{publish_time}</button>
+                  <button class="mini-btn" type="button" onclick="insertTemplateToken('{keyword}')">+关键词{keyword}</button>
+                  <button class="mini-btn" type="button" onclick="insertTemplateToken('{id}')">+ID{id}</button>
                 </div>
+                <div class="btn-row" style="margin-top:6px;gap:6px">
+                  <button class="mini-btn" type="button" onclick="applyTitleTemplatePreset('评{comments}-藏{favorites}-赞{likes}-{title}-{author}-{publish_time}')">预设：评藏赞+标题+作者+日期</button>
+                  <button class="mini-btn" type="button" onclick="applyTitleTemplatePreset('评{comments}-赞{likes}-{title}-{author}-{publish_time}')">预设：评赞+标题+作者+日期</button>
+                  <button class="mini-btn" type="button" onclick="applyTitleTemplatePreset('{publish_datetime}_{author}_{title}')">预设：时间_作者_标题</button>
+                </div>
+                <div class="panel-sub" id="titleTemplatePreview" style="margin-top:6px">预览效果：评12-藏34-赞88-安吉温泉团建攻略-小旅-2026-11-25</div>
               </div>
             </div>
             <div class="check-grid" style="margin-top:12px">
@@ -779,6 +794,17 @@ details.drawer[open] summary:after{transform:rotate(180deg)}
             <div class="check-grid">
               <label class="check-item"><input type="checkbox" id="sw_app_window_mode" checked> 优先以独立无地址栏桌面窗口打开</label>
               <label class="check-item"><input type="checkbox" id="sw_minimize_to_tray"> 最小化隐藏任务栏偏好</label>
+            </div>
+            <div style="margin-top:12px;padding-top:12px;border-top:1px solid var(--line);display:grid;gap:10px">
+              <div class="form-grid">
+                <div class="wide"><label for="sw_proxy_url">网络代理地址（可选，留空直接直连；例：http://127.0.0.1:7890）</label><input type="text" id="sw_proxy_url" placeholder="可选：http://127.0.0.1:7890（留空直连）"></div>
+              </div>
+              <div class="num-row">
+                <strong style="font-size:12.5px">自动主题昼夜规则（北京时间）：</strong>
+                <span>白天开始</span><input type="number" id="sw_theme_day_start" min="0" max="23" value="7" style="width:66px"><span>点</span>
+                <span>夜晚开始</span><input type="number" id="sw_theme_night_start" min="0" max="23" value="19" style="width:66px"><span>点</span>
+                <span>质感风格</span><select id="sw_theme_auto_style" style="width:auto;min-width:160px;height:32px"><option value="rotate">按日轮换拟态/玻璃</option><option value="neo">固定拟态质感</option><option value="glass">固定玻璃质感</option><option value="flat">固定纯净质感</option></select>
+              </div>
             </div>
             <div style="margin-top:14px;padding-top:12px;border-top:1px solid var(--line)">
               <strong style="display:block;font-size:13px;margin-bottom:8px">验证置顶、桌面弹窗与飞书通知</strong>
@@ -812,50 +838,32 @@ details.drawer[open] summary:after{transform:rotate(180deg)}
 
           <div class="subpanel" id="subAi">
             <div style="display:grid;gap:12px">
-              <div class="quick-launch-card" style="margin:0">
+              <div class="quick-launch-card" style="margin:0;display:grid;gap:10px">
                 <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap">
                   <div>
-                    <strong style="font-size:13.5px">本机 AI 服务接口地址</strong>
-                    <div style="font-size:12px;color:var(--muted);margin-top:2px">仅监听本机回环 <code>http://127.0.0.1:5678</code>，无需 API Key；AI 发起的任务与结果自动同步在「作品列表 -> 历史采集列表」。</div>
+                    <strong style="font-size:13.5px">AI Agent 一键接入提示词</strong>
+                    <div style="font-size:12px;color:var(--muted);margin-top:2px">复制下方完整指令发给任意 AI Agent（Antigravity / Codex / Claude / Cursor 等），即可记住本机采集器并自动帮你采集下载，无需再配其它规则。</div>
                   </div>
                   <div style="display:flex;gap:8px;flex-wrap:wrap">
-                    <button class="mini-btn" type="button" onclick="copyAiText('http://127.0.0.1:5678','已复制本机接口地址')">复制地址</button>
-                    <a class="mini-btn" href="/api/openapi.json" target="_blank" rel="noreferrer" style="text-decoration:none">查看 OpenAPI</a>
+                    <button class="primary" type="button" style="height:36px;padding:0 16px" onclick="copyAiSnippet('aiMasterPrompt')">一键复制给 AI Agent</button>
+                    <a class="mini-btn" href="/api/openapi.json" target="_blank" rel="noreferrer" style="text-decoration:none;height:36px;display:inline-flex;align-items:center">查看 OpenAPI 文档</a>
                   </div>
                 </div>
-              </div>
+                <pre id="aiMasterPrompt" style="margin:0;padding:12px 14px;border-radius:12px;background:var(--input);border:1px solid var(--line);font-size:12px;line-height:1.6;white-space:pre-wrap;word-break:break-word">我的电脑本机运行着「万能下载器 / 万能采集器」桌面应用（本地接口：http://127.0.0.1:5678，仅本机回环访问，无需 API Key）。
 
-              <div style="display:grid;gap:10px">
-                <strong style="font-size:13px">给 AI 下指令的快捷提示词（一键复制发给 Codex / Antigravity / Claude）</strong>
-                <div class="task-row" style="align-items:center">
-                  <div class="task-main">
-                    <span class="task-title">1. 抖音关键词搜图文并自动入库</span>
-                    <span class="task-meta" id="aiPromptKw" style="white-space:normal">使用本机万能采集器（http://127.0.0.1:5678）采集抖音关键词「安吉温泉团建」的 10 条图文作品并自动下载分类入库。</span>
-                  </div>
-                  <button class="mini-btn" type="button" onclick="copyAiSnippet('aiPromptKw')">复制提示词</button>
-                </div>
-                <div class="task-row" style="align-items:center">
-                  <div class="task-main">
-                    <span class="task-title">2. 批量链接下载与整理入库</span>
-                    <span class="task-meta" id="aiPromptLink" style="white-space:normal">把以下小红书/抖音链接提交给本机万能采集器 POST http://127.0.0.1:5678/api/v1/jobs 进行无水印下载并整理入库。</span>
-                  </div>
-                  <button class="mini-btn" type="button" onclick="copyAiSnippet('aiPromptLink')">复制提示词</button>
-                </div>
-                <div class="task-row" style="align-items:center">
-                  <div class="task-main">
-                    <span class="task-title">3. 查询最近采集历史与进度</span>
-                    <span class="task-meta" id="aiPromptHist" style="white-space:normal">查询本机万能采集器 http://127.0.0.1:5678/api/v1/workbench/artworks?mode=history&sort_by=collected_at&sort_dir=desc 并汇总最近采集的 10 条作品。</span>
-                  </div>
-                  <button class="mini-btn" type="button" onclick="copyAiSnippet('aiPromptHist')">复制提示词</button>
-                </div>
-              </div>
+从现在开始，凡是我发给你的小红书、抖音（以及 B 站、快手、X、YouTube 等）作品链接、分享文案、关键词找图文/视频需求或作者主页批量采集任务，请一律直接调用这个本地软件的 HTTP 接口来完成采集、无水印下载与分类入库，不要自己手写爬虫去网页扒图：
 
-              <div style="display:grid;gap:8px;padding-top:10px;border-top:1px solid var(--line)">
-                <div style="display:flex;justify-content:space-between;align-items:center;gap:8px">
-                  <strong style="font-size:13px">脚本 / HTTP 开发者调用示例</strong>
-                  <button class="mini-btn" type="button" onclick="copyAiSnippet('aiCurlExample')">复制示例命令</button>
-                </div>
-                <pre id="aiCurlExample" style="margin:0;padding:10px 12px;border-radius:12px;background:var(--input);border:1px solid var(--line);font-size:11.5px;overflow:auto;line-height:1.5">curl -X POST http://127.0.0.1:5678/api/v1/collections/keyword -H "Content-Type: application/json" -d "{\"platform\":\"douyin\",\"keyword\":\"安吉温泉团建\",\"count\":10,\"media_type\":\"image\",\"direct_download\":true}"</pre>
+1. 状态检查：GET http://127.0.0.1:5678/api/v1/health
+2. 单作品 / 批量链接解析下载：POST http://127.0.0.1:5678/api/jobs
+   Body JSON：{"text": "直接粘贴整段分享文案或一行一条多个链接"}
+3. 关键词搜索采集并下载：POST http://127.0.0.1:5678/api/v1/collections/keyword
+   Body JSON：{"platform": "douyin" | "xiaohongshu", "keyword": "搜索关键词", "count": 10, "media_type": "image" | "video" | "all", "direct_download": true}
+4. 作者主页批量采集：POST http://127.0.0.1:5678/api/v1/collections/homepage
+   Body JSON：{"profile_url": "作者主页链接", "max_works": 10, "direct_download": true}
+5. 查询任务与历史记录：GET http://127.0.0.1:5678/api/v1/jobs、GET http://127.0.0.1:5678/api/v1/workbench/artworks?mode=history&sort_by=collected_at&sort_dir=desc
+（全部参数与接口说明见 OpenAPI：GET http://127.0.0.1:5678/api/openapi.json）
+
+如返回 verification_required / 需要登录，说明平台触发了风控验证，本机软件会自动弹出并置顶浏览器窗口；请提示我完成滑块/扫码验证后继续采集，任务结束后再向我汇总保存路径与成功/跳过数量。</pre>
               </div>
             </div>
           </div>
@@ -871,19 +879,6 @@ details.drawer[open] summary:after{transform:rotate(180deg)}
   <p class="footnote">__APP_NAME__ V__APP_VERSION__ · 统一拟态 / 悬浮玻璃桌面工作台 · 本地闭环运行不泄露账号态</p>
 </main>
 
-<dialog class="settings-dialog" id="settingsDialog" aria-labelledby="settingsTitle">
-  <div class="dialog-heading">
-    <div><p>快速下载偏好</p><h2 id="settingsTitle">下载设置</h2></div>
-    <button class="dialog-close" id="settingsClose" type="button" aria-label="关闭设置">×</button>
-  </div>
-  <div style="display:grid;gap:12px">
-    <div><label for="outdir">保存位置</label><input id="outdir" type="text" autocomplete="off"></div>
-    <div><label for="mode">下载节奏</label><select id="mode"><option value="auto" selected>智能 · 随结果调节</option><option value="fast">快速 · 3–8 秒</option><option value="normal">标准 · 8–15 秒</option><option value="cautious">稳妥 · 35–55 秒</option><option value="slow">慢速 · 55–85 秒</option><option value="very-slow">极慢 · 110–160 秒</option></select></div>
-    <div><label for="format">图片格式</label><select id="format"><option value="jpg" selected>JPG（推荐 · 通用清晰）</option><option value="png">PNG（无损）</option><option value="keep">保持原格式（可能 WebP）</option></select></div>
-    <label class="check-item"><input type="checkbox" id="q_auto_ingest" checked> 下载后自动按01月~12月/主题入库</label>
-  </div>
-  <div class="btn-row"><button class="primary" id="settingsDone" type="button" style="height:40px">应用并保存</button></div>
-</dialog>
 <dialog class="settings-dialog" id="inputModal" aria-labelledby="inputModalTitle">
   <div class="dialog-heading">
     <div><p id="inputModalSub">分组与备注管理</p><h2 id="inputModalTitle">重命名分组</h2></div>
@@ -899,12 +894,44 @@ details.drawer[open] summary:after{transform:rotate(180deg)}
     <button class="primary" id="inputModalConfirm" type="button" style="height:40px">确认保存</button>
   </div>
 </dialog>
+<dialog class="settings-dialog" id="groupManagerModal" aria-labelledby="gmTitle" style="width:min(540px,calc(100vw - 32px))">
+  <div class="dialog-heading">
+    <div><p id="gmSub">新增 / 改名 / 删除分组</p><h2 id="gmTitle">分组管理 DIY</h2></div>
+    <button class="dialog-close" type="button" onclick="$('groupManagerModal').close()" aria-label="关闭分组管理">×</button>
+  </div>
+  <div style="display:grid;gap:12px">
+    <div style="display:flex;gap:8px;align-items:center">
+      <input id="gmNewName" type="text" placeholder="输入要新建的分组名称…" autocomplete="off" style="flex:1" onkeydown="if(event.key==='Enter'){event.preventDefault();gmCreateGroup();}">
+      <button class="primary" type="button" style="flex:0 0 auto;min-width:110px;height:38px;padding:0 14px" onclick="gmCreateGroup()">+ 新建分组</button>
+    </div>
+    <div class="scroll-list" id="gmList" style="max-height:280px;margin-top:0"><div class="panel-sub">加载中…</div></div>
+    <p class="panel-sub" style="margin:0">提示：「仅删组」会把组内条目自动移回「默认分组」；连续点两次「删组含词」可连同组内条目一并移除。</p>
+  </div>
+</dialog>
+<dialog class="settings-dialog" id="rowEditModal" aria-labelledby="reTitle">
+  <div class="dialog-heading">
+    <div><p id="reSub">单条档案 DIY 编辑</p><h2 id="reTitle">编辑记录</h2></div>
+    <button class="dialog-close" type="button" onclick="$('rowEditModal').close()" aria-label="关闭编辑">×</button>
+  </div>
+  <datalist id="groupDatalist"></datalist>
+  <div style="display:grid;gap:12px">
+    <div><label id="rePrimaryLabel" for="rePrimary">关键词</label><input id="rePrimary" type="text" autocomplete="off"></div>
+    <div id="reUrlWrap" hidden><label for="reUrl">主页网址</label><input id="reUrl" type="url" autocomplete="off"></div>
+    <div><label for="reGroup">所属分组（可选现有或直接输入新分组）</label><input id="reGroup" type="text" list="groupDatalist" autocomplete="off"></div>
+    <div><label for="reRemark">备注</label><input id="reRemark" type="text" autocomplete="off"></div>
+  </div>
+  <div class="btn-row">
+    <button class="secondary" type="button" style="height:40px" onclick="$('rowEditModal').close()">取消</button>
+    <button class="primary" type="button" style="height:40px" onclick="saveRowEdit()">保存修改</button>
+  </div>
+</dialog>
 <div id="wbToast" class="toast" aria-live="polite"></div>
 
 <script>
 const THEME_KEY='xhs-dl-theme',THEME_VER_KEY='xhs-dl-theme-v2',OUTPUT_KEY='xhs-dl-output',MODE_KEY='xhs-dl-mode',FORMAT_KEY='xhs-dl-format',DEFAULT_OUTPUT=__DEFAULT_OUTPUT_JSON__,MIN_PROGRESS_MS=1100;
 const CSS_THEMES=['light','dark','neo','neo-dark','glass','glass-dark'];
 const THEME_MODES=['auto',...CSS_THEMES];
+const CYCLE_THEMES=['auto','neo','neo-dark','glass','glass-dark'];
 const THEME_LABELS={'light':'浅色','dark':'深色','neo':'浅色拟态','neo-dark':'深色拟态','glass':'浅色玻璃','glass-dark':'深色玻璃'};
 let currentThemeMode='auto';
 const $=id=>document.getElementById(id);
@@ -931,11 +958,20 @@ async function api(url,method='GET',body=null,headers={}){
 }
 
 function resolveAutoTheme(now=new Date()){
+  const sw=(wbSettings&&wbSettings.software)||{};
+  const dsRaw=Number(sw.theme_day_start);
+  const nsRaw=Number(sw.theme_night_start);
+  const dayStart=Number.isFinite(dsRaw)?Math.max(0,Math.min(23,Math.trunc(dsRaw))):7;
+  const nightStart=Number.isFinite(nsRaw)?Math.max(0,Math.min(23,Math.trunc(nsRaw))):19;
+  const style=String(sw.theme_auto_style||'rotate');
   const bjMs=now.getTime()+now.getTimezoneOffset()*60000+8*3600000;
   const bj=new Date(bjMs);
   const hour=bj.getUTCHours();
+  const isDay=dayStart<nightStart?(hour>=dayStart&&hour<nightStart):(dayStart>nightStart?(hour>=dayStart||hour<nightStart):(hour>=7&&hour<19));
+  if(style==='flat')return isDay?'light':'dark';
+  if(style==='neo')return isDay?'neo':'neo-dark';
+  if(style==='glass')return isDay?'glass':'glass-dark';
   const dayIdx=Math.floor(bjMs/86400000);
-  const isDay=hour>=7&&hour<19;
   const useGlass=(dayIdx%2)===0;
   return useGlass?(isDay?'glass':'glass-dark'):(isDay?'neo':'neo-dark');
 }
@@ -946,8 +982,16 @@ function applyTheme(mode,persist=true){
   document.body.dataset.theme=resolved;
   try{localStorage.setItem(THEME_KEY,nextMode);localStorage.setItem(THEME_VER_KEY,'2');}catch(_){}
   const baseLabel=THEME_LABELS[resolved]||'浅色拟态';
-  $('themeButton').textContent=(nextMode==='auto'?'自动·'+baseLabel:baseLabel)+' ▾';
-  document.querySelectorAll('#themePopover [data-theme-mode]').forEach(el=>el.classList.toggle('active',el.dataset.themeMode===nextMode));
+  const btn=$('themeButton');
+  if(btn){
+    if(nextMode==='auto'){
+      btn.textContent='主题：自动切换';
+      btn.title='自动切换（当前生效：'+baseLabel+'；点击切换下一主题）';
+    }else{
+      btn.textContent='主题：'+baseLabel;
+      btn.title='点击切换下一主题（自动切换 / 浅色拟态 / 深色拟态 / 浅色玻璃 / 深色玻璃）';
+    }
+  }
   if(persist){
     if(!wbSettings.software)wbSettings.software={};
     wbSettings.software.theme=nextMode;
@@ -964,44 +1008,19 @@ function applyTheme(mode,persist=true){
   applyTheme(savedMode,false);
   setInterval(()=>{if(currentThemeMode==='auto')applyTheme('auto',false);},60000);
 })();
-function toggleThemePopover(forceOpen){
-  const pop=$('themePopover'),btn=$('themeButton');
-  if(!pop||!btn)return;
-  const nextOpen=typeof forceOpen==='boolean'?forceOpen:pop.hidden;
-  pop.hidden=!nextOpen;
-  btn.setAttribute('aria-expanded',nextOpen?'true':'false');
-}
-$('themeButton').addEventListener('click',e=>{e.stopPropagation();toggleThemePopover();});
-document.querySelectorAll('#themePopover [data-theme-mode]').forEach(btn=>btn.addEventListener('click',()=>{
-  applyTheme(btn.dataset.themeMode,true);
-  toggleThemePopover(false);
-}));
+$('themeButton').addEventListener('click',()=>{
+  const idx=CYCLE_THEMES.indexOf(currentThemeMode);
+  const next=CYCLE_THEMES[(idx+1+CYCLE_THEMES.length)%CYCLE_THEMES.length];
+  applyTheme(next,true);
+});
 document.addEventListener('click',e=>{
-  const wrap=$('themeMenuWrap');
-  if(wrap&&!wrap.contains(e.target))toggleThemePopover(false);
   document.querySelectorAll('details.more-menu[open]').forEach(m=>{if(!m.contains(e.target))m.removeAttribute('open');});
 });
-document.addEventListener('keydown',e=>{if(e.key==='Escape')toggleThemePopover(false);});
 
-const settingsDialog=$('settingsDialog');
-$('settingsButton').addEventListener('click',()=>settingsDialog.showModal());
-$('settingsClose').addEventListener('click',()=>settingsDialog.close());
-$('settingsDone').addEventListener('click',async()=>{
-  localStorage.setItem(OUTPUT_KEY,$('outdir').value.trim());
-  localStorage.setItem(MODE_KEY,$('mode').value);
-  localStorage.setItem(FORMAT_KEY,$('format').value);
-  $('d_output_dir').value=$('outdir').value.trim();
-  $('d_delay_mode').value=$('mode').value;
-  $('d_image_format').value=$('format').value;
-  if($('q_auto_ingest')&&$('d_auto_ingest_material'))$('d_auto_ingest_material').checked=$('q_auto_ingest').checked;
-  if($('k_auto_ingest_chip')&&$('d_auto_ingest_material'))$('k_auto_ingest_chip').checked=$('d_auto_ingest_material').checked;
-  await saveAllWorkbenchSettings(true);
-  settingsDialog.close();
-});
-settingsDialog.addEventListener('click',e=>{if(e.target===settingsDialog)settingsDialog.close();});
-$('outdir').value=localStorage.getItem(OUTPUT_KEY)||DEFAULT_OUTPUT;
-$('mode').value=localStorage.getItem(MODE_KEY)||'auto';
-$('format').value=localStorage.getItem(FORMAT_KEY)||'jpg';
+function getOutputDir(){return (($('d_output_dir')&&$('d_output_dir').value)||localStorage.getItem(OUTPUT_KEY)||DEFAULT_OUTPUT).trim()||DEFAULT_OUTPUT;}
+if($('d_output_dir'))$('d_output_dir').value=localStorage.getItem(OUTPUT_KEY)||DEFAULT_OUTPUT;
+if($('d_delay_mode'))$('d_delay_mode').value=localStorage.getItem(MODE_KEY)||'auto';
+if($('d_image_format'))$('d_image_format').value=localStorage.getItem(FORMAT_KEY)||'jpg';
 
 // Liquid sliding nav pill
 function moveNavPill(tabEl){
@@ -1088,12 +1107,8 @@ function bindSettingFields(s){
     else setVal('a_'+k,au[k]);
   });
   Object.keys(dl).forEach(k=>setVal('d_'+k,dl[k]));
-  if(dl.output_dir)$('outdir').value=dl.output_dir;
-  if(dl.delay_mode)$('mode').value=dl.delay_mode;
-  if(dl.image_format)$('format').value=dl.image_format;
   if(dl.auto_ingest_material!=null){
     if($('k_auto_ingest_chip'))$('k_auto_ingest_chip').checked=!!dl.auto_ingest_material;
-    if($('q_auto_ingest'))$('q_auto_ingest').checked=!!dl.auto_ingest_material;
   }
   if(dl.skip_downloaded_history!=null&&$('k_skip_dup_chip'))$('k_skip_dup_chip').checked=!!dl.skip_downloaded_history;
   setVal('sw_app_window_mode',sw.app_window_mode);
@@ -1106,11 +1121,65 @@ function bindSettingFields(s){
   if(sw.notify_feishu_app_id!=null)setVal('sw_notify_feishu_app_id',sw.notify_feishu_app_id);
   if(sw.notify_feishu_app_secret!=null)setVal('sw_notify_feishu_app_secret',sw.notify_feishu_app_secret);
   if(sw.notify_feishu_webhook!=null)setVal('sw_notify_feishu_webhook',sw.notify_feishu_webhook);
+  if(sw.proxy_url!=null)setVal('sw_proxy_url',sw.proxy_url);
+  if(sw.theme_day_start!=null)setVal('sw_theme_day_start',sw.theme_day_start);
+  if(sw.theme_night_start!=null)setVal('sw_theme_night_start',sw.theme_night_start);
+  if(sw.theme_auto_style!=null)setVal('sw_theme_auto_style',sw.theme_auto_style);
+  updateTitleTemplatePreview();
   if(sw.theme&&THEME_MODES.includes(sw.theme)&&localStorage.getItem(THEME_VER_KEY)!=='2')applyTheme(sw.theme,false);
+  else if(currentThemeMode==='auto')applyTheme('auto',false);
+}
+
+function updateTitleTemplatePreview(){
+  const el=$('d_title_template'),out=$('titleTemplatePreview');
+  if(!el||!out)return;
+  const raw=(el.value||'').trim()||'评{comments}-藏{favorites}-赞{likes}-{title}-{author}-{publish_time}';
+  const sample={'{comments}':'12','{favorites}':'34','{likes}':'88','{title}':'安吉温泉团建攻略','{author}':'小旅','{publish_time}':'2026-11-25','{publish_datetime}':'2026-11-25_14-30','{keyword}':'安吉温泉','{id}':'6738ab12'};
+  let rendered=raw;
+  Object.keys(sample).forEach(k=>{rendered=rendered.split(k).join(sample[k]);});
+  out.textContent='预览效果：'+rendered;
+}
+
+function insertTemplateToken(tok){
+  const el=$('d_title_template');if(!el||!tok)return;
+  const val=el.value||'';
+  if(document.activeElement===el&&typeof el.selectionStart==='number'){
+    const s=el.selectionStart,e=el.selectionEnd;
+    el.value=val.slice(0,s)+tok+val.slice(e);
+    el.setSelectionRange(s+tok.length,s+tok.length);
+  }else{
+    el.value=val?((/[-_/]$/.test(val)?val:val+'-')+tok):tok;
+  }
+  updateTitleTemplatePreview();
+  el.focus();
+  saveAllWorkbenchSettings(false);
+}
+
+async function pickFolderInto(inputId){
+  const el=$(inputId);
+  const initial_dir=(el&&el.value||'').trim();
+  try{
+    const d=await api('/api/v1/workbench/engine','POST',{action:'pick_folder',params:{initial_dir}});
+    if(d&&d.path){
+      if(el)el.value=d.path;
+      await saveAllWorkbenchSettings(true);
+    }else if(d&&d.cancelled){
+      showToast('已取消目录选择');
+    }
+  }catch(e){showToast('打开目录选择器失败：'+e.message,true);}
+}
+
+async function openConfigFileEditor(){
+  const p=($('d_auto_ingest_config_path')&&$('d_auto_ingest_config_path').value||'').trim()||'config/config.json';
+  try{
+    const d=await api('/api/v1/workbench/engine','POST',{action:'open_file',params:{path:p}});
+    showToast((d&&d.message)||'已用系统编辑器打开配置文件');
+  }catch(e){showToast('打开配置文件失败：'+e.message,true);}
 }
 
 function applyTitleTemplatePreset(tmpl){
   if($('d_title_template'))$('d_title_template').value=tmpl;
+  updateTitleTemplatePreview();
   saveAllWorkbenchSettings(false);
   showToast('已切换命名模板并自动保存');
 }
@@ -1122,8 +1191,8 @@ function collectSettingsPatch(){
     single:{...(wbSettings.single||{}),platform:activeSinglePlatform},
     keyword:{...(wbSettings.keyword||{}),platform:activeKwPlatform,direct_download:gVal('k_direct_download'),media_type:mtype,type_video:mtype!=='image',max_per_keyword:gVal('keywordCount'),min_images:gVal('minImages'),max_images:gVal('maxImages'),web_sort:gVal('k_web_sort')||'综合排序',web_publish_time:gVal('k_web_publish_time')||'不限'},
     author:{...(wbSettings.author||{}),platform:activeAuPlatform,direct_download:gVal('a_direct_download'),max_per_author:gVal('a_max_per_author'),min_images:gVal('a_min_images'),max_images:gVal('a_max_images')},
-    download:{...(wbSettings.download||{}),down_video:gVal('d_down_video'),down_teletex:gVal('d_down_teletex'),output_dir:gVal('d_output_dir')||$('outdir').value.trim(),skip_downloaded_history:gVal('d_skip_downloaded_history'),image_format:gVal('d_image_format'),delay_mode:gVal('d_delay_mode'),title_template:gVal('d_title_template'),set_file_time_to_publish:gVal('d_set_file_time_to_publish'),auto_ingest_material:gVal('d_auto_ingest_material'),auto_ingest_copy_only:gVal('d_auto_ingest_copy_only'),write_metadata:gVal('d_write_metadata'),auto_ingest_config_path:gVal('d_auto_ingest_config_path')},
-    software:{...(wbSettings.software||{}),theme:currentThemeMode||'auto',app_window_mode:gVal('sw_app_window_mode'),minimize_to_tray:gVal('sw_minimize_to_tray'),auto_topmost_verify_window:gVal('sw_auto_topmost_verify_window'),notify_desktop_toast:gVal('sw_notify_desktop_toast'),notify_feishu:gVal('sw_notify_feishu'),notify_on_complete:gVal('sw_notify_on_complete'),notify_feishu_target:gVal('sw_notify_feishu_target'),notify_feishu_app_id:gVal('sw_notify_feishu_app_id'),notify_feishu_app_secret:gVal('sw_notify_feishu_app_secret'),notify_feishu_webhook:gVal('sw_notify_feishu_webhook')}
+    download:{...(wbSettings.download||{}),down_video:gVal('d_down_video'),down_teletex:gVal('d_down_teletex'),output_dir:gVal('d_output_dir')||getOutputDir(),skip_downloaded_history:gVal('d_skip_downloaded_history'),image_format:gVal('d_image_format'),delay_mode:gVal('d_delay_mode'),title_template:gVal('d_title_template'),set_file_time_to_publish:gVal('d_set_file_time_to_publish'),auto_ingest_material:gVal('d_auto_ingest_material'),auto_ingest_copy_only:gVal('d_auto_ingest_copy_only'),write_metadata:gVal('d_write_metadata'),auto_ingest_config_path:gVal('d_auto_ingest_config_path')},
+    software:{...(wbSettings.software||{}),theme:currentThemeMode||'auto',app_window_mode:gVal('sw_app_window_mode'),minimize_to_tray:gVal('sw_minimize_to_tray'),auto_topmost_verify_window:gVal('sw_auto_topmost_verify_window'),notify_desktop_toast:gVal('sw_notify_desktop_toast'),notify_feishu:gVal('sw_notify_feishu'),notify_on_complete:gVal('sw_notify_on_complete'),notify_feishu_target:gVal('sw_notify_feishu_target'),notify_feishu_app_id:gVal('sw_notify_feishu_app_id'),notify_feishu_app_secret:gVal('sw_notify_feishu_app_secret'),notify_feishu_webhook:gVal('sw_notify_feishu_webhook'),proxy_url:gVal('sw_proxy_url')||'',theme_day_start:gVal('sw_theme_day_start'),theme_night_start:gVal('sw_theme_night_start'),theme_auto_style:gVal('sw_theme_auto_style')||'rotate'}
   };
 }
 
@@ -1132,15 +1201,17 @@ async function saveAllWorkbenchSettings(notify){
     const updated=await api('/api/v1/workbench/settings','POST',collectSettingsPatch());
     wbSettings=updated;
     if(updated.download){
-      $('outdir').value=updated.download.output_dir||DEFAULT_OUTPUT;
-      $('mode').value=updated.download.delay_mode||'auto';
-      $('format').value=updated.download.image_format||'jpg';
+      const outDir=updated.download.output_dir||DEFAULT_OUTPUT;
+      const delayMode=updated.download.delay_mode||'auto';
+      const imgFmt=updated.download.image_format||'jpg';
+      if($('d_output_dir'))$('d_output_dir').value=outDir;
+      if($('d_delay_mode'))$('d_delay_mode').value=delayMode;
+      if($('d_image_format'))$('d_image_format').value=imgFmt;
       if($('k_auto_ingest_chip'))$('k_auto_ingest_chip').checked=!!updated.download.auto_ingest_material;
-      if($('q_auto_ingest'))$('q_auto_ingest').checked=!!updated.download.auto_ingest_material;
       if($('k_skip_dup_chip')&&updated.download.skip_downloaded_history!=null)$('k_skip_dup_chip').checked=!!updated.download.skip_downloaded_history;
-      localStorage.setItem(OUTPUT_KEY,$('outdir').value);
-      localStorage.setItem(MODE_KEY,$('mode').value);
-      localStorage.setItem(FORMAT_KEY,$('format').value);
+      localStorage.setItem(OUTPUT_KEY,outDir);
+      localStorage.setItem(MODE_KEY,delayMode);
+      localStorage.setItem(FORMAT_KEY,imgFmt);
     }
     if(notify)showToast('设置已保存到本机 workbench_hub.json');
   }catch(e){if(notify)showToast('保存设置失败：'+e.message,true);}
@@ -1183,7 +1254,7 @@ function renderKeywordTable(){
     <td><strong>${esc(r.keyword)}</strong></td>
     <td><span class="badge ${r.last_extracted==='是'?'ok':''}">${esc(r.last_extracted)}</span></td><td>${esc(r.last_count)}</td><td>${esc(r.recorded_ids)}</td>
     <td>${esc(r.remark)}</td><td class="cell-ellipsis">${esc(r.last_time)}</td>
-    <td><button class="mini-btn" type="button" onclick="kwRunSingle('${esc(r.keyword)}')">采集</button></td>
+    <td style="white-space:nowrap"><button class="mini-btn" type="button" onclick="openRowEdit('keywords','${esc(r.id)}')">编辑</button> <button class="mini-btn" type="button" onclick="kwRunSingle('${esc(r.keyword)}')">采集</button></td>
   </tr>`).join('');
   updateStartKeywordLabel();
 }
@@ -1321,7 +1392,7 @@ function renderAuthorTable(){
     <td><span class="badge ${r.platform==='xiaohongshu'?'xhs':'dy'}">${r.platform==='xiaohongshu'?'小红书':'抖音'}</span></td>
     <td><span class="badge">${esc(r.group||'默认分组')}</span></td><td><strong>${esc(r.name)}</strong></td>
     <td class="cell-ellipsis">${esc(r.url)}</td><td>${esc(r.fans)}</td><td>${esc(r.works_count)}</td><td>${esc(r.remark)}</td>
-    <td><button class="mini-btn" type="button" onclick="auRunSingle('${esc(r.url)}')">采集</button></td>
+    <td style="white-space:nowrap"><button class="mini-btn" type="button" onclick="openRowEdit('authors','${esc(r.id)}')">编辑</button> <button class="mini-btn" type="button" onclick="auRunSingle('${esc(r.url)}')">采集</button></td>
   </tr>`).join('');
 }
 function applyAuPayload(d){wbAuthors=d.items||[];auGroups=d.groups||[];renderAuthorTable();}
@@ -1361,22 +1432,137 @@ async function auMetaPrompt(){
   await refreshAuthors();showToast(d.message||'已更新分组/备注');
 }
 async function auRenameGroupPrompt(){
-  if(!auGroups||!auGroups.length){showToast('当前平台暂无可重命名的主页分组',true);return;}
-  const pre=(activeAuGroup&&activeAuGroup!=='all')?activeAuGroup:auGroups[0].name;
-  const r=await openInputModal({
-    sub:'主页分组 DIY',title:'重命名作者主页分组',
-    selectLabel:'选择要重命名的原分组',
-    options:auGroups.map(g=>({value:g.name,label:`${g.name} (${g.count||0})`})),
-    selectedValue:pre,
-    valueLabel:'重命名后的新分组名',value:pre
-  });
-  if(!r||!r.select||!r.value.trim()||r.value.trim()===r.select)return;
-  const newGrp=r.value.trim();
+  openGroupManager('authors');
+}
+let gmKind='keywords',reKind='keywords',reRowId='';
+function openGroupManager(kind){
+  gmKind=kind==='authors'?'authors':'keywords';
+  const plat=gmKind==='keywords'?activeKwPlatform:activeAuPlatform;
+  $('gmSub').textContent=(gmKind==='keywords'?'关键词词表':'作者主页')+' · '+(plat==='xiaohongshu'?'小红书':'抖音');
+  $('gmTitle').textContent=gmKind==='keywords'?'关键词分组管理 DIY':'主页分组管理 DIY';
+  $('gmNewName').value='';
+  renderGroupManager();
+  $('groupManagerModal').showModal();
+  requestAnimationFrame(()=>$('gmNewName').focus());
+}
+function renderGroupManager(){
+  const groups=gmKind==='keywords'?kwGroups:auGroups;
+  const list=$('gmList');
+  if(!groups||!groups.length){list.innerHTML='<div class="panel-sub">当前平台暂无分组，请在上方新建分组。</div>';return;}
+  list.innerHTML=groups.map(g=>{
+    const name=String(g.name||'默认分组');
+    const isDef=name==='默认分组';
+    return `<div class="task-row" data-gm-row="${esc(name)}">
+      <div class="task-main"><span class="task-title">${esc(name)}</span><span class="task-meta">${g.count||0} 条记录</span></div>
+      <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
+        <button class="mini-btn" type="button" onclick="gmStartRename('${esc(name)}',this)">改名</button>
+        ${isDef?'':`<button class="mini-btn" type="button" onclick="gmDeleteGroup('${esc(name)}',false,this)">仅删组</button>
+        <button class="mini-btn" type="button" onclick="gmDeleteGroup('${esc(name)}',true,this)">删组含词</button>`}
+      </div>
+    </div>`;
+  }).join('');
+}
+function gmStartRename(oldName,btn){
+  const row=btn&&btn.closest('[data-gm-row]');
+  if(!row)return;
+  row.innerHTML=`<input type="text" value="${esc(oldName)}" style="flex:1;height:34px;min-width:140px" onkeydown="if(event.key==='Enter'){event.preventDefault();gmCommitRename('${esc(oldName)}',this.value);}else if(event.key==='Escape'){renderGroupManager();}">
+    <div style="display:flex;gap:6px">
+      <button class="mini-btn" type="button" onclick="gmCommitRename('${esc(oldName)}',this.closest('[data-gm-row]').querySelector('input').value)">保存</button>
+      <button class="mini-btn" type="button" onclick="renderGroupManager()">取消</button>
+    </div>`;
+  const inp=row.querySelector('input');
+  if(inp){inp.focus();inp.select();}
+}
+async function gmCommitRename(oldName,newVal){
+  const newGrp=(newVal||'').trim();
+  if(!newGrp||newGrp===oldName){renderGroupManager();return;}
+  const plat=gmKind==='keywords'?activeKwPlatform:activeAuPlatform;
+  const q=gmKind==='keywords'?kwQueryOpts():auQueryOpts();
   try{
-    const d=await api('/api/v1/workbench/authors','POST',{op:'rename_group',platform:activeAuPlatform,old_group:r.select,new_group:newGrp,...auQueryOpts()});
-    activeAuGroup=newGrp;await refreshAuthors();showToast(d.message);
+    const d=await api('/api/v1/workbench/'+gmKind,'POST',{op:'rename_group',platform:plat,old_group:oldName,new_group:newGrp,...q});
+    if(gmKind==='keywords'){if(activeKwGroup===oldName)activeKwGroup=newGrp;applyKwPayload(d);await refreshKeywords();}
+    else{if(activeAuGroup===oldName)activeAuGroup=newGrp;applyAuPayload(d);await refreshAuthors();}
+    renderGroupManager();
+    showToast(d.message||`已重命名为「${newGrp}」`);
   }catch(e){showToast(e.message,true);}
 }
+async function gmCreateGroup(){
+  const name=($('gmNewName').value||'').trim();
+  if(!name){showToast('请先输入分组名称',true);$('gmNewName').focus();return;}
+  const plat=gmKind==='keywords'?activeKwPlatform:activeAuPlatform;
+  const q=gmKind==='keywords'?kwQueryOpts():auQueryOpts();
+  try{
+    const d=await api('/api/v1/workbench/'+gmKind,'POST',{op:'create_group',platform:plat,group:name,...q});
+    $('gmNewName').value='';
+    if(gmKind==='keywords'){activeKwGroup=name;applyKwPayload(d);await refreshKeywords();}
+    else{activeAuGroup=name;applyAuPayload(d);await refreshAuthors();}
+    renderGroupManager();
+    showToast(d.message||`已创建分组「${name}」`);
+  }catch(e){showToast(e.message,true);}
+}
+async function gmDeleteGroup(name,deleteItems,btn){
+  if(deleteItems&&btn&&btn.dataset.armed!=='1'){
+    btn.dataset.armed='1';btn.textContent='确认删除?';btn.style.color='var(--danger)';
+    setTimeout(()=>{if(btn.isConnected){btn.dataset.armed='';btn.textContent='删组含词';btn.style.color='';}},3200);
+    return;
+  }
+  const plat=gmKind==='keywords'?activeKwPlatform:activeAuPlatform;
+  const q=gmKind==='keywords'?kwQueryOpts():auQueryOpts();
+  try{
+    const d=await api('/api/v1/workbench/'+gmKind,'POST',{op:'delete_group',platform:plat,group:name,delete_items:!!deleteItems,...q});
+    if(gmKind==='keywords'){if(activeKwGroup===name)activeKwGroup='all';applyKwPayload(d);await refreshKeywords();}
+    else{if(activeAuGroup===name)activeAuGroup='all';applyAuPayload(d);await refreshAuthors();}
+    renderGroupManager();
+    showToast(d.message||`已删除分组「${name}」`);
+  }catch(e){showToast(e.message,true);}
+}
+function openRowEdit(kind,id){
+  reKind=kind==='authors'?'authors':'keywords';
+  reRowId=String(id||'');
+  const rows=reKind==='keywords'?wbKeywords:wbAuthors;
+  const groups=reKind==='keywords'?kwGroups:auGroups;
+  const r=rows.find(x=>String(x.id)===reRowId);
+  if(!r){showToast('未找到该条记录',true);return;}
+  const dl=$('groupDatalist');
+  if(dl)dl.innerHTML=[...new Set(['默认分组',...(groups||[]).map(g=>g.name)])].map(g=>`<option value="${esc(g)}">`).join('');
+  if(reKind==='keywords'){
+    $('reSub').textContent='关键词档案 DIY 编辑';
+    $('reTitle').textContent='编辑关键词';
+    $('rePrimaryLabel').textContent='关键词内容';
+    $('rePrimary').value=r.keyword||'';
+    $('reUrlWrap').hidden=true;
+    $('reUrl').value='';
+  }else{
+    $('reSub').textContent='作者主页 DIY 编辑';
+    $('reTitle').textContent='编辑作者主页';
+    $('rePrimaryLabel').textContent='作者名称';
+    $('rePrimary').value=r.name||'';
+    $('reUrlWrap').hidden=false;
+    $('reUrl').value=r.url||'';
+  }
+  $('reGroup').value=r.group||'默认分组';
+  $('reRemark').value=r.remark||'';
+  $('rowEditModal').showModal();
+  requestAnimationFrame(()=>$('rePrimary').focus());
+}
+async function saveRowEdit(){
+  const primary=($('rePrimary').value||'').trim();
+  const group=($('reGroup').value||'').trim()||'默认分组';
+  const remark=($('reRemark').value||'').trim();
+  if(!primary){showToast('名称或关键词不能为空',true);$('rePrimary').focus();return;}
+  const payload=reKind==='keywords'
+    ?{op:'edit_item',id:reRowId,keyword:primary,group,remark,...kwQueryOpts()}
+    :{op:'edit_item',id:reRowId,name:primary,url:($('reUrl').value||'').trim(),group,remark,...auQueryOpts()};
+  try{
+    const d=await api('/api/v1/workbench/'+reKind,'POST',payload);
+    $('rowEditModal').close();
+    if(reKind==='keywords'){applyKwPayload(d);await refreshKeywords();}
+    else{applyAuPayload(d);await refreshAuthors();}
+    showToast(d.message||'已保存修改');
+  }catch(e){showToast(e.message,true);}
+}
+$('groupManagerModal')&&$('groupManagerModal').addEventListener('click',e=>{if(e.target===$('groupManagerModal'))$('groupManagerModal').close();});
+$('rowEditModal')&&$('rowEditModal').addEventListener('click',e=>{if(e.target===$('rowEditModal'))$('rowEditModal').close();});
 function auRunSingle(url){$('authorUrl').value=url;submitCollection('homepage');}
 async function migrateLegacyArchive(){
   try{
@@ -1430,12 +1616,20 @@ async function refreshArtworks(){
       <td style="white-space:nowrap;font-variant-numeric:tabular-nums" title="${esc(colRaw||'未记录')}">${esc(colShort)}</td>
       <td>${esc(r.image_count)}</td>
       <td><span class="badge ${stCls}">${esc(stText)}</span>${ingestBadge}</td>
-      <td style="white-space:nowrap">${openPath?`<button class="mini-btn" type="button" data-open-dir="${esc(openPath)}">打开</button> `:''}${canDownload?`<button class="mini-btn" type="button" onclick="downloadOneArtwork('${esc(r.id)}','${esc(r.url)}',${openPath?1:0})">${openPath?'重下':'下载'}</button>`:'<span style="color:var(--muted)">—</span>'}</td>
+      <td style="white-space:nowrap">${openPath?`<button class="mini-btn" type="button" data-open-dir="${esc(openPath)}">打开</button> `:''}${canDownload?`<button class="mini-btn" type="button" onclick="downloadOneArtwork('${esc(r.id)}','${esc(r.url)}',${openPath?1:0})">${openPath?'重下':'下载'}</button>`:'<span style="color:var(--muted)">—</span>'}${r.url&&String(r.url).startsWith('http')?` <a class="mini-btn" href="${esc(r.url)}" target="_blank" rel="noreferrer" style="text-decoration:none">原链</a>`:''}</td>
     </tr>`;
   }).join('');
 }
 async function artToggle(id,checked){await api('/api/v1/workbench/artworks','POST',{op:'toggle',id,checked});refreshArtworks();}
 async function artBatch(mode){await api('/api/v1/workbench/artworks','POST',{op:'batch_select',mode});refreshArtworks();}
+function artResetFilters(){
+  ['artSearch','artIncludeKw','artExcludeKw'].forEach(id=>{if($(id))$(id).value='';});
+  if($('artTypeFilter'))$('artTypeFilter').value='all';
+  if($('artSortBy'))$('artSortBy').value='collected_at';
+  ['artMinLikes','artMinFavorites','artMinComments','artMinImages'].forEach(id=>{if($(id))$(id).value='0';});
+  refreshArtworks();
+  showToast('已重置作品筛选条件');
+}
 async function artDeleteSelected(){await api('/api/v1/workbench/artworks','POST',{op:'delete'});refreshArtworks();}
 async function artExportCsv(){
   const d=await api('/api/v1/workbench/artworks','POST',{op:'export_csv'});
@@ -1445,7 +1639,7 @@ async function downloadOneArtwork(id,url,forceRedownload){
   if(!id&&!url)return;
   showToast('正在直连高速下载该作品…');
   try{
-    const res=await api('/api/v1/workbench/artworks','POST',{op:'download',ids:[String(id)],mode:activeArtView,force_redownload:!!forceRedownload,output_dir:$('outdir').value.trim()||DEFAULT_OUTPUT});
+    const res=await api('/api/v1/workbench/artworks','POST',{op:'download',ids:[String(id)],mode:activeArtView,force_redownload:!!forceRedownload,output_dir:getOutputDir()});
     refreshArtworks();refreshDashboard();
     if(res.downloaded_works>0){showToast(res.message||'下载完成');return;}
     if(res.fallback_urls&&res.fallback_urls.length){$('input').value=res.fallback_urls.join('\n');activateNavTab('tabSingle');$('go').click();return;}
@@ -1457,7 +1651,7 @@ async function downloadCheckedArtworks(){
   if(!checkedIds.length){showToast('请先在作品列表中勾选要下载的作品',true);return;}
   showToast(`正在直连下载已选 ${checkedIds.length} 条作品…`);
   try{
-    const res=await api('/api/v1/workbench/artworks','POST',{op:'download',ids:checkedIds,mode:activeArtView,output_dir:$('outdir').value.trim()||DEFAULT_OUTPUT});
+    const res=await api('/api/v1/workbench/artworks','POST',{op:'download',ids:checkedIds,mode:activeArtView,output_dir:getOutputDir()});
     refreshArtworks();refreshDashboard();
     showToast(res.message||'批量下载完成',res.downloaded_works===0&&!(res.fallback_urls&&res.fallback_urls.length));
     if(res.fallback_urls&&res.fallback_urls.length){
@@ -1499,11 +1693,33 @@ async function engineAction(action,params){
     return null;
   }
 }
+async function switchBrowserProfile(){
+  const name=($('profileSelect')&&$('profileSelect').value)||'default';
+  const r=await engineAction('switch_profile',{name});
+  if(r&&r.status==='ok')await refreshCollectionCapabilities();
+}
+async function createBrowserProfile(){
+  const r=await openInputModal({sub:'多账号浏览器档案 DIY',title:'新建独立浏览器档案',valueLabel:'档案名称（如：小红书备用号 / 抖音二号）',value:'',placeholder:'例如：小红书备用号'});
+  const name=(r&&r.value||'').trim();
+  if(!name)return;
+  const res=await engineAction('create_profile',{name});
+  if(res&&res.status==='ok'){
+    await refreshCollectionCapabilities();
+    if($('profileSelect'))$('profileSelect').value=name;
+    await switchBrowserProfile();
+  }
+}
+async function deleteBrowserProfile(){
+  const name=($('profileSelect')&&$('profileSelect').value)||'default';
+  if(name==='default'){showToast('默认主账号档案不可删除',true);return;}
+  const res=await engineAction('delete_profile',{name});
+  if(res&&res.status==='ok')await refreshCollectionCapabilities();
+}
 async function openLocalDir(pathStr){
-  try{await api('/api/v1/workbench/engine','POST',{action:'open_folder',params:{path:pathStr||$('outdir').value.trim()||DEFAULT_OUTPUT}});}
+  try{await api('/api/v1/workbench/engine','POST',{action:'open_folder',params:{path:pathStr||getOutputDir()}});}
   catch(e){showToast('打开目录失败：'+e.message,true);}
 }
-function openDownloadDir(){openLocalDir($('outdir').value.trim()||DEFAULT_OUTPUT);}
+function openDownloadDir(){openLocalDir(getOutputDir());}
 document.addEventListener('click',e=>{
   const btn=e.target&&e.target.closest?e.target.closest('[data-open-dir]'):null;
   if(btn&&btn.dataset.openDir)openLocalDir(btn.dataset.openDir);
@@ -1517,9 +1733,9 @@ $('engineStatusPill').addEventListener('click',()=>activateNavTab('tabLogin'));
 
 // Original single download & collection wiring
 const settings=()=>({
-  output_dir:$('outdir').value.trim()||DEFAULT_OUTPUT,
-  mode:$('mode').value,
-  image_format:$('format').value||'jpg',
+  output_dir:getOutputDir(),
+  mode:($('d_delay_mode')&&$('d_delay_mode').value)||localStorage.getItem(MODE_KEY)||'auto',
+  image_format:($('d_image_format')&&$('d_image_format').value)||localStorage.getItem(FORMAT_KEY)||'jpg',
   title_template:($('d_title_template')&&$('d_title_template').value.trim())||'评{comments}-藏{favorites}-赞{likes}-{title}-{author}-{publish_time}',
   set_file_time_to_publish:$('d_set_file_time_to_publish')?$('d_set_file_time_to_publish').checked:true,
   auto_ingest_material:$('k_auto_ingest_chip')?$('k_auto_ingest_chip').checked:($('d_auto_ingest_material')?$('d_auto_ingest_material').checked:true),
@@ -1631,11 +1847,13 @@ async function submitCollection(kind){
   if(kind==='homepage'){
     const profile_url=($('authorUrl').value||'').trim()||(wbAuthors.find(a=>a.checked)||{}).url||'';
     if(!profile_url){setCollectionStatus(kind,null,'请填写或勾选一个作者主页链接');showToast('请先填写或勾选主页链接',true);return;}
+    const hpPlat=/xiaohongshu\.com|xhslink\.com/i.test(profile_url)?'xiaohongshu':'douyin';
     btn.disabled=true;
     setCollectionStatus(kind,{status:'queued',label:'准备引擎',message:'正在检查引擎状态并连接采集流程…'},null);
     try{
-      await ensureEngineOnline('douyin');
+      await ensureEngineOnline(hpPlat);
       const req={
+        platform:hpPlat,
         profile_url,
         max_works:Math.max(1,Math.min(50,Number(($('a_max_per_author')||{}).value)||10)),
         min_images:Number(($('a_min_images')||{}).value)||4,
@@ -1643,7 +1861,7 @@ async function submitCollection(kind){
         direct_download:!!($('a_direct_download')?$('a_direct_download').checked:true),
         ...settings()
       };
-      showToast('已启动作者主页采集');
+      showToast(`已启动${hpPlat==='xiaohongshu'?'小红书':'抖音'}作者主页采集`);
       const task=await api('/api/v1/collections/homepage','POST',req);
       await pollCollection('homepage',task.job_id);
     }catch(e){setCollectionStatus(kind,null,e.message);showToast(e.message,true);}
@@ -1790,7 +2008,24 @@ async function refreshCollectionCapabilities(){
       txt.textContent=d.engine_mode==='native-playwright'?'内置双核引擎就绪':((activeEnginePlatform==='xiaohongshu'?'小红书':'抖音')+'引擎在线');banner.classList.remove('show');
     }
     const chLabel=d.browser_channel==='chrome'?'Chrome':(d.browser_channel==='chromium'?'Chromium':'Edge');
-    const kwMsg=online?(d.verification_required?'内置浏览器等待人机验证。':(d.engine_mode==='native-playwright'?`内置 ${chLabel} 持久化引擎在线（自动适配 Edge / Chrome / Chromium · 抖音 / 小红书随时开采），采集后自动下载入库。`:`底层引擎在线（${activeEnginePlatform==='xiaohongshu'?'小红书':'抖音'}），采集作品将自动送入统一下载队列。`)):'底层引擎离线（公开单链接仍可直接使用）。';
+    const drvLabel=d.browser_driver==='patchright'?'Patchright 反检测内核':'Playwright 内核';
+    const sel=$('profileSelect');
+    if(sel&&Array.isArray(d.profiles)&&d.profiles.length){
+      sel.innerHTML=d.profiles.map(p=>`<option value="${esc(p.name)}" ${p.active?'selected':''}>${esc(p.label||p.name)}</option>`).join('');
+      if(d.active_profile)sel.value=d.active_profile;
+    }
+    const rhBox=$('engineRuleHealthBox');
+    if(rhBox){
+      const rh=d.rule_health||{};
+      const fmtRh=(label,st)=>{
+        if(!st)return `${label}：等待自检`;
+        const map={ok:'接口监听正常',dom_fallback:'页面兜底生效',possible_rule_break:'⚠️ 疑似网页改版/需检查登录',gate_blocked:'⚠️ 触发人机验证'};
+        const zh=map[st.status]||'等待采集自检';
+        return `${label}：<strong>${esc(zh)}</strong>（接口 ${st.api_items||0} / 页面 ${st.dom_items||0}）`;
+      };
+      rhBox.innerHTML=`<div>驱动内核：<span class="badge ok">${esc(drvLabel)}</span> · 浏览器：<strong>${esc(chLabel)}</strong> · 当前档案：<strong>${esc(d.active_profile==='default'?'默认主账号':(d.active_profile||'默认主账号'))}</strong></div><div style="margin-top:4px">${fmtRh('抖音规则',rh.douyin)} &nbsp;|&nbsp; ${fmtRh('小红书规则',rh.xiaohongshu)}</div>`;
+    }
+    const kwMsg=online?(d.verification_required?'内置浏览器等待人机验证。':(d.engine_mode==='native-playwright'?`内置 ${chLabel}（${drvLabel}）在线（接口直听 + 抖音/小红书随时开采），采集后自动下载入库。`:`底层引擎在线（${activeEnginePlatform==='xiaohongshu'?'小红书':'抖音'}），采集作品将自动送入统一下载队列。`)):'底层引擎离线（公开单链接仍可直接使用）。';
     $('keywordCapability').textContent=kwMsg;$('homepageCapability').textContent=kwMsg;
     const kp=d.keyword_progress;
     const isStaleVerifyKp=kp&&(kp.phase==='verification'||kp.status==='verification_required')&&!d.verification_required;
@@ -1863,12 +2098,10 @@ $('collectorToggle').addEventListener('click',async()=>{
   });
   $('k_auto_ingest_chip')&&$('k_auto_ingest_chip').addEventListener('change',()=>{
     if($('d_auto_ingest_material'))$('d_auto_ingest_material').checked=$('k_auto_ingest_chip').checked;
-    if($('q_auto_ingest'))$('q_auto_ingest').checked=$('k_auto_ingest_chip').checked;
     triggerAutoSave();
   });
   $('d_auto_ingest_material')&&$('d_auto_ingest_material').addEventListener('change',()=>{
     if($('k_auto_ingest_chip'))$('k_auto_ingest_chip').checked=$('d_auto_ingest_material').checked;
-    if($('q_auto_ingest'))$('q_auto_ingest').checked=$('d_auto_ingest_material').checked;
   });
   $('k_skip_dup_chip')&&$('k_skip_dup_chip').addEventListener('change',()=>{
     if($('d_skip_downloaded_history'))$('d_skip_downloaded_history').checked=$('k_skip_dup_chip').checked;
@@ -1878,6 +2111,14 @@ $('collectorToggle').addEventListener('click',async()=>{
     if($('k_skip_dup_chip'))$('k_skip_dup_chip').checked=$('d_skip_downloaded_history').checked;
   });
   document.querySelectorAll('#settingsPanel input,#settingsPanel select').forEach(el=>el.addEventListener('change',triggerAutoSave));
+  ['sw_theme_day_start','sw_theme_night_start','sw_theme_auto_style'].forEach(id=>{
+    const el=$(id);
+    if(el)el.addEventListener('change',()=>{
+      if(!wbSettings.software)wbSettings.software={};
+      wbSettings.software[id.replace('sw_','')]=el.type==='number'?Number(el.value||0):el.value;
+      if(currentThemeMode==='auto')applyTheme('auto',false);
+    });
+  });
   const bindEnter=(id,fn)=>{const el=$(id);if(el)el.addEventListener('keydown',e=>{if(e.key==='Enter'){e.preventDefault();fn();}});};
   bindEnter('keywordValue',()=>submitCollection('keyword'));
   bindEnter('kwBatchInput',()=>kwAddFromInput());

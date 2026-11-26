@@ -205,7 +205,8 @@ def test_web_job_api():
         assert "xhs-dl-theme" in page
         assert json.dumps(str(Path.home() / "Downloads"), ensure_ascii=False) in page
         assert "MIN_PROGRESS_MS=1100" in page
-        assert 'id="settingsDialog"' in page
+        assert 'id="settingsPanel"' in page
+        assert 'id="d_output_dir"' in page
         assert 'id="tabHomepage"' in page
         assert 'id="tabKeyword"' in page
 

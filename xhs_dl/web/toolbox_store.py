@@ -159,6 +159,7 @@ def default_workbench_settings():
         },
         "software": {
             "theme": "auto",
+            "browser_profile": "default",
             "minimize_to_tray": False,
             "app_window_mode": True,
             "auto_start_engine": False,
@@ -171,6 +172,9 @@ def default_workbench_settings():
             "notify_feishu_app_id": "",
             "notify_feishu_app_secret": "",
             "notify_feishu_webhook": "",
+            "theme_day_start": 7,
+            "theme_night_start": 19,
+            "theme_auto_style": "rotate",
         },
     }
 
@@ -250,8 +254,27 @@ def _empty_state():
         "keywords": [],
         "authors": [],
         "artworks": [],
+        "keyword_groups": {"douyin": [], "xiaohongshu": []},
+        "author_groups": {"douyin": [], "xiaohongshu": []},
         "settings": default_workbench_settings(),
     }
+
+
+def _normalize_group_map(raw_map):
+    out = {"douyin": [], "xiaohongshu": []}
+    if not isinstance(raw_map, dict):
+        return out
+    for plat in ("douyin", "xiaohongshu"):
+        seen = set()
+        vals = raw_map.get(plat)
+        if not isinstance(vals, list):
+            continue
+        for item in vals:
+            name = str(item or "").strip()
+            if name and name not in {"all", "全部", "全部分组"} and name not in seen:
+                out[plat].append(name)
+                seen.add(name)
+    return out
 
 
 def _load_jianghu_keywords_from_dir(runtime_dir):
@@ -423,6 +446,8 @@ def load_state(bridge_dir=None):
                 state["authors"] = [copy.deepcopy(x) for x in raw["authors"] if isinstance(x, dict)]
             if isinstance(raw.get("artworks"), list):
                 state["artworks"] = [copy.deepcopy(x) for x in raw["artworks"] if isinstance(x, dict)]
+            state["keyword_groups"] = _normalize_group_map(raw.get("keyword_groups"))
+            state["author_groups"] = _normalize_group_map(raw.get("author_groups"))
             state["settings"] = _merge_settings(state["settings"], raw.get("settings"))
         synced = _sync_jianghu_into_state(state, runtime_dir, force=False)
         need_reseq = False
@@ -458,13 +483,113 @@ def _normalize_platform(value):
     return "douyin"
 
 
-def _summarize_groups(rows, default_name="默认分组"):
+def _summarize_groups(rows, default_name="默认分组", extra_names=None):
     counts = {}
+    for raw_name in (extra_names or []):
+        clean = str(raw_name or "").strip()
+        if clean and clean not in {"all", "全部", "全部分组"}:
+            counts.setdefault(clean, 0)
     for row in rows:
         name = str(row.get("group") or default_name).strip() or default_name
         counts[name] = counts.get(name, 0) + 1
     names = sorted(counts.keys(), key=lambda g: (0 if g == default_name else 1, g))
     return [{"name": name, "count": counts[name]} for name in names]
+
+
+def _explicit_groups_for_platform(state, groups_key, plat):
+    gmap = state.get(groups_key) if isinstance(state.get(groups_key), dict) else {}
+    plats = ["douyin", "xiaohongshu"] if plat == "all" else [plat]
+    names = []
+    for p in plats:
+        vals = gmap.get(p) or []
+        if isinstance(vals, list):
+            names.extend(vals)
+    return names
+
+
+def _mutate_group_op(state, rows_key, groups_key, op, payload, target_plat, entity_label):
+    gmap = state.setdefault(groups_key, {"douyin": [], "xiaohongshu": []})
+    for p in ("douyin", "xiaohongshu"):
+        if not isinstance(gmap.get(p), list):
+            gmap[p] = []
+    plats = ["douyin", "xiaohongshu"] if target_plat == "all" else [target_plat]
+    invalid = {"", "all", "全部", "全部分组"}
+
+    if op == "create_group":
+        group = str(payload.get("group") or "").strip()
+        if group in invalid:
+            raise ValueError("请输入有效的分组名称")
+        for p in plats:
+            if group not in gmap[p]:
+                gmap[p].append(group)
+        return f"已新建{entity_label}「{group}」"
+
+    if op == "rename_group":
+        old_group = str(payload.get("old_group") or "").strip()
+        new_group = str(payload.get("new_group") or "").strip()
+        if old_group in invalid or new_group in invalid:
+            raise ValueError("请提供有效的原分组名称和新分组名称")
+        if old_group == new_group:
+            raise ValueError("新分组名称不能与原分组相同")
+        updated = 0
+        for row in state[rows_key]:
+            if target_plat != "all" and row.get("platform", "douyin") != target_plat:
+                continue
+            cur_grp = str(row.get("group") or "默认分组").strip() or "默认分组"
+            if cur_grp == old_group:
+                row["group"] = new_group
+                updated += 1
+        found_explicit = False
+        for p in plats:
+            if old_group in gmap[p]:
+                found_explicit = True
+                gmap[p] = [g for g in gmap[p] if g != old_group]
+                if new_group not in gmap[p]:
+                    gmap[p].append(new_group)
+        if updated == 0 and not found_explicit:
+            raise ValueError(f"未找到分组「{old_group}」")
+        return f"已将{entity_label}「{old_group}」重命名为「{new_group}」（共 {updated} 条）"
+
+    if op == "delete_group":
+        group = str(payload.get("group") or "").strip()
+        if group in invalid:
+            raise ValueError("请提供要删除的分组名称")
+        delete_items = bool(payload.get("delete_items", False))
+        if group == "默认分组" and not delete_items:
+            raise ValueError("「默认分组」为基础分组，不能仅解散；如需清空请选择删除组内条目")
+        found_explicit = False
+        for p in plats:
+            if group in gmap[p]:
+                found_explicit = True
+                gmap[p] = [g for g in gmap[p] if g != group]
+        if delete_items:
+            kept = []
+            removed = 0
+            for row in state[rows_key]:
+                matches_plat = (target_plat == "all" or row.get("platform", "douyin") == target_plat)
+                cur_grp = str(row.get("group") or "默认分组").strip() or "默认分组"
+                if matches_plat and cur_grp == group:
+                    removed += 1
+                else:
+                    kept.append(row)
+            if removed == 0 and not found_explicit:
+                raise ValueError(f"未找到分组「{group}」")
+            state[rows_key] = kept
+            _resequence(state[rows_key])
+            return f"已删除{entity_label}「{group}」及组内 {removed} 条记录"
+        moved = 0
+        for row in state[rows_key]:
+            if target_plat != "all" and row.get("platform", "douyin") != target_plat:
+                continue
+            cur_grp = str(row.get("group") or "默认分组").strip() or "默认分组"
+            if cur_grp == group:
+                row["group"] = "默认分组"
+                moved += 1
+        if moved == 0 and not found_explicit:
+            raise ValueError(f"未找到分组「{group}」")
+        return f"已删除{entity_label}「{group}」，原组内 {moved} 条记录已移至「默认分组」"
+
+    raise ValueError(f"不支持的分组操作：{op}")
 
 
 def list_keywords(platform="all", search="", group="all", sort_by="seq", sort_dir="asc", bridge_dir=None):
@@ -476,7 +601,7 @@ def list_keywords(platform="all", search="", group="all", sort_by="seq", sort_di
         row for row in state["keywords"]
         if plat == "all" or row.get("platform", "douyin") == plat
     ]
-    groups = _summarize_groups(plat_rows)
+    groups = _summarize_groups(plat_rows, extra_names=_explicit_groups_for_platform(state, "keyword_groups", plat))
     items = []
     for row in plat_rows:
         row_group = str(row.get("group") or "默认分组").strip() or "默认分组"
@@ -639,26 +764,33 @@ def mutate_keywords(op, payload, bridge_dir=None):
                     updated += 1
             message = f"已将 {updated} 条关键词归入分组「{group}」"
 
-        elif op == "rename_group":
-            old_group = str(payload.get("old_group") or "").strip()
-            new_group = str(payload.get("new_group") or "").strip()
-            invalid = {"", "all", "全部", "全部分组"}
-            if old_group in invalid or new_group in invalid:
-                raise ValueError("请提供有效的原分组名称和新分组名称")
-            if old_group == new_group:
-                raise ValueError("新分组名称不能与原分组相同")
+        elif op in {"create_group", "rename_group", "delete_group"}:
             target_plat = _normalize_platform(payload.get("platform") or "all")
-            updated = 0
-            for row in items:
-                if target_plat != "all" and row.get("platform", "douyin") != target_plat:
-                    continue
-                cur_grp = str(row.get("group") or "默认分组").strip() or "默认分组"
-                if cur_grp == old_group:
-                    row["group"] = new_group
-                    updated += 1
-            if updated == 0:
-                raise ValueError(f"未找到分组「{old_group}」")
-            message = f"已将分组「{old_group}」重命名为「{new_group}」（共 {updated} 条）"
+            message = _mutate_group_op(state, "keywords", "keyword_groups", op, payload, target_plat, "分组")
+
+        elif op == "edit_item":
+            row_id = str(payload.get("id") or "").strip()
+            target = next((r for r in items if str(r.get("id") or "") == row_id), None)
+            if target is None:
+                raise ValueError("未找到要编辑的关键词记录")
+            new_kw = str(payload.get("keyword") or "").strip()
+            if not new_kw:
+                raise ValueError("关键词不能为空")
+            row_plat = target.get("platform", "douyin")
+            conflict = next(
+                (r for r in items if r is not target and r.get("platform", "douyin") == row_plat and str(r.get("keyword", "")).strip().lower() == new_kw.lower()),
+                None,
+            )
+            if conflict is not None:
+                raise ValueError(f"当前平台已存在关键词「{new_kw}」")
+            new_grp = str(payload.get("group") or "默认分组").strip() or "默认分组"
+            if new_grp in {"all", "全部", "全部分组"}:
+                new_grp = "默认分组"
+            new_rm = str(payload.get("remark") if payload.get("remark") is not None else target.get("remark") or "默认").strip() or "默认"
+            target["keyword"] = new_kw
+            target["group"] = new_grp
+            target["remark"] = new_rm
+            message = f"已更新关键词「{new_kw}」"
 
         elif op == "update_remark":
             remark = str(payload.get("remark") or "默认").strip() or "默认"
@@ -751,7 +883,7 @@ def list_authors(platform="all", search="", sort_by="seq", sort_dir="asc", group
         row for row in state["authors"]
         if plat == "all" or row.get("platform", "douyin") == plat
     ]
-    groups = _summarize_groups(plat_rows)
+    groups = _summarize_groups(plat_rows, extra_names=_explicit_groups_for_platform(state, "author_groups", plat))
     items = []
     for row in plat_rows:
         row_group = str(row.get("group") or "默认分组").strip() or "默认分组"
@@ -890,26 +1022,31 @@ def mutate_authors(op, payload, bridge_dir=None):
                     updated += 1
             message = f"已修改 {updated} 条主页分组/备注"
 
-        elif op == "rename_group":
-            old_group = str(payload.get("old_group") or "").strip()
-            new_group = str(payload.get("new_group") or "").strip()
-            invalid = {"", "all", "全部", "全部分组"}
-            if old_group in invalid or new_group in invalid:
-                raise ValueError("请提供有效的原分组名称和新分组名称")
-            if old_group == new_group:
-                raise ValueError("新分组名称不能与原分组相同")
+        elif op in {"create_group", "rename_group", "delete_group"}:
             target_plat = _normalize_platform(payload.get("platform") or "all")
-            updated = 0
-            for row in items:
-                if target_plat != "all" and row.get("platform", "douyin") != target_plat:
-                    continue
-                cur_grp = str(row.get("group") or "默认分组").strip() or "默认分组"
-                if cur_grp == old_group:
-                    row["group"] = new_group
-                    updated += 1
-            if updated == 0:
-                raise ValueError(f"未找到分组「{old_group}」")
-            message = f"已将主页分组「{old_group}」重命名为「{new_group}」（共 {updated} 条）"
+            message = _mutate_group_op(state, "authors", "author_groups", op, payload, target_plat, "主页分组")
+
+        elif op == "edit_item":
+            row_id = str(payload.get("id") or "").strip()
+            target = next((r for r in items if str(r.get("id") or "") == row_id), None)
+            if target is None:
+                raise ValueError("未找到要编辑的主页记录")
+            new_name = str(payload.get("name") or "").strip()
+            if not new_name:
+                raise ValueError("作者名称不能为空")
+            new_url = str(payload.get("url") or "").strip()
+            if new_url:
+                if "http" not in new_url.lower():
+                    raise ValueError("主页网址必须包含 http/https")
+                target["url"] = new_url
+            new_grp = str(payload.get("group") or "默认分组").strip() or "默认分组"
+            if new_grp in {"all", "全部", "全部分组"}:
+                new_grp = "默认分组"
+            new_rm = str(payload.get("remark") if payload.get("remark") is not None else target.get("remark") or "默认").strip() or "默认"
+            target["name"] = new_name
+            target["group"] = new_grp
+            target["remark"] = new_rm
+            message = f"已更新主页「{new_name}」"
 
         elif op == "delete":
             ids = set(payload.get("ids") or [])
@@ -1322,6 +1459,13 @@ def _detect_image_suffix(content):
     raise OSError("响应不是有效图片")
 
 
+def _referer_for_media_url(url):
+    lowered = str(url or "").lower()
+    if "xhscdn" in lowered or "xiaohongshu" in lowered or "xhslink" in lowered:
+        return "https://www.xiaohongshu.com/"
+    return "https://www.douyin.com/"
+
+
 def _download_one_image_bytes(url):
     import requests
     headers = {
@@ -1329,13 +1473,39 @@ def _download_one_image_bytes(url):
             "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
             "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36"
         ),
-        "Referer": "https://www.douyin.com/",
+        "Referer": _referer_for_media_url(url),
     }
     resp = requests.get(str(url), headers=headers, timeout=(15, 45))
     resp.raise_for_status()
     content = resp.content or b""
     suffix = _detect_image_suffix(content)
     return content, suffix
+
+
+def _download_binary_file(url, dest_path, referer=""):
+    import requests
+    headers = {
+        "User-Agent": (
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+            "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36"
+        ),
+        "Referer": referer or _referer_for_media_url(url),
+    }
+    resp = requests.get(str(url), headers=headers, stream=True, timeout=(15, 60))
+    resp.raise_for_status()
+    dest = Path(dest_path)
+    tmp = dest.with_suffix(dest.suffix + ".part")
+    written = 0
+    with tmp.open("wb") as fh:
+        for chunk in resp.iter_content(chunk_size=65536):
+            if chunk:
+                fh.write(chunk)
+                written += len(chunk)
+    if written <= 0:
+        tmp.unlink(missing_ok=True)
+        return False
+    tmp.replace(dest)
+    return True
 
 
 def _utf16_units(text):
@@ -1458,11 +1628,14 @@ def _download_single_artwork_row(row, base_output_dir, download_settings=None):
     title = str(row.get("title") or "").strip()
     keyword = _safe_dir_part(row.get("keyword") or "作品列表下载", default="作品列表下载", max_len=40)
     urls = [str(u).strip() for u in (row.get("image_urls") or []) if str(u).strip()]
-    if not urls:
+    video_url = str(row.get("video_url") or "").strip()
+    live_photo_urls = [str(u).strip() for u in (row.get("live_photo_urls") or []) if str(u).strip()]
+    if not urls and not video_url:
         return None, str(row.get("url") or "")
     target_root = Path(base_output_dir).expanduser().resolve()
-    if target_root.name != "图文作品":
-        target_root = target_root / "关键词作品" / keyword / "图文作品"
+    if target_root.name not in {"图文作品", "视频作品"}:
+        kind_dir = "视频作品" if (not urls and video_url) else "图文作品"
+        target_root = target_root / "关键词作品" / keyword / kind_dir
 
     now_dt = datetime.datetime.now()
     collected_at = now_dt.strftime("%Y-%m-%d %H:%M:%S")
@@ -1476,22 +1649,20 @@ def _download_single_artwork_row(row, base_output_dir, download_settings=None):
 
     downloaded_map = {}
     errors = []
-    with ThreadPoolExecutor(max_workers=min(4, max(1, len(urls)))) as pool:
-        futures = {pool.submit(_download_one_image_bytes, u): idx for idx, u in enumerate(urls[:50], 1)}
-        for fut in as_completed(futures):
-            idx = futures[fut]
-            try:
-                downloaded_map[idx] = fut.result()
-            except Exception as exc:
-                errors.append(str(exc)[:140])
+    if urls:
+        with ThreadPoolExecutor(max_workers=min(4, max(1, len(urls)))) as pool:
+            futures = {pool.submit(_download_one_image_bytes, u): idx for idx, u in enumerate(urls[:50], 1)}
+            for fut in as_completed(futures):
+                idx = futures[fut]
+                try:
+                    downloaded_map[idx] = fut.result()
+                except Exception as exc:
+                    errors.append(str(exc)[:140])
 
-    if not downloaded_map:
-        raise RuntimeError(errors[0] if errors else "图片全部下载失败")
-
-    inner = 0
-    saved = 0
     saved_files = []
     saved_paths = []
+    inner = 0
+    saved = 0
     for pos, idx in enumerate(sorted(downloaded_map), 1):
         content, suffix = downloaded_map[idx]
         try:
@@ -1509,6 +1680,29 @@ def _download_single_artwork_row(row, base_output_dir, download_settings=None):
         saved_files.append(dst.name)
         saved_paths.append(dst)
         saved += 1
+
+    live_photo_files = []
+    for lp_idx, lp_url in enumerate(live_photo_urls[:50], 1):
+        lp_dst = pkg_dir / f"实况{lp_idx}.mp4"
+        try:
+            if _download_binary_file(lp_url, lp_dst, referer=_referer_for_media_url(lp_url)):
+                live_photo_files.append(lp_dst.name)
+                saved_paths.append(lp_dst)
+        except Exception:
+            pass
+
+    video_file = ""
+    if not urls and video_url:
+        v_dst = pkg_dir / "视频.mp4"
+        try:
+            if _download_binary_file(video_url, v_dst, referer=_referer_for_media_url(video_url)):
+                video_file = v_dst.name
+                saved_paths.append(v_dst)
+        except Exception as exc:
+            errors.append(str(exc)[:140])
+
+    if not saved and not video_file:
+        raise RuntimeError(errors[0] if errors else "媒体全部下载失败")
 
     caption = str(row.get("caption") or row.get("title") or "").strip()
     copy_written = False
@@ -1553,6 +1747,8 @@ def _download_single_artwork_row(row, base_output_dir, download_settings=None):
         "image_sizes": list(row.get("image_sizes") or []),
         "image_format": effective_format,
         "watermark_free": not has_watermark,
+        "live_photo_files": live_photo_files,
+        "video_file": video_file,
         "copy_file": "文案.txt" if copy_written else "",
         "save_dir": str(pkg_dir),
         "folder_name": pkg_dir.name,
@@ -1577,7 +1773,7 @@ def _download_single_artwork_row(row, base_output_dir, download_settings=None):
             os.utime(pkg_dir, (publish_ts, publish_ts))
         except OSError:
             pass
-    return {"save_path": str(pkg_dir), "image_count": saved}, ""
+    return {"save_path": str(pkg_dir), "image_count": saved, "video_file": video_file, "live_photo_count": len(live_photo_files)}, ""
 
 
 def _load_material_ingestor():
@@ -2265,10 +2461,64 @@ def _use_native_engine():
     return os.environ.get("XHS_DL_LEGACY_JIANGHU_ENGINE", "0") != "1"
 
 
+def _pick_local_folder(initial_dir=""):
+    if os.name != "nt":
+        return {"status": "unsupported", "path": "", "message": "仅支持 Windows 系统文件夹选择弹窗"}
+    target = str(initial_dir or "").strip()
+    if target:
+        try:
+            target = str(Path(target).expanduser())
+        except Exception:
+            target = ""
+    safe_init = target.replace("'", "''")
+    ps_script = (
+        "Add-Type -AssemblyName System.Windows.Forms; "
+        "$dlg = New-Object System.Windows.Forms.FolderBrowserDialog; "
+        "$dlg.Description = '选择作品保存根目录'; "
+        "$dlg.ShowNewFolderButton = $true; "
+        + (f"if (Test-Path -LiteralPath '{safe_init}') {{ $dlg.SelectedPath = '{safe_init}' }}; " if safe_init else "")
+        + "if ($dlg.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) { Write-Output $dlg.SelectedPath }"
+    )
+    proc = subprocess.run(
+        ["powershell", "-NoProfile", "-STA", "-WindowStyle", "Hidden", "-Command", ps_script],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        timeout=120,
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+    )
+    chosen = (proc.stdout or "").strip().splitlines()[-1].strip() if (proc.stdout or "").strip() else ""
+    if chosen:
+        return {"status": "ok", "path": chosen, "message": f"已选择保存目录：{chosen}"}
+    return {"status": "cancelled", "path": "", "message": "已取消目录选择"}
+
+
+def _open_local_file(path_str=""):
+    raw = str(path_str or "").strip()
+    if not raw:
+        raise ValueError("请先填写配置文件路径")
+    target = Path(raw).expanduser()
+    if not target.exists():
+        example = Path(__file__).resolve().parents[2] / "config.example.json"
+        if target.name.lower() == "config.json" and example.is_file():
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text(example.read_text(encoding="utf-8"), encoding="utf-8")
+        else:
+            raise FileNotFoundError(f"配置文件不存在：{target}")
+    if os.name == "nt":
+        os.startfile(str(target))
+    return {"status": "ok", "path": str(target), "message": f"已打开配置文件：{target}"}
+
+
 def run_engine_action(action, params, bridge_dir, toolbox_project, python_exe):
     params = params if isinstance(params, dict) else {}
     if action == "open_folder":
         return _open_local_folder(params.get("path"))
+    if action == "pick_folder":
+        return _pick_local_folder(params.get("initial_dir"))
+    if action == "open_file":
+        return _open_local_file(params.get("path"))
     if action == "test_notification":
         from xhs_dl.web import notifier
         res = notifier.dispatch_workbench_notification(
@@ -2318,6 +2568,24 @@ def run_engine_action(action, params, bridge_dir, toolbox_project, python_exe):
             return eng.hide_browser()
         if action == "stop_keyword":
             return eng.stop_collection()
+        if action == "list_profiles":
+            return {"status": "ok", "profiles": eng.list_profiles()}
+        if action == "create_profile":
+            return eng.create_profile(params.get("name") or "")
+        if action == "switch_profile":
+            res = eng.switch_profile(params.get("name") or "default")
+            try:
+                update_settings({"software": {"browser_profile": res.get("active_profile") or "default"}}, bridge_dir=bridge_dir)
+            except Exception:
+                pass
+            return res
+        if action == "delete_profile":
+            res = eng.delete_profile(params.get("name") or "")
+            try:
+                update_settings({"software": {"browser_profile": res.get("active_profile") or "default"}}, bridge_dir=bridge_dir)
+            except Exception:
+                pass
+            return res
         if action == "browser_status":
             cap = eng.get_capabilities()
             return {"status": "ready" if cap.get("browser_ready") else "idle", "capabilities": cap}

@@ -490,28 +490,57 @@ def _run_collection_discovery(job_id, command, cleanup_files=None):
                 threading.Thread(target=_send, daemon=True).start()
 
             if pre_task.get("kind") == "homepage":
-                result = eng.collect_douyin_homepage(
-                    pre_task.get("profile_url") or "",
-                    max_works=int(pre_task.get("max_works") or 10),
-                    min_images=int(pre_task.get("min_images") or 4),
-                    max_images=int(pre_task.get("max_images") or 20),
+                hp_url = str(pre_task.get("profile_url") or "")
+                is_xhs_hp = plat_code == "xiaohongshu" or "xiaohongshu.com" in hp_url.lower()
+                if is_xhs_hp:
+                    result = eng.collect_xhs_homepage(
+                        hp_url,
+                        max_works=int(pre_task.get("max_works") or 10),
+                        min_images=int(pre_task.get("min_images") if pre_task.get("min_images") is not None else 1),
+                        max_images=int(pre_task.get("max_images") or 50),
+                        direct_download=bool(pre_task.get("direct_download", True)),
+                        skip_ids=skip_ids,
+                        output_dir=str(pre_task.get("output_dir") or DEFAULT_OUTPUT_DIR),
+                        image_format=str(pre_task.get("image_format") or "jpg"),
+                        title_template=str(pre_task.get("title_template") or toolbox_store.DEFAULT_TITLE_TEMPLATE),
+                        set_file_time=bool(pre_task.get("set_file_time_to_publish", True)),
+                        proxy_url=proxy_url,
+                        on_gate_cb=_on_gate,
+                        job_request=pre_task,
+                    )
+                else:
+                    result = eng.collect_douyin_homepage(
+                        hp_url,
+                        max_works=int(pre_task.get("max_works") or 10),
+                        min_images=int(pre_task.get("min_images") or 4),
+                        max_images=int(pre_task.get("max_images") or 20),
+                        direct_download=bool(pre_task.get("direct_download", True)),
+                        skip_ids=skip_ids,
+                        output_dir=str(pre_task.get("output_dir") or DEFAULT_OUTPUT_DIR),
+                        image_format=str(pre_task.get("image_format") or "jpg"),
+                        title_template=str(pre_task.get("title_template") or toolbox_store.DEFAULT_TITLE_TEMPLATE),
+                        set_file_time=bool(pre_task.get("set_file_time_to_publish", True)),
+                        proxy_url=proxy_url,
+                        on_gate_cb=_on_gate,
+                        job_request=pre_task,
+                    )
+            elif plat_code == "xiaohongshu":
+                cnt_val = int(pre_task.get("count") if pre_task.get("count") is not None else 20)
+                result = eng.collect_xhs_keyword(
+                    pre_task.get("keyword") or "",
+                    count=cnt_val,
+                    min_images=int(pre_task.get("min_images") if pre_task.get("min_images") is not None else 1),
+                    max_images=int(pre_task.get("max_images") or 50),
+                    allow_video=bool(pre_task.get("allow_video", False)),
+                    media_type=str(pre_task.get("media_type") or ("all" if pre_task.get("allow_video") else "image")),
                     direct_download=bool(pre_task.get("direct_download", True)),
+                    web_sort=str(pre_task.get("web_sort") or "综合排序"),
+                    web_publish_time=str(pre_task.get("web_publish_time") or "不限"),
                     skip_ids=skip_ids,
                     output_dir=str(pre_task.get("output_dir") or DEFAULT_OUTPUT_DIR),
                     image_format=str(pre_task.get("image_format") or "jpg"),
                     title_template=str(pre_task.get("title_template") or toolbox_store.DEFAULT_TITLE_TEMPLATE),
                     set_file_time=bool(pre_task.get("set_file_time_to_publish", True)),
-                    proxy_url=proxy_url,
-                    on_gate_cb=_on_gate,
-                    job_request=pre_task,
-                )
-            elif plat_code == "xiaohongshu":
-                result = eng.collect_xhs_keyword(
-                    pre_task.get("keyword") or "",
-                    count=int(pre_task.get("count") or 20),
-                    allow_video=bool(pre_task.get("allow_video", False)),
-                    media_type=str(pre_task.get("media_type") or ("all" if pre_task.get("allow_video") else "image")),
-                    skip_ids=skip_ids,
                     proxy_url=proxy_url,
                     on_gate_cb=_on_gate,
                     job_request=pre_task,
@@ -806,20 +835,31 @@ def _run_collection_discovery(job_id, command, cleanup_files=None):
                 pass
 
 
-def _validate_douyin_profile(value):
+def _validate_profile_url(value):
     urls = extract_urls_from_text(value) if isinstance(value, str) else []
     if len(urls) != 1:
-        raise ValueError("主页采集一次只填写一个抖音主页链接")
+        raise ValueError("主页采集一次只填写一个作者主页链接")
     url = urls[0]
     parsed = urlsplit(url)
     host = (parsed.hostname or "").lower().rstrip(".")
-    allowed_host = (
+    path_lower = (parsed.path or "").lower()
+    if parsed.scheme.lower() not in {"http", "https"} or parsed.username is not None or parsed.password is not None:
+        raise ValueError("请输入合法的抖音或小红书作者主页网址")
+    is_dy = (
         host == "douyin.com" or host.endswith(".douyin.com")
         or host == "iesdouyin.com" or host.endswith(".iesdouyin.com")
     )
-    if (parsed.scheme.lower() not in {"http", "https"} or not allowed_host
-            or parsed.username is not None or parsed.password is not None
-            or "/user/" not in (parsed.path or "").lower()):
+    if is_dy and "/user/" in path_lower:
+        return url, "douyin"
+    is_xhs = host == "xiaohongshu.com" or host.endswith(".xiaohongshu.com") or host == "xhslink.com"
+    if is_xhs and ("/user/profile/" in path_lower or host == "xhslink.com"):
+        return url, "xiaohongshu"
+    raise ValueError("请输入抖音（含 /user/）或小红书（含 /user/profile/）作者主页链接")
+
+
+def _validate_douyin_profile(value):
+    url, plat = _validate_profile_url(value)
+    if plat != "douyin":
         raise ValueError("请输入抖音作者主页链接（路径需包含 /user/）")
     return url
 
@@ -1894,7 +1934,7 @@ class Handler(BaseHTTPRequestHandler):
 
             if api_path.endswith("/homepage"):
                 try:
-                    profile_url = _validate_douyin_profile(body.get("profile_url", ""))
+                    profile_url, profile_plat = _validate_profile_url(body.get("profile_url", ""))
                 except ValueError as exc:
                     for path_str in skip_cleanup_files:
                         Path(path_str).unlink(missing_ok=True)
@@ -1928,8 +1968,9 @@ class Handler(BaseHTTPRequestHandler):
                     command.append("--no-auto-download")
                 command.extend(skip_cmd_args)
                 kind = "homepage"
-                label = "抖音主页"
+                label = "小红书主页" if profile_plat == "xiaohongshu" else "抖音主页"
                 request = {
+                    "platform": profile_plat,
                     "profile_url": profile_url,
                     "max_works": max_works,
                     "min_images": min_images,

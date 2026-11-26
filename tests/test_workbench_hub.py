@@ -675,7 +675,9 @@ def test_ui_template_has_dedup_and_notification_controls():
         'id="k_media_type"',
         'id="k_web_sort"',
         'id="k_web_publish_time"',
-        'id="themePopover"',
+        'id="themeButton"',
+        'CYCLE_THEMES',
+        '主题：自动切换',
         'data-theme="light"',
         'data-theme="dark"',
         'resolveAutoTheme',
@@ -684,6 +686,8 @@ def test_ui_template_has_dedup_and_notification_controls():
         'rename_group',
         'id="subAi"',
         'AI 接入',
+        'id="aiMasterPrompt"',
+        '一键复制给 AI Agent',
         'copyAiSnippet',
         'id="d_write_metadata"',
         '读取时间',
@@ -698,6 +702,20 @@ def test_ui_template_has_dedup_and_notification_controls():
         'id="sw_notify_feishu_app_id"',
         'id="sw_notify_feishu_app_secret"',
         'id="sw_notify_feishu_webhook"',
+        'id="groupManagerModal"',
+        'id="rowEditModal"',
+        'id="sw_proxy_url"',
+        'id="sw_theme_day_start"',
+        'id="sw_theme_night_start"',
+        'id="sw_theme_auto_style"',
+        'id="titleTemplatePreview"',
+        'artResetFilters',
+        'pickFolderInto',
+        'openConfigFileEditor',
+        'insertTemplateToken',
+        'create_group',
+        'delete_group',
+        'edit_item',
         "test_notification",
         'id="queueList"',
         'id="progressBar"',
@@ -712,6 +730,10 @@ def test_ui_template_has_dedup_and_notification_controls():
         'id="d_down_dynamic_cover"',
         'id="k_local_life_only"',
         'id="themePickerCards"',
+        'id="themePopover"',
+        'id="settingsButton"',
+        'id="settingsDialog"',
+        'id="aiCurlExample"',
         'id="tabTasks"',
         'id="tasksPanel"',
         "onmouseleave=\"this.removeAttribute('open')\"",
@@ -1178,3 +1200,316 @@ def test_open_feishu_webhook_openapi_and_browser_channel_detection(monkeypatch):
         cooldown_seconds=60.0,
     )
     assert d_res["feishu"]["sent"] is True and d_res["feishu"]["channel"] == "feishu-webhook"
+
+
+def test_group_crud_row_edit_and_diy_settings(monkeypatch, tmp_path):
+    hub_file = tmp_path / "workbench_hub.json"
+    monkeypatch.setenv("XHS_DL_WORKBENCH_FILE", str(hub_file))
+    monkeypatch.setenv("XHS_DL_AUTO_SYNC_JIANGHU", "0")
+    monkeypatch.setattr(web_app, "TOOLBOX_BRIDGE_DIR", tmp_path / "bridge")
+
+    server = HTTPServer(("127.0.0.1", 0), web_app.Handler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        root = f"http://127.0.0.1:{server.server_port}"
+
+        # 1. Keyword empty group create -> rename -> add -> edit_item -> delete_group (move & cascade)
+        code, k1 = _post_json(root + "/api/v1/workbench/keywords", {"op": "create_group", "platform": "douyin", "group": "江浙沪"})
+        assert code == 200 and any(g["name"] == "江浙沪" and g["count"] == 0 for g in k1["groups"])
+
+        code, k2 = _post_json(
+            root + "/api/v1/workbench/keywords",
+            {"op": "rename_group", "platform": "douyin", "old_group": "江浙沪", "new_group": "长三角"},
+        )
+        assert code == 200
+        assert any(g["name"] == "长三角" for g in k2["groups"])
+        assert not any(g["name"] == "江浙沪" for g in k2["groups"])
+
+        _, k3 = _post_json(
+            root + "/api/v1/workbench/keywords",
+            {"op": "add", "platform": "douyin", "group": "长三角", "text": "莫干山\n千岛湖"},
+        )
+        target_row = next(r for r in k3["items"] if r["keyword"] == "莫干山")
+        _, k4 = _post_json(
+            root + "/api/v1/workbench/keywords",
+            {"op": "edit_item", "id": target_row["id"], "keyword": "莫干山温泉", "group": "长三角", "remark": "核心词"},
+        )
+        edited = next(r for r in k4["items"] if r["id"] == target_row["id"])
+        assert edited["keyword"] == "莫干山温泉" and edited["remark"] == "核心词"
+
+        _, k5 = _post_json(
+            root + "/api/v1/workbench/keywords",
+            {"op": "delete_group", "platform": "douyin", "group": "长三角", "delete_items": False},
+        )
+        assert not any(g["name"] == "长三角" for g in k5["groups"])
+        moved = next(r for r in k5["items"] if r["id"] == target_row["id"])
+        assert moved["group"] == "默认分组"
+
+        _, k6 = _post_json(
+            root + "/api/v1/workbench/keywords",
+            {"op": "add", "platform": "douyin", "group": "临时分组", "text": "临时词A"},
+        )
+        assert any(r["keyword"] == "临时词A" for r in k6["items"])
+        _, k7 = _post_json(
+            root + "/api/v1/workbench/keywords",
+            {"op": "delete_group", "platform": "douyin", "group": "临时分组", "delete_items": True},
+        )
+        assert not any(r["keyword"] == "临时词A" for r in k7["items"])
+        assert not any(g["name"] == "临时分组" for g in k7["groups"])
+
+        # 2. Author group create -> add -> edit_item -> delete_group
+        _, a1 = _post_json(root + "/api/v1/workbench/authors", {"op": "create_group", "platform": "douyin", "group": "民宿达人"})
+        assert any(g["name"] == "民宿达人" and g["count"] == 0 for g in a1["groups"])
+        _, a2 = _post_json(
+            root + "/api/v1/workbench/authors",
+            {"op": "add", "platform": "douyin", "group": "民宿达人", "text": "https://www.douyin.com/user/MS4wLjABAAAA_demo_author"},
+        )
+        au_row = a2["items"][0]
+        _, a3 = _post_json(
+            root + "/api/v1/workbench/authors",
+            {
+                "op": "edit_item",
+                "id": au_row["id"],
+                "name": "安吉小住",
+                "url": "https://www.douyin.com/user/MS4wLjABAAAA_demo_author_v2",
+                "group": "精选达人",
+                "remark": "高赞稳定",
+            },
+        )
+        au_edited = next(r for r in a3["items"] if r["id"] == au_row["id"])
+        assert au_edited["name"] == "安吉小住"
+        assert au_edited["group"] == "精选达人"
+        assert au_edited["remark"] == "高赞稳定"
+
+        # 3. DIY settings persistence (proxy_url & Beijing auto-theme schedule/style)
+        code, saved = _post_json(
+            root + "/api/v1/workbench/settings",
+            {
+                "software": {
+                    "proxy_url": "http://127.0.0.1:7890",
+                    "theme_day_start": 8,
+                    "theme_night_start": 20,
+                    "theme_auto_style": "glass",
+                }
+            },
+        )
+        assert code == 200
+        assert saved["software"]["proxy_url"] == "http://127.0.0.1:7890"
+        assert saved["software"]["theme_day_start"] == 8
+        assert saved["software"]["theme_night_start"] == 20
+        assert saved["software"]["theme_auto_style"] == "glass"
+        _, reloaded = _get_json(root + "/api/v1/workbench/settings")
+        assert reloaded["software"]["proxy_url"] == "http://127.0.0.1:7890"
+        assert reloaded["software"]["theme_auto_style"] == "glass"
+    finally:
+        server.shutdown()
+        server.server_close()
+
+
+def test_patchright_loader_and_network_json_parsers_for_douyin_and_xhs():
+    from xhs_dl.web import native_collector
+
+    _sync_fn, driver_name = native_collector._load_sync_playwright()
+    assert callable(_sync_fn)
+    assert driver_name == "patchright"
+
+    # Douyin search + author_list JSON parsing
+    dy_search_payload = {
+        "data": [
+            {
+                "aweme_info": {
+                    "aweme_id": "7580000000000000123",
+                    "aweme_type": 68,
+                    "media_type": 2,
+                    "desc": "莫干山温泉度假文案",
+                    "create_time": 1735099283,
+                    "author": {"nickname": "小旅", "uid": "1001", "sec_uid": "MS4w_test"},
+                    "statistics": {"digg_count": 88, "comment_count": 12, "collect_count": 34, "share_count": 5},
+                    "images": [
+                        {
+                            "width": 1080,
+                            "height": 1440,
+                            "url_list": [
+                                "https://p3-sign.douyinpic.com/tplv-dy-water/abc.jpeg",
+                                "https://p3-sign.douyinpic.com/origin/clean1.jpeg",
+                            ],
+                        },
+                        {
+                            "width": 1080,
+                            "height": 1440,
+                            "url_list": ["https://p3-sign.douyinpic.com/origin/clean2.png"],
+                        },
+                    ],
+                }
+            }
+        ]
+    }
+    dy_items = native_collector._extract_douyin_items_from_api_payload(dy_search_payload)
+    assert len(dy_items) == 1
+    assert dy_items[0]["source_layer"] == "network_api"
+    assert dy_items[0]["is_photo"] is True
+    assert dy_items[0]["image_urls"] == [
+        "https://p3-sign.douyinpic.com/origin/clean1.jpeg",
+        "https://p3-sign.douyinpic.com/origin/clean2.png",
+    ]
+    assert dy_items[0]["collect_count"] == "34"
+
+    dy_author_payload = {
+        "aweme_list": [
+            {
+                "aweme_id": "7580000000000000456",
+                "aweme_type": 0,
+                "media_type": 4,
+                "desc": "安吉竹海航拍",
+                "video": {"duration": 15000, "play_addr": {"url_list": ["https://v26.douyinvod.com/demo.mp4"]}},
+            }
+        ]
+    }
+    dy_vids = native_collector._extract_douyin_items_from_api_payload(dy_author_payload)
+    assert len(dy_vids) == 1 and dy_vids[0]["is_video"] is True and "demo.mp4" in dy_vids[0]["video_url"]
+
+    # Xiaohongshu search + feed detail + user_posted JSON parsing with xsec_token & LivePhoto
+    xhs_feed_payload = {
+        "data": {
+            "items": [
+                {
+                    "id": "6738ab12000000001e01a2b3",
+                    "xsec_token": "ABcDeF123+/",
+                    "note_card": {
+                        "type": "normal",
+                        "display_title": "桐庐绝美民宿",
+                        "desc": "weekend stay",
+                        "time": 1735099283000,
+                        "user": {"nickname": "宿集", "user_id": "u_99"},
+                        "interact_info": {"liked_count": "1.2万", "collected_count": "890", "comment_count": "45"},
+                        "image_list": [
+                            {
+                                "width": 1242,
+                                "height": 1660,
+                                "info_list": [
+                                    {"image_scene": "WB_PRV", "url": "http://sns-webpic-qc.xhscdn.com/prv/1.jpg"},
+                                    {"image_scene": "WB_DFT", "url": "http://sns-webpic-qc.xhscdn.com/dft/1.jpg"},
+                                ],
+                                "live_photo": True,
+                                "stream": {"h264": [{"master_url": "http://sns-video-qc.xhscdn.com/live1.mp4"}]},
+                            },
+                            {
+                                "width": 1242,
+                                "height": 1660,
+                                "url_default": "https://sns-webpic-qc.xhscdn.com/dft/2.jpg",
+                            },
+                        ],
+                    },
+                }
+            ]
+        }
+    }
+    xhs_items = native_collector._extract_xhs_items_from_api_payload(xhs_feed_payload, source="pc_search")
+    assert len(xhs_items) == 1
+    x = xhs_items[0]
+    assert "xsec_token=ABcDeF123%2B%2F" in x["url"]
+    assert x["image_urls"] == [
+        "https://sns-webpic-qc.xhscdn.com/dft/1.jpg",
+        "https://sns-webpic-qc.xhscdn.com/dft/2.jpg",
+    ]
+    assert x["live_photo_urls"] == ["https://sns-video-qc.xhscdn.com/live1.mp4"]
+    assert x["like_count"] == "12000"
+    assert x["create_time"] == "1735099283"
+
+    xhs_user_payload = {
+        "data": {
+            "notes": [
+                {
+                    "note_id": "6738ab12000000001e01a2b4",
+                    "xsec_token": "USER_TOK",
+                    "type": "normal",
+                    "display_title": "达人主页合集",
+                    "user": {"nick_name": "博主A", "user_id": "u_1"},
+                    "cover": {"url_default": "https://sns-webpic-qc.xhscdn.com/cover.jpg"},
+                }
+            ]
+        }
+    }
+    hp_items = native_collector._extract_xhs_items_from_api_payload(xhs_user_payload, source="pc_user")
+    assert len(hp_items) == 1 and hp_items[0]["id"] == "6738ab12000000001e01a2b4"
+    assert "xsec_source=pc_user" in hp_items[0]["url"]
+
+
+def test_xhs_homepage_routing_live_photo_download_profiles_and_rule_health(monkeypatch, tmp_path):
+    import requests as _req
+    from xhs_dl.web import native_collector, ui_template
+
+    # 1. Dual-platform profile URL validation
+    dy_url, dy_plat = web_app._validate_profile_url("https://www.douyin.com/user/MS4wLjABAAAA_test")
+    assert dy_plat == "douyin" and "/user/" in dy_url
+    xhs_url, xhs_plat = web_app._validate_profile_url("https://www.xiaohongshu.com/user/profile/5f1234abcd")
+    assert xhs_plat == "xiaohongshu" and "/user/profile/" in xhs_url
+
+    # 2. LivePhoto & Xiaohongshu Referer download in _download_single_artwork_row
+    png_bytes = (
+        b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x02\x00\x00\x00\x02\x08\x02\x00\x00\x00\xfd\xd4\x9as"
+        b"\x00\x00\x00\x14IDATx\x9cc\xf8\xcf\xc0\x80\x01\x01\x00\x00\x00\x00\xff\xff\x03\x00\x07\x85\x01\x81"
+        b"\x7f\x92\xbd\xd2\x00\x00\x00\x00IEND\xaeB`\x82"
+    )
+    seen_referers = []
+
+    class _FakeResp:
+        def __init__(self, payload_bytes):
+            self.content = payload_bytes
+
+        def raise_for_status(self):
+            return None
+
+        def iter_content(self, chunk_size=65536):
+            yield self.content
+
+    def _fake_get(url, headers=None, stream=False, timeout=None):
+        seen_referers.append((url, (headers or {}).get("Referer")))
+        if "live1.mp4" in url:
+            return _FakeResp(b"\x00\x00\x00\x18ftypmp42livephoto")
+        return _FakeResp(png_bytes)
+
+    monkeypatch.setattr(_req, "get", _fake_get)
+    row = {
+        "id": "xhs_lp_1",
+        "platform": "xiaohongshu",
+        "keyword": "杭州赏秋",
+        "title": "实况图文测试",
+        "author": "旅行拍客",
+        "image_urls": ["https://sns-webpic-qc.xhscdn.com/dft/1.jpg"],
+        "live_photo_urls": ["https://sns-video-qc.xhscdn.com/live1.mp4"],
+    }
+    dl_info, _ = toolbox_store._download_single_artwork_row(row, str(tmp_path / "xhs_dl_out"))
+    from pathlib import Path as _P
+    pkg_dir = _P(dl_info["save_path"])
+    assert (pkg_dir / "封面.jpg").is_file()
+    assert (pkg_dir / "实况1.mp4").is_file()
+    meta = json.loads((pkg_dir / "metadata.json").read_text(encoding="utf-8"))
+    assert meta["live_photo_files"] == ["实况1.mp4"]
+    assert all(ref == "https://www.xiaohongshu.com/" for _, ref in seen_referers)
+
+    # 3. Multi-account profiles + rule_health + UI markers
+    monkeypatch.setenv("XHS_DL_PROFILES_ROOT", str(tmp_path / "profiles"))
+    eng = native_collector.NativeBrowserCollector()
+    assert eng.get_capabilities()["browser_driver"] == "patchright"
+    assert eng.get_capabilities()["supports"]["xiaohongshu_homepage"] is True
+
+    created = eng.create_profile("小红书备用号")
+    assert any(p["name"] == "小红书备用号" for p in created["profiles"])
+    switched = eng.switch_profile("小红书备用号")
+    assert switched["active_profile"] == "小红书备用号"
+    deleted = eng.delete_profile("小红书备用号")
+    assert deleted["active_profile"] == "default"
+
+    assert eng._record_rule_health("douyin", api_items=0, dom_items=0) == "possible_rule_break"
+    assert eng._record_rule_health("xiaohongshu", api_items=12, dom_items=0) == "ok"
+    caps = eng.get_capabilities()
+    assert caps["rule_health"]["douyin"]["status"] == "possible_rule_break"
+    assert caps["rule_health"]["xiaohongshu"]["status"] == "ok"
+
+    html = web_app.TEMPLATE
+    for marker in ("profileSelect", "engineRuleHealthBox", "createBrowserProfile", "switchBrowserProfile", "deleteBrowserProfile"):
+        assert marker in html
+
+

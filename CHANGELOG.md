@@ -1,5 +1,21 @@
 # 变更记录
 
+## 4.1.0 反检测内核与接口直听升级 · 小红书实况/主页 · 多账号档案 · 全站 DIY — 2026-11-26
+
+- **反检测浏览器底座升级（`native_collector.py`, `pyproject.toml`）**：
+  - 支持优先使用 `Patchright` 驱动本机 Edge / Chrome / Chromium（`[project.optional-dependencies] stealth`），底层消除 `Runtime.enable` 等 CDP 自动化泄漏特征，保留 Playwright 自动兜底。
+  - 将机械的瞬间触底滚动升级为 `_human_scroll_page` 拟人化鼠标移动 + 多段随机滚轮滑动 + 随机停顿节流，降低触发滑块风控概率。
+- **真实网络 JSON 响应监听与小红书全链路打通（`native_collector.py`, `toolbox_store.py`, `app.py`）**：
+  - 抖音关键词与作者主页接入 `page.on("response")` 真实接口 JSON 监听（`/aweme/v1/web/...`）为主、DOM 扒取为兜底，无水印原图与统计参数直取，抗前端改版能力大幅增强。
+  - 小红书升级支持接口直听（`/api/sns/web/v1/search/notes`、`/api/sns/web/v1/feed`、`/api/sns/web/v1/user_posted`）与 `__INITIAL_STATE__` 兜底，**完整透传 `xsec_token`**、自动读取笔记详情全套高清多图与 **LivePhoto 实况视频（`实况1.mp4`…）** 并写入 `metadata.json`（自动匹配 `xhscdn` Referer）。
+  - 正式上线 **小红书作者主页批量采集**（支持 `/user/profile/...`，能力声明 `xiaohongshu_homepage: true`）。
+- **多账号浏览器档案与规则健康自检（`native_collector.py`, `toolbox_store.py`, `ui_template.py`）**：
+  - 「平台登录」新增 **多账号浏览器档案**（新建 / 切换 / 删除独立隔离会话目录，保留默认主账号 Cookie）与 **反检测内核 / 双平台规则自检看板**，区分正常捕获、DOM 兜底、人机验证拦截与疑似改版告警。
+- **全站 DIY 与交互精简（`toolbox_store.py`, `ui_template.py`）**：
+  - 关键词与作者主页新增 **分组完整 CRUD**（支持新建 0 条记录空分组、原地改名、`仅删组` 迁回默认分组、`删组含词` 二次确认级联删除）与 **单条行内编辑**（名称 / 网址 / 分组 / 备注）。
+  - 作品列表补充 **清空勾选**、**重置筛选** 与每行 **原链** 跳转；设置面板补充原生目录选择器（`浏览选择…`）、`config.json` 直开编辑、命名模板占位符可点拼接 + 实时预览、代理地址与北京时间昼夜主题规则配置。
+  - 移除顶部冗余「快速设置」弹窗，将右上角主题按钮改为 **直接点击循环切换 5 种模式**（`自动切换 / 浅色拟态 / 深色拟态 / 浅色玻璃 / 深色玻璃`）；「AI 接入」精简为一段可直接发给 AI Agent 的完整指令提示词。
+
 ## 4.0.0 统一智能采集工作台（内置多浏览器内核 · 统一历史记录 · 通用飞书 · AI 接入） — 2026-11-25
 
 - **内置持久化浏览器内核（`native_collector.py`）**：

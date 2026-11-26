@@ -8,21 +8,25 @@ external .NET helper (DY提取作品_直开.exe / jianghu_cli.py) is required.
 from __future__ import annotations
 
 from datetime import datetime
+import importlib.util
 import json
 import os
 import queue
+import random
 import re
+import shutil
 import socket
 import threading
 import time
 from concurrent.futures import Future
 from pathlib import Path
-from typing import Any, Callable, Dict, Iterable, List, Optional, Set
+from typing import Any, Callable, Dict, Iterable, List, Optional, Set, Tuple
 from urllib.parse import quote, urlsplit
 
 
 DEFAULT_TITLE_TEMPLATE = "评{comments}-藏{favorites}-赞{likes}-{title}-{author}-{publish_time}"
-DEFAULT_PROFILE_DIR = Path.home() / ".xhs-dl" / "browser_profiles" / "collector"
+PROFILES_ROOT = Path.home() / ".xhs-dl" / "browser_profiles"
+DEFAULT_PROFILE_DIR = PROFILES_ROOT / "collector"
 MAX_SEARCH_CANDIDATES = 300
 MAX_SEARCH_SCROLL_ROUNDS = 45
 SEARCH_SCROLL_SETTLE_SECONDS = 1.15
@@ -561,6 +565,484 @@ def _resolve_reachable_proxy(proxy_url: str = "") -> Optional[str]:
     return None
 
 
+def _load_sync_playwright() -> Tuple[Any, str]:
+    """Load Patchright's stealth sync_playwright first, falling back to vanilla Playwright."""
+    try:
+        from patchright.sync_api import sync_playwright as pr_sync  # type: ignore
+        return pr_sync, "patchright"
+    except Exception:
+        from playwright.sync_api import sync_playwright as pw_sync
+        return pw_sync, "playwright"
+
+
+def _detected_driver_name() -> str:
+    try:
+        if importlib.util.find_spec("patchright") is not None:
+            return "patchright"
+    except Exception:
+        pass
+    return "playwright"
+
+
+def _pump_wait(page: Any, seconds: float) -> None:
+    """Wait while yielding to Playwright/Patchright dispatcher so page.on('response') fires."""
+    secs = max(0.05, float(seconds or 0.05))
+    wait_fn = getattr(page, "wait_for_timeout", None)
+    if callable(wait_fn):
+        try:
+            wait_fn(int(secs * 1000))
+            return
+        except Exception:
+            pass
+    time.sleep(secs)
+
+
+def _human_scroll_page(
+    page: Any,
+    *,
+    steps: int = 3,
+    settle_min: float = 0.95,
+    settle_max: float = 1.65,
+) -> None:
+    """Perform randomized mouse-wheel scrolling and natural pacing to reduce bot detection."""
+    mouse = getattr(page, "mouse", None)
+    used_wheel = False
+    if mouse is not None and hasattr(mouse, "wheel"):
+        try:
+            if hasattr(mouse, "move"):
+                mouse.move(random.randint(360, 880), random.randint(240, 560))
+            n_steps = random.randint(2, max(2, steps))
+            for _ in range(n_steps):
+                mouse.wheel(0, random.randint(280, 620))
+                _pump_wait(page, random.uniform(0.14, 0.34))
+            used_wheel = True
+        except Exception:
+            used_wheel = False
+    if not used_wheel:
+        try:
+            page.evaluate(f"window.scrollBy(0, {random.randint(560, 880)})")
+        except Exception:
+            pass
+    _pump_wait(page, random.uniform(settle_min, settle_max))
+
+
+def _is_douyin_watermarked(url: str) -> bool:
+    return bool(re.search(r"tplv-dy-water|watermark", str(url or ""), re.I))
+
+
+def _pick_clean_douyin_image_url(image: Dict[str, Any]) -> str:
+    if not isinstance(image, dict):
+        return ""
+    originals = [str(u).strip() for u in (image.get("url_list") or image.get("urlList") or []) if str(u or "").strip()]
+    downloads = [str(u).strip() for u in (image.get("download_url_list") or image.get("downloadUrlList") or []) if str(u or "").strip()]
+    pref_re = re.compile(r"\.(?:jpe?g|png)(?:[?#]|$)", re.I)
+    for bucket in (
+        [u for u in originals if not _is_douyin_watermarked(u) and pref_re.search(u)],
+        [u for u in originals if not _is_douyin_watermarked(u)],
+        [u for u in downloads if not _is_douyin_watermarked(u) and pref_re.search(u)],
+        [u for u in downloads if not _is_douyin_watermarked(u)],
+    ):
+        if bucket:
+            return bucket[0]
+    raw = str(image.get("url") or "").strip()
+    if raw and not _is_douyin_watermarked(raw):
+        return raw
+    for pool in (originals, downloads):
+        if pool:
+            return pool[0]
+    return raw
+
+
+def _parse_douyin_aweme_dict(aweme: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    if not isinstance(aweme, dict):
+        return None
+    raw_id = aweme.get("aweme_id") or aweme.get("awemeId") or aweme.get("group_id") or aweme.get("groupId")
+    nid = str(raw_id or "").strip()
+    if not nid or not re.match(r"^\d{10,}$", nid):
+        return None
+    raw_images = aweme.get("images") if isinstance(aweme.get("images"), list) else []
+    image_urls: List[str] = []
+    image_sizes: List[str] = []
+    seen_imgs: Set[str] = set()
+    for img in raw_images:
+        if not isinstance(img, dict):
+            continue
+        u = _pick_clean_douyin_image_url(img)
+        if u and u not in seen_imgs:
+            seen_imgs.add(u)
+            image_urls.append(u)
+        w = img.get("width") or 0
+        h = img.get("height") or 0
+        if w and h:
+            image_sizes.append(f"{w}x{h}")
+
+    aweme_type = int(aweme.get("aweme_type") if aweme.get("aweme_type") is not None else (aweme.get("awemeType") or 0) or 0)
+    media_type = int(aweme.get("media_type") if aweme.get("media_type") is not None else (aweme.get("mediaType") or 0) or 0)
+    video = aweme.get("video") if isinstance(aweme.get("video"), dict) else {}
+    play_addr = video.get("play_addr") or video.get("playAddr") or {}
+    play_urls = []
+    if isinstance(play_addr, dict):
+        play_urls = [str(u).strip() for u in (play_addr.get("url_list") or play_addr.get("urlList") or []) if str(u or "").strip()]
+    elif isinstance(video.get("playAddrUrlList"), list):
+        play_urls = [str(u).strip() for u in video["playAddrUrlList"] if str(u or "").strip()]
+    video_url = play_urls[0] if play_urls else str(video.get("playApi") or "").strip()
+
+    cover_urls: List[str] = list(image_urls)
+    for c_key in ("origin_cover", "originCover", "cover"):
+        cov = video.get(c_key)
+        if isinstance(cov, dict):
+            for u in (cov.get("url_list") or cov.get("urlList") or []):
+                us = str(u or "").strip()
+                if us and not _is_douyin_watermarked(us) and us not in cover_urls:
+                    cover_urls.append(us)
+        elif isinstance(cov, str) and cov.strip() and not _is_douyin_watermarked(cov):
+            if cov.strip() not in cover_urls:
+                cover_urls.append(cov.strip())
+
+    has_images = len(image_urls) > 0
+    is_photo = has_images and (aweme_type == 68 or media_type == 2 or not video_url)
+    is_video = (not is_photo) and (media_type == 4 or aweme_type == 0 or bool(video_url) or int(video.get("duration") or 0) > 0)
+    if not is_photo and not is_video:
+        is_photo = has_images
+        is_video = not has_images
+
+    stats = aweme.get("statistics") or aweme.get("stats") or {}
+    author = aweme.get("author") or aweme.get("authorInfo") or {}
+    desc = str(aweme.get("desc") or aweme.get("item_title") or aweme.get("itemTitle") or aweme.get("caption") or "").strip()
+    note_or_video = "note" if is_photo else "video"
+    return {
+        "id": nid,
+        "platform": "douyin",
+        "source_layer": "network_api",
+        "url": f"https://www.douyin.com/{note_or_video}/{nid}",
+        "title": desc[:300],
+        "caption": desc[:12000],
+        "text": desc[:1800],
+        "author": str((author.get("nickname") or author.get("name") or "") if isinstance(author, dict) else "").strip()[:120],
+        "author_uid": str((author.get("uid") or author.get("authorId") or "") if isinstance(author, dict) else ""),
+        "author_sec_uid": str((author.get("sec_uid") or author.get("secUid") or "") if isinstance(author, dict) else ""),
+        "is_photo": is_photo,
+        "is_video": is_video,
+        "image_count": len(image_urls),
+        "image_urls": image_urls[:50],
+        "image_sizes": image_sizes[:50],
+        "cover_urls": cover_urls[:50],
+        "video_url": video_url,
+        "aweme_type": str(aweme_type) if aweme_type else "",
+        "media_type": str(media_type) if media_type else "",
+        "create_time": str(aweme.get("create_time") or aweme.get("createTime") or ""),
+        "play_count": str(stats.get("play_count") or stats.get("playCount") or "0") if isinstance(stats, dict) else "0",
+        "like_count": str(stats.get("digg_count") or stats.get("diggCount") or stats.get("like_count") or "0") if isinstance(stats, dict) else "0",
+        "comment_count": str(stats.get("comment_count") or stats.get("commentCount") or "0") if isinstance(stats, dict) else "0",
+        "collect_count": str(stats.get("collect_count") or stats.get("collectCount") or "0") if isinstance(stats, dict) else "0",
+        "share_count": str(stats.get("share_count") or stats.get("shareCount") or "0") if isinstance(stats, dict) else "0",
+    }
+
+
+def _extract_douyin_items_from_api_payload(payload: Any) -> List[Dict[str, Any]]:
+    if not isinstance(payload, dict):
+        return []
+    out: List[Dict[str, Any]] = []
+    seen: Set[str] = set()
+    candidates: List[Dict[str, Any]] = []
+    for entry in (payload.get("aweme_list") or []):
+        if isinstance(entry, dict):
+            candidates.append(entry)
+    for entry in (payload.get("data") or []):
+        if not isinstance(entry, dict):
+            continue
+        if isinstance(entry.get("aweme_info"), dict):
+            candidates.append(entry["aweme_info"])
+        elif isinstance(entry.get("aweme_mix_info"), dict) and isinstance(entry["aweme_mix_info"].get("aweme_info"), dict):
+            candidates.append(entry["aweme_mix_info"]["aweme_info"])
+        elif entry.get("aweme_id") or entry.get("awemeId"):
+            candidates.append(entry)
+    for aweme in candidates:
+        parsed = _parse_douyin_aweme_dict(aweme)
+        if parsed and parsed["id"] not in seen:
+            seen.add(parsed["id"])
+            out.append(parsed)
+    return out
+
+
+def _normalize_https(url: str) -> str:
+    raw = str(url or "").strip()
+    if raw.startswith("http://"):
+        return "https://" + raw[7:]
+    if raw.startswith("//"):
+        return "https:" + raw
+    return raw
+
+
+def _parse_cn_count(raw: Any) -> str:
+    if raw is None:
+        return "0"
+    if isinstance(raw, (int, float)):
+        return str(max(0, int(raw)))
+    text = str(raw).strip()
+    if not text:
+        return "0"
+    m = re.match(r"^(\d+(?:\.\d+)?)\s*万\+?$", text)
+    if m:
+        return str(int(float(m.group(1)) * 10000))
+    m2 = re.match(r"^(\d+)$", text)
+    if m2:
+        return m2.group(1)
+    return "0"
+
+
+def _clean_xhs_image_url(img: Dict[str, Any]) -> str:
+    if not isinstance(img, dict):
+        return ""
+    for k in ("url_default", "urlDefault", "url", "url_pre", "urlPre"):
+        val = _normalize_https(str(img.get(k) or ""))
+        if val and "WB_DFT" in val:
+            return val
+    info_list = img.get("info_list") or img.get("infoList") or []
+    if isinstance(info_list, list):
+        for scene in ("WB_DFT", "WB_PRV", ""):
+            for info in info_list:
+                if not isinstance(info, dict):
+                    continue
+                if scene and str(info.get("image_scene") or info.get("imageScene") or "").upper() != scene:
+                    continue
+                u = _normalize_https(str(info.get("url") or ""))
+                if u:
+                    return u
+    for k in ("url_default", "urlDefault", "url", "url_pre", "urlPre"):
+        val = _normalize_https(str(img.get(k) or ""))
+        if val:
+            return val
+    return ""
+
+
+def _extract_xhs_live_photo_url(img: Dict[str, Any]) -> str:
+    if not isinstance(img, dict) or not img.get("live_photo"):
+        return ""
+    stream = img.get("stream") if isinstance(img.get("stream"), dict) else {}
+    for codec in ("h264", "h265", "av1"):
+        arr = stream.get(codec)
+        if not isinstance(arr, list):
+            continue
+        for item in arr:
+            if not isinstance(item, dict):
+                continue
+            master = _normalize_https(str(item.get("master_url") or item.get("masterUrl") or ""))
+            if master:
+                return master
+            for b in (item.get("backup_urls") or item.get("backupUrls") or []):
+                bu = _normalize_https(str(b or ""))
+                if bu:
+                    return bu
+    return ""
+
+
+def _build_xhs_note_url(note_id: str, xsec_token: str = "", source: str = "pc_search") -> str:
+    nid = str(note_id or "").strip()
+    tok = str(xsec_token or "").strip()
+    if tok:
+        return f"https://www.xiaohongshu.com/explore/{nid}?xsec_token={quote(tok, safe='')}&xsec_source={quote(source or 'pc_search', safe='')}"
+    return f"https://www.xiaohongshu.com/explore/{nid}"
+
+
+def _parse_xhs_note_card(
+    note_id: str,
+    card: Dict[str, Any],
+    *,
+    xsec_token: str = "",
+    source: str = "pc_search",
+) -> Optional[Dict[str, Any]]:
+    nid = str(note_id or (card.get("note_id") if isinstance(card, dict) else "") or (card.get("id") if isinstance(card, dict) else "") or "").strip()
+    if not nid or not isinstance(card, dict):
+        return None
+    tok = str(xsec_token or card.get("xsec_token") or card.get("xsecToken") or "").strip()
+    note_type = str(card.get("type") or "normal").strip().lower()
+    image_list = card.get("image_list") or card.get("imageList") or []
+    image_urls: List[str] = []
+    image_sizes: List[str] = []
+    live_photo_urls: List[str] = []
+    seen_imgs: Set[str] = set()
+    if isinstance(image_list, list):
+        for img in image_list:
+            if not isinstance(img, dict):
+                continue
+            u = _clean_xhs_image_url(img)
+            if u and u not in seen_imgs:
+                seen_imgs.add(u)
+                image_urls.append(u)
+            w = img.get("width") or 0
+            h = img.get("height") or 0
+            if w and h:
+                image_sizes.append(f"{w}x{h}")
+            lp = _extract_xhs_live_photo_url(img)
+            if lp and lp not in live_photo_urls:
+                live_photo_urls.append(lp)
+
+    cover = card.get("cover") if isinstance(card.get("cover"), dict) else {}
+    cover_url = _clean_xhs_image_url(cover) if cover else ""
+    if not image_urls and cover_url:
+        image_urls.append(cover_url)
+
+    video_url = ""
+    vid = card.get("video") if isinstance(card.get("video"), dict) else {}
+    media = vid.get("media") if isinstance(vid.get("media"), dict) else {}
+    v_stream = media.get("stream") if isinstance(media.get("stream"), dict) else {}
+    for codec in ("h264", "h265", "av1"):
+        arr = v_stream.get(codec)
+        if isinstance(arr, list) and arr and isinstance(arr[0], dict):
+            video_url = _normalize_https(str(arr[0].get("master_url") or arr[0].get("masterUrl") or ""))
+            if video_url:
+                break
+
+    is_video = note_type == "video" or bool(video_url and len(image_urls) <= 1)
+    is_photo = not is_video
+    user = card.get("user") if isinstance(card.get("user"), dict) else {}
+    interact = card.get("interact_info") or card.get("interactInfo") or {}
+    title = str(card.get("display_title") or card.get("displayTitle") or card.get("title") or "").strip()
+    desc = str(card.get("desc") or title or "").strip()
+    if not title and desc:
+        title = desc.splitlines()[0][:120]
+
+    raw_ts = card.get("time") or card.get("last_update_time") or card.get("lastUpdateTime") or ""
+    create_time = ""
+    if raw_ts not in (None, ""):
+        try:
+            ts_num = int(float(raw_ts))
+            if ts_num > 10_000_000_000:
+                ts_num //= 1000
+            create_time = str(ts_num)
+        except (TypeError, ValueError):
+            create_time = str(raw_ts)
+
+    return {
+        "id": nid,
+        "platform": "xiaohongshu",
+        "source_layer": "network_api",
+        "xsec_token": tok,
+        "url": _build_xhs_note_url(nid, tok, source=source),
+        "title": title[:300],
+        "caption": desc[:12000],
+        "text": desc[:1800],
+        "author": str(user.get("nickname") or user.get("nick_name") or user.get("nickName") or "").strip()[:120],
+        "author_uid": str(user.get("user_id") or user.get("userId") or ""),
+        "is_photo": is_photo,
+        "is_video": is_video,
+        "image_count": 0 if is_video else len(image_urls),
+        "image_urls": [] if is_video else image_urls[:50],
+        "image_sizes": image_sizes[:50],
+        "live_photo_urls": live_photo_urls[:50],
+        "cover_urls": [cover_url] if cover_url else image_urls[:1],
+        "video_url": video_url,
+        "create_time": create_time,
+        "like_count": _parse_cn_count(interact.get("liked_count") or interact.get("likedCount")) if isinstance(interact, dict) else "0",
+        "comment_count": _parse_cn_count(interact.get("comment_count") or interact.get("commentCount")) if isinstance(interact, dict) else "0",
+        "collect_count": _parse_cn_count(interact.get("collected_count") or interact.get("collectedCount")) if isinstance(interact, dict) else "0",
+        "share_count": _parse_cn_count(interact.get("shared_count") or interact.get("sharedCount") or interact.get("share_count")) if isinstance(interact, dict) else "0",
+    }
+
+
+def _extract_xhs_items_from_api_payload(payload: Any, *, source: str = "pc_search") -> List[Dict[str, Any]]:
+    if not isinstance(payload, dict):
+        return []
+    data = payload.get("data") if isinstance(payload.get("data"), dict) else payload
+    if not isinstance(data, dict):
+        return []
+    out: List[Dict[str, Any]] = []
+    seen: Set[str] = set()
+    raw_list = []
+    if isinstance(data.get("items"), list):
+        raw_list.extend(data["items"])
+    if isinstance(data.get("notes"), list):
+        raw_list.extend(data["notes"])
+    for entry in raw_list:
+        if not isinstance(entry, dict):
+            continue
+        card = entry.get("note_card") or entry.get("noteCard")
+        nid = str(entry.get("id") or entry.get("note_id") or entry.get("noteId") or "").strip()
+        tok = str(entry.get("xsec_token") or entry.get("xsecToken") or "").strip()
+        if not isinstance(card, dict):
+            card = entry
+        parsed = _parse_xhs_note_card(nid, card, xsec_token=tok, source=source)
+        if parsed and parsed["id"] not in seen:
+            seen.add(parsed["id"])
+            out.append(parsed)
+    return out
+
+
+def _merge_discovered_card(prev: Optional[Dict[str, Any]], incoming: Dict[str, Any]) -> Dict[str, Any]:
+    """Merge DOM snapshot or Network API record cleanly, preferring richer Network API payloads."""
+    if not isinstance(prev, dict) or not prev:
+        return dict(incoming)
+    merged = dict(prev)
+    prev_api = prev.get("source_layer") == "network_api"
+    inc_api = incoming.get("source_layer") == "network_api"
+    for k, v in incoming.items():
+        if v in (None, "", [], {}):
+            continue
+        if k == "image_urls":
+            prev_imgs = merged.get("image_urls") or []
+            if len(v) > len(prev_imgs) or (inc_api and not prev_api and len(v) >= len(prev_imgs)):
+                merged[k] = v
+                merged["image_count"] = len(v)
+        elif k == "image_count":
+            if int(v or 0) > int(merged.get("image_count") or 0):
+                merged[k] = v
+        elif inc_api or not prev_api or not merged.get(k):
+            merged[k] = v
+    if merged.get("image_urls") and merged.get("is_photo"):
+        merged["image_count"] = max(int(merged.get("image_count") or 0), len(merged["image_urls"]))
+    return merged
+
+
+def _attach_response_collector(
+    page: Any,
+    url_patterns: Iterable[str],
+    extractor: Callable[[Any], List[Dict[str, Any]]],
+) -> Tuple[Dict[str, Dict[str, Any]], Dict[str, int], Callable[[], None]]:
+    """Listen to real browser JSON responses without interfering with page execution."""
+    captured: Dict[str, Dict[str, Any]] = {}
+    stats = {"api_responses": 0, "api_items": 0}
+    patterns = tuple(p for p in url_patterns if p)
+    on_fn = getattr(page, "on", None)
+    if not callable(on_fn) or not patterns:
+        return captured, stats, (lambda: None)
+
+    def _on_response(resp: Any) -> None:
+        try:
+            url = str(getattr(resp, "url", "") or "")
+            if not any(p in url for p in patterns):
+                return
+            status = getattr(resp, "status", 200)
+            if isinstance(status, int) and status >= 400:
+                return
+            data = resp.json()
+            items = extractor(data)
+            if items:
+                stats["api_responses"] += 1
+                stats["api_items"] += len(items)
+                for it in items:
+                    cid = str(it.get("id") or "").strip()
+                    if cid:
+                        captured[cid] = _merge_discovered_card(captured.get(cid), it)
+        except Exception:
+            pass
+
+    try:
+        on_fn("response", _on_response)
+    except Exception:
+        return captured, stats, (lambda: None)
+
+    def _detach() -> None:
+        rem = getattr(page, "remove_listener", None)
+        if callable(rem):
+            try:
+                rem("response", _on_response)
+            except Exception:
+                pass
+
+    return captured, stats, _detach
+
+
 def _find_browser_hwnd(user32: Any, wintypes: Any, title_hint: str = "") -> int:
     import ctypes
 
@@ -734,7 +1216,7 @@ def _candidate_records(
 
 
 class NativeBrowserCollector:
-    """Single-owner Playwright persistent Edge/Chrome collector engine."""
+    """Single-owner Patchright/Playwright persistent Edge/Chrome collector engine."""
 
     PLATFORM_LOGIN_URLS = {
         "douyin": "https://www.douyin.com/",
@@ -744,7 +1226,22 @@ class NativeBrowserCollector:
 
     def __init__(self, profile_dir: Optional[str | Path] = None):
         env_dir = os.environ.get("XHS_DL_BROWSER_PROFILE_DIR", "").strip()
-        self.profile_dir = Path(profile_dir or env_dir or DEFAULT_PROFILE_DIR).expanduser()
+        self._explicit_profile = bool(profile_dir or env_dir)
+        self._active_profile = "custom" if self._explicit_profile else "default"
+        if not self._explicit_profile:
+            try:
+                from xhs_dl.web import toolbox_store
+                sw = (toolbox_store.get_settings() or {}).get("software") or {}
+                saved_prof = str(sw.get("browser_profile") or "default").strip() or "default"
+                if saved_prof != "default" and self._profile_dir_for(saved_prof).exists():
+                    self._active_profile = saved_prof
+            except Exception:
+                pass
+        self.profile_dir = (
+            Path(profile_dir or env_dir).expanduser()
+            if self._explicit_profile
+            else self._profile_dir_for(self._active_profile)
+        )
         self._state_lock = threading.Lock()
         self._cmd_queue: queue.Queue = queue.Queue()
         self._worker_started = False
@@ -754,12 +1251,178 @@ class NativeBrowserCollector:
         self._page = None
         self._cdp = None
         self._channel_used = ""
+        self._driver_used = _detected_driver_name()
         self._active_platform = "douyin"
         self._busy = False
         self._verification_required = False
         self._cancel_event = threading.Event()
         self._paused_job: Optional[Dict[str, Any]] = None
         self._keyword_progress: Dict[str, Any] = {}
+        self._rule_health: Dict[str, Dict[str, Any]] = {
+            "douyin": {"status": "idle", "api_items": 0, "dom_items": 0, "message": "等待采集自检", "updated_at": ""},
+            "xiaohongshu": {"status": "idle", "api_items": 0, "dom_items": 0, "message": "等待采集自检", "updated_at": ""},
+        }
+
+    # ── Multi-account browser profile management ──────────────────────
+    def _profiles_root_dir(self) -> Path:
+        env_root = os.environ.get("XHS_DL_PROFILES_ROOT", "").strip()
+        return Path(env_root).expanduser() if env_root else PROFILES_ROOT
+
+    def _profiles_index_file(self) -> Path:
+        return self._profiles_root_dir() / "profiles.json"
+
+    def _load_profile_index(self) -> Dict[str, str]:
+        try:
+            raw = json.loads(self._profiles_index_file().read_text(encoding="utf-8"))
+            if isinstance(raw, dict):
+                return {str(k): str(v) for k, v in raw.items() if k and v and k != "default"}
+        except (OSError, ValueError, TypeError):
+            pass
+        return {}
+
+    def _save_profile_index(self, mapping: Dict[str, str]) -> None:
+        idx = self._profiles_index_file()
+        idx.parent.mkdir(parents=True, exist_ok=True)
+        idx.write_text(json.dumps(mapping, ensure_ascii=False, indent=2), encoding="utf-8")
+
+    def _default_profile_dir(self) -> Path:
+        env_root = os.environ.get("XHS_DL_PROFILES_ROOT", "").strip()
+        return (Path(env_root).expanduser() / "collector") if env_root else DEFAULT_PROFILE_DIR
+
+    def _profile_dir_for(self, name: str) -> Path:
+        clean = str(name or "default").strip() or "default"
+        if clean == "default":
+            return self._default_profile_dir()
+        mapping = self._load_profile_index()
+        if clean in mapping:
+            return self._profiles_root_dir() / mapping[clean]
+        slug = re.sub(r"[^a-zA-Z0-9_-]+", "_", clean).strip("_") or f"p_{abs(hash(clean)) % 100000}"
+        return self._profiles_root_dir() / f"profile_{slug}"
+
+    def list_profiles(self) -> List[Dict[str, Any]]:
+        mapping = self._load_profile_index()
+        names = ["default"] + [k for k in mapping.keys() if k != "default"]
+        if self._active_profile not in names and self._active_profile != "custom":
+            names.append(self._active_profile)
+        return [
+            {
+                "name": n,
+                "label": "默认主账号" if n == "default" else n,
+                "active": n == self._active_profile,
+                "is_default": n == "default",
+                "dir": str(self._profile_dir_for(n)),
+            }
+            for n in names
+        ]
+
+    def create_profile(self, name: str) -> Dict[str, Any]:
+        clean = str(name or "").strip()
+        if not clean or len(clean) > 40:
+            raise ValueError("档案名称不能为空且不超过 40 个字符")
+        if clean in {"default", "默认主账号", "custom"}:
+            raise ValueError("该名称为系统保留名称")
+        mapping = self._load_profile_index()
+        if clean in mapping:
+            raise ValueError(f"档案「{clean}」已存在")
+        slug = re.sub(r"[^a-zA-Z0-9_-]+", "_", clean).strip("_")
+        folder = f"profile_{slug}" if slug and (self._profiles_root_dir() / f"profile_{slug}").name not in mapping.values() else f"profile_{int(time.time() * 1000) % 1000000}"
+        target_dir = self._profiles_root_dir() / folder
+        target_dir.mkdir(parents=True, exist_ok=True)
+        mapping[clean] = folder
+        self._save_profile_index(mapping)
+        return {
+            "status": "ok",
+            "created": clean,
+            "profiles": self.list_profiles(),
+            "message": f"已新建浏览器档案「{clean}」",
+        }
+
+    def switch_profile(self, name: str) -> Dict[str, Any]:
+        clean = str(name or "default").strip() or "default"
+        with self._state_lock:
+            if self._busy:
+                raise ValueError("当前有采集任务正在运行，请等待结束后再切换浏览器档案")
+        mapping = self._load_profile_index()
+        if clean != "default" and clean not in mapping and not self._profile_dir_for(clean).exists():
+            raise ValueError(f"浏览器档案「{clean}」不存在")
+        target_dir = self._profile_dir_for(clean)
+        target_dir.mkdir(parents=True, exist_ok=True)
+        if self._worker_started:
+            try:
+                self._call_browser(self._close_browser_in_worker, timeout=20.0)
+            except Exception:
+                pass
+        with self._state_lock:
+            self._active_profile = clean
+            self._explicit_profile = False
+            self.profile_dir = target_dir
+            self._verification_required = False
+        return {
+            "status": "ok",
+            "active_profile": clean,
+            "profiles": self.list_profiles(),
+            "message": f"已切换为浏览器档案「{'默认主账号' if clean == 'default' else clean}」（如首次使用请点登录）",
+        }
+
+    def delete_profile(self, name: str) -> Dict[str, Any]:
+        clean = str(name or "").strip()
+        if not clean or clean in {"default", "默认主账号", "custom"}:
+            raise ValueError("默认主账号档案不可删除")
+        with self._state_lock:
+            if self._busy:
+                raise ValueError("当前有采集任务正在运行，请先停止后再删除档案")
+        mapping = self._load_profile_index()
+        if clean not in mapping:
+            raise ValueError(f"档案「{clean}」不存在")
+        if self._active_profile == clean:
+            self.switch_profile("default")
+        target_dir = self._profiles_root_dir() / mapping.pop(clean)
+        self._save_profile_index(mapping)
+        if target_dir.is_dir():
+            shutil.rmtree(target_dir, ignore_errors=True)
+        return {
+            "status": "ok",
+            "deleted": clean,
+            "active_profile": self._active_profile,
+            "profiles": self.list_profiles(),
+            "message": f"已删除浏览器档案「{clean}」",
+        }
+
+    def _record_rule_health(
+        self,
+        platform: str,
+        *,
+        api_items: int,
+        dom_items: int,
+        gate_blocked: bool = False,
+        skipped_dup: int = 0,
+        message: str = "",
+    ) -> str:
+        plat = "xiaohongshu" if platform == "xiaohongshu" else "douyin"
+        if gate_blocked:
+            status = "gate_blocked"
+            msg = message or "触发人机验证/登录墙"
+        elif api_items > 0:
+            status = "ok"
+            msg = f"接口监听正常（捕获 {api_items} 条）"
+        elif dom_items > 0:
+            status = "dom_fallback"
+            msg = f"使用页面 DOM 兜底（捕获 {dom_items} 条）"
+        elif skipped_dup > 0:
+            status = "ok"
+            msg = f"发现作品均已历史去重（跳过 {skipped_dup} 条）"
+        else:
+            status = "possible_rule_break"
+            msg = message or "页面已打开且未触发验证码，但接口与页面均未解析到作品，平台网页或接口规则可能已更新，建议检查登录态或查看「平台登录 → 规则自检」"
+        with self._state_lock:
+            self._rule_health[plat] = {
+                "status": status,
+                "api_items": int(api_items),
+                "dom_items": int(dom_items),
+                "message": msg,
+                "updated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            }
+        return status
 
     # ── Worker thread plumbing (Playwright sync API thread-safety) ────
     def _ensure_worker(self) -> None:
@@ -832,7 +1495,7 @@ class NativeBrowserCollector:
             except Exception:
                 self._close_browser_in_worker()
 
-        from playwright.sync_api import sync_playwright
+        sync_playwright_fn, driver_used = _load_sync_playwright()
 
         self.profile_dir.mkdir(parents=True, exist_ok=True)
         # Clear stale SingletonLock left by hard-killed previous processes
@@ -844,7 +1507,8 @@ class NativeBrowserCollector:
                 except OSError:
                     pass
 
-        self._pw = sync_playwright().start()
+        self._pw = sync_playwright_fn().start()
+        self._driver_used = driver_used
         proxy = _resolve_reachable_proxy(proxy_url)
         launch_args = self._build_launch_args()
         last_exc: Optional[Exception] = None
@@ -875,12 +1539,13 @@ class NativeBrowserCollector:
             self._close_browser_in_worker()
             raise RuntimeError(f"无法启动内置浏览器组件：{last_exc}")
 
-        try:
-            self._context.add_init_script(
-                "Object.defineProperty(navigator, 'webdriver', { get: () => undefined });"
-            )
-        except Exception:
-            pass
+        if driver_used != "patchright":
+            try:
+                self._context.add_init_script(
+                    "Object.defineProperty(navigator, 'webdriver', { get: () => undefined });"
+                )
+            except Exception:
+                pass
         pages = self._context.pages
         self._page = pages[0] if pages else self._context.new_page()
         try:
@@ -977,22 +1642,27 @@ class NativeBrowserCollector:
 
     # ── Public engine controls ────────────────────────────────────────
     def get_capabilities(self) -> Dict[str, Any]:
+        profiles = self.list_profiles()
         with self._state_lock:
             return {
                 "available": True,
                 "status": "online",
                 "engine_mode": "native-playwright",
+                "browser_driver": self._driver_used or _detected_driver_name(),
                 "browser_channel": self._channel_used or _detect_available_browser_channel(),
                 "browser_ready": self._context is not None,
+                "active_profile": self._active_profile,
+                "profiles": profiles,
                 "age_seconds": 0.0,
                 "active_platform": self._active_platform,
                 "verification_required": self._verification_required,
                 "busy": self._busy,
                 "keyword_progress": dict(self._keyword_progress),
+                "rule_health": {k: dict(v) for k, v in self._rule_health.items()},
                 "supports": {
-                    "homepage": ["douyin"],
+                    "homepage": ["douyin", "xiaohongshu"],
                     "keyword": ["douyin", "xiaohongshu"],
-                    "xiaohongshu_homepage": False,
+                    "xiaohongshu_homepage": True,
                 },
             }
 
@@ -1004,12 +1674,15 @@ class NativeBrowserCollector:
         self._call_browser(lambda: self._ensure_page_in_worker(proxy_url=proxy_url), timeout=35.0)
         ch = self._channel_used or _detect_available_browser_channel()
         ch_name = "Edge" if ch == "msedge" else ("Chrome" if ch == "chrome" else "Chromium")
+        drv = "Patchright 反检测内核" if self._driver_used == "patchright" else "Playwright 内核"
         return {
             "status": "ok",
             "platform": plat,
             "engine_mode": "native-playwright",
+            "browser_driver": self._driver_used,
             "browser_channel": ch,
-            "message": f"内置 {ch_name} 浏览器采集核心已在线就绪",
+            "active_profile": self._active_profile,
+            "message": f"内置 {ch_name}（{drv}）采集核心已在线就绪",
         }
 
     def open_platform_login(self, platform: str = "douyin", proxy_url: str = "", topmost: bool = False) -> Dict[str, Any]:
@@ -1149,9 +1822,23 @@ class NativeBrowserCollector:
             web_publish_time=web_publish_time,
             media_type=eff_media_type,
         )
+        api_cards: Dict[str, Dict[str, Any]] = {}
+        api_stats = {"api_responses": 0, "api_items": 0}
+        dom_ids: Set[str] = set()
+        detach_listener: Callable[[], None] = lambda: None
         try:
             def _open_and_wait():
+                nonlocal api_cards, api_stats, detach_listener
                 page = self._ensure_page_in_worker(proxy_url=proxy_url)
+                api_cards, api_stats, detach_listener = _attach_response_collector(
+                    page,
+                    (
+                        "/aweme/v1/web/general/search/",
+                        "/aweme/v1/web/search/item/",
+                        "/aweme/v1/web/search/search_item/",
+                    ),
+                    _extract_douyin_items_from_api_payload,
+                )
                 cur = ""
                 try:
                     cur = str(page.url or "")
@@ -1173,9 +1860,11 @@ class NativeBrowserCollector:
                     snap = page.evaluate(_DOUYIN_SEARCH_SNAPSHOT_SCRIPT)
                     if isinstance(snap, dict):
                         latest = snap
-                        if snap.get("verification") or snap.get("login_required") or (snap.get("cards") or []):
+                        if snap.get("verification") or snap.get("login_required") or (snap.get("cards") or []) or api_cards:
+                            if api_cards or (snap.get("cards") or []) or snap.get("verification") or snap.get("login_required"):
+                                _pump_wait(page, 0.35)
                             return {"cancelled": False, "snapshot": snap}
-                    time.sleep(0.6)
+                    _pump_wait(page, 0.55)
                 return {"cancelled": False, "snapshot": latest}
 
             open_res = self._call_browser(_open_and_wait, timeout=45.0)
@@ -1198,6 +1887,7 @@ class NativeBrowserCollector:
                     self._call_browser(lambda: self._bring_to_front_in_worker(topmost=True), timeout=10.0)
                 except Exception:
                     pass
+                self._record_rule_health("douyin", api_items=len(api_cards), dom_items=len(dom_ids), gate_blocked=True, message=gate_msg)
                 self._set_progress(phase="verification", status=gate_status, message=gate_msg)
                 if callable(on_gate_cb):
                     try:
@@ -1215,26 +1905,28 @@ class NativeBrowserCollector:
             all_cards: Dict[str, Dict[str, Any]] = {}
             crawled_ids: Set[str] = set()
 
-            def _absorb(s: Dict[str, Any]) -> None:
-                for card in (s.get("cards") or []):
-                    if not isinstance(card, dict):
-                        continue
-                    cid = str(card.get("id") or f"idx:{card.get('index')}")
-                    crawled_ids.add(cid)
-                    if card.get("id"):
-                        prev = all_cards.get(str(card["id"]), {})
-                        merged = dict(prev)
-                        for k, v in card.items():
-                            if v not in (None, "", [], {}):
-                                merged[k] = v
-                        all_cards[str(card["id"])] = merged
+            def _absorb(s: Optional[Dict[str, Any]]) -> None:
+                if isinstance(s, dict):
+                    for card in (s.get("cards") or []):
+                        if not isinstance(card, dict):
+                            continue
+                        cid = str(card.get("id") or f"idx:{card.get('index')}")
+                        crawled_ids.add(cid)
+                        if card.get("id"):
+                            sid = str(card["id"])
+                            dom_ids.add(sid)
+                            all_cards[sid] = _merge_discovered_card(all_cards.get(sid), card)
+                for sid, acard in list(api_cards.items()):
+                    crawled_ids.add(sid)
+                    all_cards[sid] = _merge_discovered_card(all_cards.get(sid), acard)
 
             _absorb(snap)
             idle_rounds = 0
             seen_count = len(crawled_ids)
-            for _ in range(MAX_SEARCH_SCROLL_ROUNDS):
+            for round_idx in range(MAX_SEARCH_SCROLL_ROUNDS):
                 if self._cancel_event.is_set():
                     break
+                _absorb(None)
                 cur_list = _candidate_records(
                     {"cards": list(all_cards.values())},
                     MAX_SEARCH_CANDIDATES,
@@ -1251,15 +1943,17 @@ class NativeBrowserCollector:
                     crawled=len(crawled_ids),
                     qualified=len(fresh_list),
                     total=len(crawled_ids),
-                    message=f"正在滚动读取抖音搜索列表；已抓到 {len(fresh_list)} 条新合格作品（已扫描 {len(crawled_ids)}，去重 {dup_skipped}）",
+                    message=f"正在滚动读取抖音搜索列表；已抓到 {len(fresh_list)} 条新合格作品（接口 {len(api_cards)} / 页面 {len(dom_ids)}，去重 {dup_skipped}）",
                 )
                 if len(fresh_list) >= target:
                     break
 
                 def _scroll_and_snap():
                     page = self._ensure_page_in_worker(proxy_url=proxy_url)
+                    extra_pause = 0.8 if (round_idx + 1) % 6 == 0 else 0.0
+                    _human_scroll_page(page, steps=3, settle_min=0.95 + extra_pause, settle_max=1.65 + extra_pause)
                     sc = page.evaluate(_DOUYIN_SCROLL_SCRIPT)
-                    time.sleep(SEARCH_SCROLL_SETTLE_SECONDS)
+                    _pump_wait(page, 0.25)
                     nxt = page.evaluate(_DOUYIN_SEARCH_SNAPSHOT_SCRIPT)
                     return sc, nxt
 
@@ -1275,6 +1969,7 @@ class NativeBrowserCollector:
                             self._call_browser(lambda: self._bring_to_front_in_worker(topmost=True), timeout=10.0)
                         except Exception:
                             pass
+                        self._record_rule_health("douyin", api_items=len(api_cards), dom_items=len(dom_ids), gate_blocked=True, message=gate_msg)
                         self._set_progress(phase="verification", status=gate_status, message=gate_msg)
                         if callable(on_gate_cb):
                             try:
@@ -1289,6 +1984,8 @@ class NativeBrowserCollector:
                             "message": gate_msg,
                         }
                     _absorb(nxt)
+                else:
+                    _absorb(None)
 
                 if len(crawled_ids) > seen_count:
                     seen_count = len(crawled_ids)
@@ -1310,6 +2007,12 @@ class NativeBrowserCollector:
             )
             fresh = [c for c in qualified_all if str(c.get("id") or "") not in skip_set][:target]
             skipped_dup_count = max(0, len(qualified_all) - len([c for c in qualified_all if str(c.get("id") or "") not in skip_set]))
+            health_status = self._record_rule_health(
+                "douyin",
+                api_items=len(api_cards),
+                dom_items=len(dom_ids),
+                skipped_dup=skipped_dup_count,
+            )
 
             candidates_out: List[Dict[str, Any]] = []
             for idx, item in enumerate(fresh, 1):
@@ -1328,6 +2031,8 @@ class NativeBrowserCollector:
             if not candidates_out:
                 if skipped_dup_count:
                     zero_msg = f"共发现 {skipped_dup_count} 条合格作品，均已历史采集过，本次自动去重跳过"
+                elif health_status == "possible_rule_break":
+                    zero_msg = "页面已打开且未触发验证码，但抖音接口与页面均未解析到作品，规则可能已更新，请检查登录态或查看「平台登录 → 规则自检」"
                 elif eff_media_type == "video":
                     zero_msg = "未发现符合条件的视频作品"
                 elif eff_media_type == "all":
@@ -1427,6 +2132,10 @@ class NativeBrowserCollector:
                 "message": done_msg,
             }
         finally:
+            try:
+                detach_listener()
+            except Exception:
+                pass
             with self._state_lock:
                 self._busy = False
 
@@ -1456,9 +2165,18 @@ class NativeBrowserCollector:
             self._busy = True
             self._verification_required = False
 
+        api_cards: Dict[str, Dict[str, Any]] = {}
+        dom_ids: Set[str] = set()
+        detach_listener: Callable[[], None] = lambda: None
         try:
             def _open_author():
+                nonlocal api_cards, detach_listener
                 page = self._ensure_page_in_worker(proxy_url=proxy_url)
+                api_cards, _, detach_listener = _attach_response_collector(
+                    page,
+                    ("/aweme/v1/web/aweme/post/",),
+                    _extract_douyin_items_from_api_payload,
+                )
                 page.goto(target_url, wait_until="domcontentloaded", timeout=30000)
                 deadline = time.monotonic() + 20.0
                 latest: Dict[str, Any] = {}
@@ -1466,9 +2184,10 @@ class NativeBrowserCollector:
                     snap = page.evaluate(_DOUYIN_AUTHOR_SNAPSHOT_SCRIPT)
                     if isinstance(snap, dict):
                         latest = snap
-                        if snap.get("verification") or snap.get("login_required") or (snap.get("items") or []):
+                        if snap.get("verification") or snap.get("login_required") or (snap.get("items") or []) or api_cards:
+                            _pump_wait(page, 0.35)
                             return snap
-                    time.sleep(0.7)
+                    _pump_wait(page, 0.6)
                 return latest
 
             snap = self._call_browser(_open_author, timeout=40.0)
@@ -1482,6 +2201,7 @@ class NativeBrowserCollector:
                     self._call_browser(lambda: self._bring_to_front_in_worker(topmost=True), timeout=10.0)
                 except Exception:
                     pass
+                self._record_rule_health("douyin", api_items=len(api_cards), dom_items=len(dom_ids), gate_blocked=True, message=gate_msg)
                 if callable(on_gate_cb):
                     try:
                         on_gate_cb(gate_status, gate_msg)
@@ -1494,7 +2214,12 @@ class NativeBrowserCollector:
                 if isinstance(snap, dict):
                     for it in (snap.get("items") or []):
                         if isinstance(it, dict) and it.get("id"):
-                            items_by_id[str(it["id"])] = it
+                            sid = str(it["id"])
+                            dom_ids.add(sid)
+                            items_by_id[sid] = _merge_discovered_card(items_by_id.get(sid), it)
+                for sid, acard in list(api_cards.items()):
+                    if acard.get("is_photo"):
+                        items_by_id[sid] = _merge_discovered_card(items_by_id.get(sid), acard)
                 filtered = [
                     it for it in items_by_id.values()
                     if min_images <= int(it.get("image_count") or 0) <= max_images
@@ -1505,8 +2230,7 @@ class NativeBrowserCollector:
 
                 def _scroll_author():
                     page = self._ensure_page_in_worker(proxy_url=proxy_url)
-                    page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
-                    time.sleep(1.1)
+                    _human_scroll_page(page, steps=3, settle_min=0.95, settle_max=1.55)
                     return page.evaluate(_DOUYIN_AUTHOR_SNAPSHOT_SCRIPT)
 
                 snap = self._call_browser(_scroll_author, timeout=20.0)
@@ -1520,6 +2244,12 @@ class NativeBrowserCollector:
             chosen = fresh_all[:limit]
             for it in chosen:
                 it["keyword"] = "作者主页"
+            health_status = self._record_rule_health(
+                "douyin",
+                api_items=len(api_cards),
+                dom_items=len(dom_ids),
+                skipped_dup=skipped_dup,
+            )
 
             links = [str(it.get("url") or "") for it in chosen if it.get("url")]
             download_items: List[Dict[str, Any]] = []
@@ -1547,6 +2277,11 @@ class NativeBrowserCollector:
                     except Exception:
                         continue
 
+            msg = (
+                f"主页采集完成：发现 {len(chosen)} 套图文" + (f"，已下载 {len(download_items)} 套" if direct_download else "")
+                if (chosen or health_status != "possible_rule_break")
+                else "抖音主页已打开且未触发验证码，但接口与页面均未解析到作品，规则可能已更新"
+            )
             return {
                 "status": "completed" if chosen else "completed_zero",
                 "success": True,
@@ -1557,20 +2292,139 @@ class NativeBrowserCollector:
                 "media_file_count": total_media,
                 "skipped_duplicate_count": skipped_dup,
                 "completion_confirmed": bool(chosen),
-                "message": f"主页采集完成：发现 {len(chosen)} 套图文" + (f"，已下载 {len(download_items)} 套" if direct_download else ""),
+                "message": msg,
             }
         finally:
+            try:
+                detach_listener()
+            except Exception:
+                pass
             with self._state_lock:
                 self._busy = False
+
+    def _enrich_xhs_note_detail_in_worker(self, page: Any, item: Dict[str, Any]) -> Dict[str, Any]:
+        """Open XHS note URL (preserving xsec_token) to capture all high-res images & LivePhotos."""
+        url = str(item.get("url") or "").strip()
+        nid = str(item.get("id") or "").strip()
+        if not url or not nid or not callable(getattr(page, "goto", None)):
+            return item
+        feed_captured, _, detach = _attach_response_collector(
+            page,
+            ("/api/sns/web/v1/feed",),
+            lambda p: _extract_xhs_items_from_api_payload(p, source="pc_feed"),
+        )
+        try:
+            page.goto(url, wait_until="domcontentloaded", timeout=22000)
+            _pump_wait(page, random.uniform(0.85, 1.45))
+            if nid in feed_captured:
+                return _merge_discovered_card(item, feed_captured[nid])
+            try:
+                state_note = page.evaluate(
+                    """(nid) => {
+                      try {
+                        var st = window.__INITIAL_STATE__;
+                        var map = st && st.note && st.note.noteDetailMap;
+                        if (!map) return null;
+                        var entry = map[nid] || map[Object.keys(map)[0]];
+                        return entry && (entry.note || entry) || null;
+                      } catch (_) { return null; }
+                    }""",
+                    nid,
+                )
+                if isinstance(state_note, dict):
+                    parsed = _parse_xhs_note_card(nid, state_note, xsec_token=str(item.get("xsec_token") or ""), source="pc_feed")
+                    if parsed:
+                        return _merge_discovered_card(item, parsed)
+            except Exception:
+                pass
+        except Exception:
+            pass
+        finally:
+            detach()
+        return item
+
+    def _download_xhs_candidates(
+        self,
+        chosen: List[Dict[str, Any]],
+        *,
+        output_dir: str,
+        image_format: str,
+        title_template: str,
+        set_file_time: bool,
+    ) -> Tuple[List[Dict[str, Any]], int]:
+        from xhs_dl.web import toolbox_store
+
+        dl_cfg = {
+            "image_format": image_format or "jpg",
+            "title_template": title_template or DEFAULT_TITLE_TEMPLATE,
+            "set_file_time_to_publish": bool(set_file_time),
+        }
+        base_out = output_dir or str(Path.home() / "Downloads")
+        download_items: List[Dict[str, Any]] = []
+        total_media = 0
+        for pos, row in enumerate(chosen, 1):
+            if self._cancel_event.is_set():
+                break
+            self._set_progress(
+                phase="downloading",
+                downloaded=len(download_items),
+                qualified=len(chosen),
+                message=f"正在下载小红书第 {pos}/{len(chosen)} 条：{str(row.get('title') or '')[:24]}",
+            )
+            try:
+                if row.get("image_urls") or row.get("video_url"):
+                    info, _ = toolbox_store._download_single_artwork_row(row, base_out, download_settings=dl_cfg)
+                    if info:
+                        dl_item = dict(row)
+                        dl_item["downloaded"] = True
+                        dl_item["completion_confirmed"] = True
+                        dl_item["save_directory"] = info["save_path"]
+                        dl_item["image_count"] = info["image_count"]
+                        dl_item["media_file_count"] = int(info.get("image_count") or 0) + (1 if info.get("video_file") else 0)
+                        dl_item["download_status"] = (
+                            "已下载视频"
+                            if info.get("video_file") and not info.get("image_count")
+                            else f"已下载 {info['image_count']} 张图"
+                        )
+                        download_items.append(dl_item)
+                        total_media += int(dl_item["media_file_count"] or 0)
+                        continue
+                if row.get("url"):
+                    from xhs_dl.unified import UnifiedDownloader
+
+                    vdl = UnifiedDownloader(output_dir=base_out, image_format=image_format or "jpg")
+                    vres = vdl.download([str(row["url"])])
+                    vitem = (getattr(vres, "items", None) or [None])[0]
+                    save_dir = str(getattr(vitem, "save_dir", "") or "").strip() if vitem else ""
+                    if vitem and getattr(vitem, "success", False) and save_dir:
+                        dl_item = dict(row)
+                        dl_item["downloaded"] = True
+                        dl_item["completion_confirmed"] = True
+                        dl_item["save_directory"] = save_dir
+                        dl_item["download_status"] = "已下载完成"
+                        download_items.append(dl_item)
+                        total_media += 1
+            except Exception:
+                continue
+        return download_items, total_media
 
     def collect_xhs_keyword(
         self,
         keyword: str,
         *,
         count: int = 20,
+        min_images: int = 1,
+        max_images: int = 50,
         allow_video: bool = False,
         media_type: str = "",
+        direct_download: bool = True,
+        web_sort: str = "综合排序",
+        web_publish_time: str = "不限",
         skip_ids: Optional[Iterable[str]] = None,
+        output_dir: str = "",
+        image_format: str = "jpg",
+        title_template: str = DEFAULT_TITLE_TEMPLATE,
+        set_file_time: bool = True,
         proxy_url: str = "",
         on_gate_cb: Optional[Callable[[str, str], None]] = None,
         job_request: Optional[Dict[str, Any]] = None,
@@ -1582,7 +2436,7 @@ class NativeBrowserCollector:
         if eff_media_type not in {"image", "video", "all"}:
             eff_media_type = "all" if allow_video else "image"
         skip_set = {str(x).strip() for x in (skip_ids or []) if str(x).strip()}
-        target = max(1, min(200, int(count or 20)))
+        target = MAX_SEARCH_CANDIDATES if int(count or 0) == 0 else max(1, min(200, int(count or 20)))
         self._cancel_event.clear()
         with self._state_lock:
             self._active_platform = "xiaohongshu"
@@ -1601,9 +2455,18 @@ class NativeBrowserCollector:
                 "updated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
             }
         search_url = f"https://www.xiaohongshu.com/search_result?keyword={quote(kw, safe='')}&source=web_search_result_notes"
+        api_cards: Dict[str, Dict[str, Any]] = {}
+        dom_ids: Set[str] = set()
+        detach_listener: Callable[[], None] = lambda: None
         try:
             def _open_xhs():
+                nonlocal api_cards, detach_listener
                 page = self._ensure_page_in_worker(proxy_url=proxy_url)
+                api_cards, _, detach_listener = _attach_response_collector(
+                    page,
+                    ("/api/sns/web/v1/search/notes",),
+                    lambda p: _extract_xhs_items_from_api_payload(p, source="pc_search"),
+                )
                 page.goto(search_url, wait_until="domcontentloaded", timeout=30000)
                 deadline = time.monotonic() + 20.0
                 latest: Dict[str, Any] = {}
@@ -1611,9 +2474,10 @@ class NativeBrowserCollector:
                     snap = page.evaluate(_XHS_SEARCH_SNAPSHOT_SCRIPT)
                     if isinstance(snap, dict):
                         latest = snap
-                        if snap.get("verification") or snap.get("login_required") or (snap.get("cards") or []):
+                        if snap.get("verification") or snap.get("login_required") or (snap.get("cards") or []) or api_cards:
+                            _pump_wait(page, 0.35)
                             return snap
-                    time.sleep(0.7)
+                    _pump_wait(page, 0.6)
                 return latest
 
             snap = self._call_browser(_open_xhs, timeout=35.0)
@@ -1627,6 +2491,7 @@ class NativeBrowserCollector:
                     self._call_browser(lambda: self._bring_to_front_in_worker(topmost=True), timeout=10.0)
                 except Exception:
                     pass
+                self._record_rule_health("xiaohongshu", api_items=len(api_cards), dom_items=len(dom_ids), gate_blocked=True, message=gate_msg)
                 if callable(on_gate_cb):
                     try:
                         on_gate_cb(gate_status, gate_msg)
@@ -1639,9 +2504,18 @@ class NativeBrowserCollector:
                 if isinstance(snap, dict):
                     for it in (snap.get("cards") or []):
                         if isinstance(it, dict) and it.get("id"):
-                            it["keyword"] = kw
-                            it["artwork_type"] = "视频" if it.get("is_video") else "图文"
-                            items_by_id[str(it["id"])] = it
+                            sid = str(it["id"])
+                            dom_ids.add(sid)
+                            row = dict(it)
+                            row["keyword"] = kw
+                            row["artwork_type"] = "视频" if row.get("is_video") else "图文"
+                            items_by_id[sid] = _merge_discovered_card(items_by_id.get(sid), row)
+                for sid, acard in list(api_cards.items()):
+                    row = dict(acard)
+                    row["keyword"] = kw
+                    row["artwork_type"] = "视频" if row.get("is_video") else "图文"
+                    items_by_id[sid] = _merge_discovered_card(items_by_id.get(sid), row)
+
                 typed_items = [
                     it for it in items_by_id.values()
                     if (
@@ -1655,15 +2529,14 @@ class NativeBrowserCollector:
                     phase="crawling",
                     crawled=len(items_by_id),
                     qualified=len(fresh),
-                    message=f"小红书已抓取 {len(fresh)} 条新笔记",
+                    message=f"小红书已抓取 {len(fresh)} 条新笔记（接口 {len(api_cards)} / 页面 {len(dom_ids)}）",
                 )
                 if len(fresh) >= target or self._cancel_event.is_set():
                     break
 
                 def _scroll_xhs():
                     page = self._ensure_page_in_worker(proxy_url=proxy_url)
-                    page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
-                    time.sleep(1.1)
+                    _human_scroll_page(page, steps=3, settle_min=0.95, settle_max=1.55)
                     return page.evaluate(_XHS_SEARCH_SNAPSHOT_SCRIPT)
 
                 snap = self._call_browser(_scroll_xhs, timeout=20.0)
@@ -1679,13 +2552,71 @@ class NativeBrowserCollector:
             fresh_all = [it for it in all_items if str(it.get("id") or "") not in skip_set]
             skipped_dup = max(0, len(all_items) - len(fresh_all))
             chosen = fresh_all[:target]
+
+            if chosen:
+                enriched: List[Dict[str, Any]] = []
+                for idx, item in enumerate(chosen, 1):
+                    if self._cancel_event.is_set():
+                        break
+                    self._set_progress(
+                        phase="crawling",
+                        crawled=len(all_items),
+                        qualified=len(chosen),
+                        message=f"正在读取小红书笔记详情多图/实况 ({idx}/{len(chosen)})…",
+                    )
+                    detail_item = self._call_browser(
+                        lambda cur_item=item: self._enrich_xhs_note_detail_in_worker(
+                            self._ensure_page_in_worker(proxy_url=proxy_url),
+                            cur_item,
+                        ),
+                        timeout=30.0,
+                    )
+                    detail_item["keyword"] = kw
+                    detail_item["artwork_type"] = "视频" if detail_item.get("is_video") else "图文"
+                    if eff_media_type == "image" and not detail_item.get("is_video"):
+                        img_cnt = int(detail_item.get("image_count") or len(detail_item.get("image_urls") or []) or 0)
+                        if not (min_images <= img_cnt <= max_images):
+                            continue
+                    enriched.append(detail_item)
+                chosen = enriched
+
+            health_status = self._record_rule_health(
+                "xiaohongshu",
+                api_items=len(api_cards),
+                dom_items=len(dom_ids),
+                skipped_dup=skipped_dup,
+            )
             links = [str(it.get("url") or "") for it in chosen if it.get("url")]
+
+            download_items: List[Dict[str, Any]] = []
+            total_media = 0
+            if direct_download and chosen:
+                download_items, total_media = self._download_xhs_candidates(
+                    chosen,
+                    output_dir=output_dir,
+                    image_format=image_format,
+                    title_template=title_template,
+                    set_file_time=set_file_time,
+                )
+
+            if chosen:
+                done_msg = (
+                    f"小红书采集完成：发现 {len(chosen)} 条，已下载 {len(download_items)} 条（{total_media} 个媒体文件）"
+                    if direct_download
+                    else f"小红书采集完成：发现 {len(chosen)} 条笔记"
+                )
+            elif health_status == "possible_rule_break":
+                done_msg = "小红书页面已打开且未触发验证码，但接口与页面均未解析到笔记，规则或登录态可能需更新"
+            else:
+                done_msg = f"小红书共发现 {skipped_dup} 条匹配笔记，均已去重跳过" if skipped_dup else "小红书未发现符合条件的笔记"
+
             self._set_progress(
                 phase="completed",
                 status="completed" if chosen else "completed_zero",
                 crawled=len(all_items),
                 qualified=len(chosen),
-                message=f"小红书采集完成：发现 {len(chosen)} 条笔记",
+                downloaded=len(download_items),
+                message=done_msg,
             )
             return {
                 "status": "completed" if chosen else "completed_zero",
@@ -1693,11 +2624,176 @@ class NativeBrowserCollector:
                 "stage": "completed",
                 "candidates": chosen,
                 "discovered_links": links,
+                "download": {"items": download_items, "success_count": len(download_items)} if direct_download else {},
+                "media_file_count": total_media,
                 "skipped_duplicate_count": skipped_dup,
                 "completion_confirmed": bool(chosen),
-                "message": f"小红书发现 {len(chosen)} 条笔记",
+                "message": done_msg,
             }
         finally:
+            try:
+                detach_listener()
+            except Exception:
+                pass
+            with self._state_lock:
+                self._busy = False
+
+    def collect_xhs_homepage(
+        self,
+        profile_url: str,
+        *,
+        max_works: int = 10,
+        min_images: int = 1,
+        max_images: int = 50,
+        direct_download: bool = True,
+        skip_ids: Optional[Iterable[str]] = None,
+        output_dir: str = "",
+        image_format: str = "jpg",
+        title_template: str = DEFAULT_TITLE_TEMPLATE,
+        set_file_time: bool = True,
+        proxy_url: str = "",
+        on_gate_cb: Optional[Callable[[str, str], None]] = None,
+        job_request: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        target_url = str(profile_url or "").strip()
+        skip_set = {str(x).strip() for x in (skip_ids or []) if str(x).strip()}
+        limit = max(1, min(50, int(max_works or 10)))
+        self._cancel_event.clear()
+        with self._state_lock:
+            self._active_platform = "xiaohongshu"
+            self._busy = True
+            self._verification_required = False
+
+        api_cards: Dict[str, Dict[str, Any]] = {}
+        dom_ids: Set[str] = set()
+        detach_listener: Callable[[], None] = lambda: None
+        try:
+            def _open_author():
+                nonlocal api_cards, detach_listener
+                page = self._ensure_page_in_worker(proxy_url=proxy_url)
+                api_cards, _, detach_listener = _attach_response_collector(
+                    page,
+                    ("/api/sns/web/v1/user_posted",),
+                    lambda p: _extract_xhs_items_from_api_payload(p, source="pc_user"),
+                )
+                page.goto(target_url, wait_until="domcontentloaded", timeout=30000)
+                deadline = time.monotonic() + 20.0
+                latest: Dict[str, Any] = {}
+                while time.monotonic() < deadline:
+                    snap = page.evaluate(_XHS_SEARCH_SNAPSHOT_SCRIPT)
+                    if isinstance(snap, dict):
+                        latest = snap
+                        if snap.get("verification") or snap.get("login_required") or (snap.get("cards") or []) or api_cards:
+                            _pump_wait(page, 0.35)
+                            return snap
+                    _pump_wait(page, 0.6)
+                return latest
+
+            snap = self._call_browser(_open_author, timeout=40.0)
+            if isinstance(snap, dict) and (snap.get("verification") or snap.get("login_required")):
+                gate_status = "verification_required" if snap.get("verification") else "login_required"
+                gate_msg = "小红书主页触发登录或安全验证，已置顶弹出浏览器"
+                with self._state_lock:
+                    self._verification_required = True
+                    self._paused_job = dict(job_request or {"kind": "homepage", "platform": "xiaohongshu", "profile_url": target_url})
+                try:
+                    self._call_browser(lambda: self._bring_to_front_in_worker(topmost=True), timeout=10.0)
+                except Exception:
+                    pass
+                self._record_rule_health("xiaohongshu", api_items=len(api_cards), dom_items=len(dom_ids), gate_blocked=True, message=gate_msg)
+                if callable(on_gate_cb):
+                    try:
+                        on_gate_cb(gate_status, gate_msg)
+                    except Exception:
+                        pass
+                return {"status": gate_status, "success": False, "stage": "browser", "message": gate_msg}
+
+            items_by_id: Dict[str, Dict[str, Any]] = {}
+            for _ in range(12):
+                if isinstance(snap, dict):
+                    for it in (snap.get("cards") or []):
+                        if isinstance(it, dict) and it.get("id"):
+                            sid = str(it["id"])
+                            dom_ids.add(sid)
+                            items_by_id[sid] = _merge_discovered_card(items_by_id.get(sid), it)
+                for sid, acard in list(api_cards.items()):
+                    items_by_id[sid] = _merge_discovered_card(items_by_id.get(sid), acard)
+                fresh = [it for it in items_by_id.values() if str(it.get("id") or "") not in skip_set]
+                if len(fresh) >= limit or self._cancel_event.is_set():
+                    break
+
+                def _scroll_author():
+                    page = self._ensure_page_in_worker(proxy_url=proxy_url)
+                    _human_scroll_page(page, steps=3, settle_min=0.95, settle_max=1.55)
+                    return page.evaluate(_XHS_SEARCH_SNAPSHOT_SCRIPT)
+
+                snap = self._call_browser(_scroll_author, timeout=20.0)
+
+            all_items = list(items_by_id.values())
+            fresh_all = [it for it in all_items if str(it.get("id") or "") not in skip_set]
+            skipped_dup = max(0, len(all_items) - len(fresh_all))
+            chosen = fresh_all[:limit]
+
+            enriched: List[Dict[str, Any]] = []
+            for item in chosen:
+                if self._cancel_event.is_set():
+                    break
+                detail_item = self._call_browser(
+                    lambda cur_item=item: self._enrich_xhs_note_detail_in_worker(
+                        self._ensure_page_in_worker(proxy_url=proxy_url),
+                        cur_item,
+                    ),
+                    timeout=30.0,
+                )
+                detail_item["keyword"] = "作者主页"
+                detail_item["artwork_type"] = "视频" if detail_item.get("is_video") else "图文"
+                if not detail_item.get("is_video"):
+                    img_cnt = int(detail_item.get("image_count") or len(detail_item.get("image_urls") or []) or 0)
+                    if not (min_images <= img_cnt <= max_images):
+                        continue
+                enriched.append(detail_item)
+            chosen = enriched
+
+            health_status = self._record_rule_health(
+                "xiaohongshu",
+                api_items=len(api_cards),
+                dom_items=len(dom_ids),
+                skipped_dup=skipped_dup,
+            )
+            links = [str(it.get("url") or "") for it in chosen if it.get("url")]
+            download_items: List[Dict[str, Any]] = []
+            total_media = 0
+            if direct_download and chosen:
+                download_items, total_media = self._download_xhs_candidates(
+                    chosen,
+                    output_dir=output_dir,
+                    image_format=image_format,
+                    title_template=title_template,
+                    set_file_time=set_file_time,
+                )
+
+            msg = (
+                f"小红书主页采集完成：发现 {len(chosen)} 条作品" + (f"，已下载 {len(download_items)} 条" if direct_download else "")
+                if (chosen or health_status != "possible_rule_break")
+                else "小红书主页已打开且未触发验证码，但接口与页面均未解析到作品，规则或登录态可能需更新"
+            )
+            return {
+                "status": "completed" if chosen else "completed_zero",
+                "success": True,
+                "stage": "completed",
+                "candidates": chosen,
+                "discovered_links": links,
+                "download": {"items": download_items, "success_count": len(download_items)} if direct_download else {},
+                "media_file_count": total_media,
+                "skipped_duplicate_count": skipped_dup,
+                "completion_confirmed": bool(chosen),
+                "message": msg,
+            }
+        finally:
+            try:
+                detach_listener()
+            except Exception:
+                pass
             with self._state_lock:
                 self._busy = False
 
