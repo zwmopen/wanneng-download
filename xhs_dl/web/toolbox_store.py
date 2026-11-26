@@ -1913,6 +1913,38 @@ def _has_existing_media_dir(path_str):
         return False
 
 
+def record_queued_artwork_downloads(results, bridge_dir=None):
+    """Attach successful queue downloads to their existing workbench rows."""
+    from xhs_dl.core.platforms import detect_platform
+
+    downloaded = {}
+    platforms = {"xhs": "xiaohongshu", "douyin": "douyin"}
+    for item in results:
+        if not item.success or not item.note_id:
+            continue
+        platform = platforms.get(detect_platform(item.url))
+        if platform and _has_existing_media_dir(item.save_dir):
+            downloaded[(platform, str(item.note_id))] = item
+    if not downloaded:
+        return 0
+
+    updated = 0
+    with _STORE_LOCK:
+        state = load_state(bridge_dir)
+        for row in state["artworks"]:
+            item = downloaded.get((row.get("platform"), str(row.get("id"))))
+            if item is None:
+                continue
+            count = _safe_int(item.image_success, 0)
+            row["save_path"] = item.save_dir
+            row["download_status"] = f"已下载 {count} 张图" if count else "已下载"
+            row["image_count"] = max(_safe_int(row.get("image_count"), 0), count)
+            updated += 1
+        if updated:
+            _save_state(state)
+    return updated
+
+
 def collect_downloaded_artwork_ids(bridge_dir=None):
     """Collect already-downloaded artwork IDs from both workbench_hub.json and central history.json."""
     ids = set()

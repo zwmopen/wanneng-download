@@ -975,6 +975,7 @@ def _job_summary(job):
         "skipped": job.get("skipped", 0),
         "output_dir": job.get("output_dir", ""),
         "error": job.get("error", ""),
+        "workbench_sync_error": job.get("workbench_sync_error", ""),
         "items": [
             {
                 "success": item.get("success", False),
@@ -1564,6 +1565,10 @@ def _run_job(job_id, urls, output_dir, delay, image_format, adaptive=False):
             adaptive=adaptive,
         )
         result = downloader.download(urls)
+        try:
+            toolbox_store.record_queued_artwork_downloads(result.results, bridge_dir=TOOLBOX_BRIDGE_DIR)
+        except OSError:
+            _update_job(job_id, workbench_sync_error="素材已保存，作品列表状态写入失败")
         _update_job(
             job_id,
             status="completed",

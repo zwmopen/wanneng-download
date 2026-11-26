@@ -1977,7 +1977,8 @@ async function pollJob(id){
       stopTrackingDownload();
       $('stateDot').className='state-dot '+(j.status==='error'||failed?'error':'done');
       $('statusSub').textContent=j.status==='error'?(j.error||'任务执行失败'):
-        (failed?(success||skipped?'任务结束，部分作品下载失败':'任务结束，全部下载失败'):'任务处理完毕');
+        (failed?(success||skipped?'任务结束，部分作品下载失败':'任务结束，全部下载失败'):
+          (j.workbench_sync_error||'任务处理完毕'));
       refreshDashboard();refreshArtworks();
       return;
     }

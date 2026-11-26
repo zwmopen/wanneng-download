@@ -1565,3 +1565,46 @@ def test_xhs_homepage_metadata_only_writes_rows_without_queueing_download(monkey
     assert row["likes"] == 0
     assert row["comments"] is None and row["favorites"] is None
     assert row["publish_time"] == "2025-08-15 10:50:05"
+
+
+def test_web_queue_updates_existing_workbench_download_status(monkeypatch, tmp_path):
+    from xhs_dl.core.models import DownloadResult, NoteResult
+
+    monkeypatch.setenv("XHS_DL_WORKBENCH_FILE", str(tmp_path / "workbench.json"))
+    monkeypatch.setenv("XHS_DL_AUTO_SYNC_JIANGHU", "0")
+    monkeypatch.setattr(web_app, "TOOLBOX_BRIDGE_DIR", tmp_path / "bridge")
+    monkeypatch.setattr(web_app, "WEB_HISTORY_FILE", tmp_path / "web_history.json")
+    monkeypatch.setattr(web_app, "WEB_HISTORY", [])
+    job_id = "download-one"
+    work_id = "6ad85b030000000024036326"
+    url = f"https://www.xiaohongshu.com/explore/{work_id}"
+    save_dir = tmp_path / "download"
+    save_dir.mkdir()
+    (save_dir / "封面.jpg").write_bytes(b"test-image" * 30)
+    toolbox_store.record_discovered_artworks(
+        [{"id": work_id, "url": url, "author": "作者", "title": "作品", "like_count": 7}],
+        platform="xiaohongshu", bridge_dir=web_app.TOOLBOX_BRIDGE_DIR,
+    )
+    monkeypatch.setattr(web_app, "JOBS", {job_id: {"job_id": job_id, "status": "queued", "items": []}})
+
+    class Downloader:
+        def __init__(self, on_progress, **kwargs):
+            self.on_progress = on_progress
+
+        def download(self, urls):
+            item = NoteResult(
+                url=urls[0], note_id=work_id, success=True,
+                save_dir=str(save_dir), image_success=1,
+            )
+            self.on_progress(item, 1, 1)
+            return DownloadResult(results=[item], output_dir=str(tmp_path))
+
+    monkeypatch.setattr(web_app, "UnifiedDownloader", Downloader)
+    web_app._run_job(job_id, [url], str(tmp_path), (0, 0), "jpg")
+    assert web_app.JOBS[job_id]["success"] == 1
+    result = toolbox_store.list_artworks(mode="current", bridge_dir=web_app.TOOLBOX_BRIDGE_DIR)
+    row, = result["items"]
+    assert row["save_path"] == str(save_dir)
+    assert row["download_status"] == "已下载 1 张图"
+    assert row["image_count"] == 1
+    assert row["likes"] == 7 and row["author"] == "作者"
