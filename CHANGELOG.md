@@ -1,5 +1,17 @@
 # 变更记录
 
+## 4.2.0 抖音原画秒解 · 8 大国内/AI 视频平台 · 小红书主页解锁 · 白屏修复与全屏重构 — 2026-11-26
+
+- **抖音免 Cookie 原画极速通道（`douyin_downloader.py`）**：
+  - 吸收 `api.amemv.com` + `aweme.snssdk.com` 302 原画解析能力作为前置极速通道（视频/图集/实况 LivePhoto），遇风控或接口异常自动降级内置 Edge 浏览器兜底。
+- **8 大国内与 AI 视频平台直解（`cn_short_video_downloader.py`, `platforms.py`, `unified_downloader.py`）**：
+  - 新增支持快手、微博视频、今日头条、豆包 AI 视频、即梦 AI 视频、皮皮虾、皮皮搞笑、最右，统一落盘格式、文案输出与历史去重。
+- **桌面壳白屏修复（`desktop_shell/UniversalCollectorShell.cs`, `app.py`）**：
+  - 过滤 `about:blank` 预加载触发的 `NavigationCompleted`，仅在真正加载 `http://127.0.0.1:5678/` 成功后再隐藏启动遮罩，失败时提供清晰提示与重试按钮；`code_stamp` 同步覆盖 `xhs_dl/core/*.py`。
+- **界面重构与减法瘦身（`ui_template.py`, `toolbox_store.py`）**：
+  - 全屏自适应布局吃满视口高度；左侧导航底部收敛唯一「打开作品保存目录」入口；单作品页移除多余平台切换按钮，展示全部支持平台徽章并支持整段带废话分享文本自动提取。
+  - 解锁主页采集的 **小红书** 平台入口；排队抽屉默认折叠且全面替换为可读中文任务标题，消灭 32 位哈希乱码；作品列表拆清「来源」列与「关键词 / 采集方式」列，默认隐藏纯调度空壳行并严谨区分 `0` 与未返回字段。
+
 ## 4.1.0 反检测内核与接口直听升级 · 小红书实况/主页 · 多账号档案 · 全站 DIY — 2026-11-26
 
 - **反检测浏览器底座升级（`native_collector.py`, `pyproject.toml`）**：

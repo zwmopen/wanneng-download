@@ -98,7 +98,7 @@ body[data-theme="glass"] .surface,body[data-theme="glass"] .side-nav,body[data-t
 body[data-theme="glass-dark"] .surface,body[data-theme="glass-dark"] .side-nav,body[data-theme="glass-dark"] .topbar{
   backdrop-filter:blur(22px) saturate(140%);-webkit-backdrop-filter:blur(22px) saturate(140%);
 }
-.shell{position:relative;z-index:1;max-width:1540px;margin:0 auto}
+.shell{position:relative;z-index:1;max-width:1580px;min-height:calc(100vh - 48px);margin:0 auto;display:flex;flex-direction:column}
 
 /* Top Bar */
 .topbar{
@@ -142,10 +142,10 @@ body[data-theme="glass-dark"] .surface,body[data-theme="glass-dark"] .side-nav,b
 .alert-banner.show{display:flex;animation:panel-in 260ms var(--spring)}
 
 /* Main App Grid */
-.app-layout{display:grid;grid-template-columns:204px minmax(0,1fr);gap:18px;align-items:start}
+.app-layout{display:grid;grid-template-columns:212px minmax(0,1fr);gap:18px;align-items:stretch;flex:1}
 .side-nav{
   position:sticky;top:18px;display:flex;flex-direction:column;gap:8px;
-  padding:14px 10px;border:1px solid var(--line);border-radius:22px;
+  min-height:calc(100vh - 132px);padding:14px 10px;border:1px solid var(--line);border-radius:22px;
   background:var(--panel);box-shadow:var(--shadow-small);
 }
 .nav-caption{padding:4px 10px 4px;color:var(--muted);font-size:11px;font-weight:800;letter-spacing:.08em}
@@ -168,15 +168,17 @@ body[data-theme="glass-dark"] .surface,body[data-theme="glass-dark"] .side-nav,b
 .nav-item span{font-size:13px;font-weight:800}.nav-item small{color:var(--muted);font-size:10.5px;line-height:1.35}
 .nav-item:hover{transform:translateX(2px)}
 .nav-item[aria-selected="true"] span{color:var(--accent)}
-.nav-tip{margin:6px 6px 2px;padding-top:10px;border-top:1px solid var(--line);color:var(--muted);font-size:11px;line-height:1.55}
+.nav-footer{margin-top:auto;padding:10px 4px 2px;border-top:1px solid var(--line);display:grid;gap:8px}
+.nav-tip{margin:0 2px;color:var(--muted);font-size:11px;line-height:1.5}
 
-.workspace{display:grid;grid-template-columns:minmax(0,1fr);gap:18px;align-items:start}
+.workspace{display:flex;flex-direction:column;gap:18px;min-width:0}
+.workspace>div{display:flex;flex-direction:column;flex:1;min-width:0}
 .surface{
   background:var(--panel);border:1px solid var(--line);border-radius:var(--radius-xl);
   box-shadow:var(--shadow);padding:24px;min-width:0;
   transition:background var(--ease),box-shadow var(--ease),border-color var(--ease);
 }
-.work-panel{display:none;min-width:0}.work-panel.active{display:block;animation:panel-in 300ms var(--spring)}
+.work-panel{display:none;min-width:0}.work-panel.active{display:flex;flex-direction:column;flex:1;min-height:calc(100vh - 132px);animation:panel-in 300ms var(--spring)}
 
 .eyebrow{display:flex;align-items:center;gap:8px;color:var(--muted);font-size:11px;font-weight:700;letter-spacing:.12em;text-transform:uppercase;margin-bottom:8px}
 .eyebrow:before{content:"";width:22px;height:2.5px;border-radius:2px;background:var(--accent)}
@@ -259,16 +261,17 @@ textarea:focus,input:focus,select:focus{border-color:var(--accent);box-shadow:va
 .param-chips{display:flex;align-items:stretch;gap:10px;flex-wrap:wrap}
 .param-chip{display:inline-flex;align-items:center;gap:8px;padding:7px 12px;border-radius:12px;background:var(--panel);border:1px solid var(--line);box-shadow:var(--shadow-small);font-size:12px;font-weight:700}
 .param-chip input[type="number"]{width:68px;height:30px;padding:0 8px;text-align:center;font-weight:800;font-variant-numeric:tabular-nums;border-radius:9px}
-.kpi-strip{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px}
-.kpi-card{padding:10px 12px;border-radius:13px;background:var(--panel);border:1px solid var(--line);box-shadow:var(--shadow-inset);display:grid;gap:4px;text-align:center}
+.kpi-strip{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px}
+.kpi-card{padding:7px 10px;border-radius:11px;background:var(--panel);border:1px solid var(--line);box-shadow:var(--shadow-inset);display:flex;align-items:center;justify-content:space-between;gap:6px}
 .kpi-label{font-size:11px;font-weight:700;color:var(--muted)}
-.kpi-value{font-size:20px;font-weight:800;line-height:1.15;color:var(--text);font-variant-numeric:tabular-nums}
+.kpi-value{font-size:16px;font-weight:800;line-height:1.15;color:var(--text);font-variant-numeric:tabular-nums}
 .kpi-card.accent .kpi-value{color:var(--accent)}
 .kpi-card.ok .kpi-value{color:var(--ok)}
 @media(max-width:680px){.kpi-strip{grid-template-columns:repeat(2,minmax(0,1fr))}}
 .table-wrap{
+  flex:1;min-height:260px;max-height:calc(100vh - 340px);
   border:1px solid var(--line);border-radius:16px;background:var(--input);
-  box-shadow:var(--shadow-inset);overflow:auto;max-height:290px;margin-bottom:12px;
+  box-shadow:var(--shadow-inset);overflow:auto;margin-bottom:8px;
 }
 table.data-table{width:100%;border-collapse:collapse;font-size:12px}
 table.data-table th{
@@ -422,7 +425,10 @@ details.drawer[open] summary:after{transform:rotate(180deg)}
         <button class="nav-item" id="tabLogin" type="button" role="tab" aria-selected="false" data-panel="loginPanel"><span>平台登录</span><small>抖音 · 小红书 · B站会话</small></button>
         <button class="nav-item" id="tabSettings" type="button" role="tab" aria-selected="false" data-panel="settingsPanel"><span>下载与软件设置</span><small>路径入库 · 模板通知 · AI 接入</small></button>
       </div>
-      <p class="nav-tip">所有入口共享同一保存目录、本地去重账本与统一采集内核。</p>
+      <div class="nav-footer">
+        <button class="secondary" type="button" style="width:100%;height:36px" onclick="openDownloadDir()">打开作品保存目录</button>
+        <p class="nav-tip">所有入口共享同一保存目录、本地去重账本与统一采集内核。</p>
+      </div>
     </aside>
 
     <section class="workspace">
@@ -431,16 +437,23 @@ details.drawer[open] summary:after{transform:rotate(180deg)}
         <section class="surface work-panel" id="singlePanel" role="tabpanel" hidden>
           <div class="eyebrow">Single & Batch Media</div>
           <div class="panel-head-row">
-            <div><h2>单作品与批量链接采集</h2><p class="lead">粘贴公开作品链接或分享文案，按平台解析并下载。批量作品按队列处理，遇到访问限制时查看失败原因。</p></div>
-            <div class="seg-group" id="singlePlatformSeg">
-              <button class="seg-btn active" type="button" data-plat="douyin">抖音</button>
-              <button class="seg-btn" type="button" data-plat="xiaohongshu">小红书</button>
-            </div>
+            <div><h2>单作品与批量链接采集</h2><p class="lead">直接粘贴包含作品链接的任意分享文案，系统会自动识别平台并提取全部链接无水印下载（抖音优先免 Cookie 原画秒解，遇风控自动切内置浏览器兜底）。</p></div>
           </div>
-          <label for="input">分享文本或作品链接（一行一条，支持批量解析）</label>
-          <textarea id="input" placeholder="例如：复制小红书、抖音或B站分享文案到这里，支持一次粘贴多条公开链接。"></textarea>
+          <div style="display:flex;flex-wrap:wrap;gap:6px;margin:2px 0 12px 0">
+            <span class="badge dy">抖音（原画秒解/图文/实况）</span>
+            <span class="badge xhs">小红书</span>
+            <span class="badge">快手</span>
+            <span class="badge">B站</span>
+            <span class="badge">微博</span>
+            <span class="badge">今日头条</span>
+            <span class="badge">豆包 AI</span>
+            <span class="badge">即梦 AI</span>
+            <span class="badge">皮皮虾 / 皮皮搞笑 / 最右</span>
+            <span class="badge">YouTube / X / TikTok / IG / Reddit</span>
+          </div>
+          <label for="input">分享文案或作品链接（支持随便粘贴整段带废话的分享文本，自动提取全部 http 链接）</label>
+          <textarea id="input" rows="6" placeholder="直接把整段分享文案粘贴到这里即可（无需删废话、无需手动分行，系统会自动识别并提取里面所有 http(s):// 链接）：&#10;• 核心平台：抖音（免 Cookie 原画秒解/图文/实况）、小红书（图文/视频/实况）、B站&#10;• 国内与 AI 视频：快手、微博、今日头条、豆包 AI、即梦 AI、皮皮虾、皮皮搞笑、最右&#10;• 海外平台：YouTube、X (Twitter)、TikTok、Instagram、Facebook、Pinterest、Reddit、Vimeo"></textarea>
           <div class="btn-row">
-            <button class="secondary" type="button" onclick="openDownloadDir()">打开保存目录</button>
             <button class="primary" id="go" type="button">立即解析并下载</button>
           </div>
           <div class="quick-launch-card" style="margin-top:16px" aria-live="polite">
@@ -501,7 +514,6 @@ details.drawer[open] summary:after{transform:rotate(180deg)}
               <button class="primary" id="startKeyword" type="button">开始关键词采集</button>
               <button class="secondary danger" type="button" onclick="stopKeywordCollection()">停止采集</button>
               <button class="secondary" type="button" onclick="engineAction('bring_verify_browser',{platform:activeKwPlatform,topmost:false})">查看采集浏览器</button>
-              <button class="secondary" type="button" onclick="openDownloadDir()">打开作品保存目录</button>
             </div>
 
             <div class="kpi-strip" aria-label="关键词采集计数面板">
@@ -567,10 +579,10 @@ details.drawer[open] summary:after{transform:rotate(180deg)}
         <section class="surface work-panel" id="homepagePanel" role="tabpanel" hidden>
           <div class="eyebrow">Author Homepage</div>
           <div class="panel-head-row">
-            <div><h2>作者主页采集</h2><p class="lead">按项目分组管理关注作者档案，粘贴或勾选抖音主页链接，一键抓取公开图文。</p></div>
+            <div><h2>作者主页采集</h2><p class="lead">按项目分组管理抖音 / 小红书关注作者档案，粘贴或勾选主页链接，一键抓取公开图文与视频。</p></div>
             <div class="seg-group" id="auPlatformSeg">
               <button class="seg-btn active" type="button" data-plat="douyin">抖音</button>
-              <button class="seg-btn" type="button" data-plat="xiaohongshu" disabled title="小红书主页发现暂未开放，请使用小红书关键词采集" style="opacity:.48;cursor:not-allowed">小红书（暂未开放）</button>
+              <button class="seg-btn" type="button" data-plat="xiaohongshu">小红书</button>
             </div>
           </div>
 
@@ -592,7 +604,6 @@ details.drawer[open] summary:after{transform:rotate(180deg)}
             </div>
             <div class="btn-row" style="margin-top:0">
               <button class="primary" id="startHomepage" type="button">采集主页</button>
-              <button class="secondary" type="button" onclick="openDownloadDir()">打开作品保存目录</button>
             </div>
             <p class="panel-sub" id="homepageCapability" style="margin:0">正在检测内置 Edge 采集核心…</p>
             <div class="collection-status" id="homepageStatus" role="status" hidden style="margin:0"></div>
@@ -670,15 +681,14 @@ details.drawer[open] summary:after{transform:rotate(180deg)}
           </details>
 
           <div class="progress-meta" style="margin:10px 0 8px"><span id="artSummaryText">当前 0 条 · 历史 0 条 · 显示 0 条</span></div>
-          <div class="table-wrap" style="max-height:360px">
+          <div class="table-wrap" style="max-height:calc(100vh - 280px)">
             <table class="data-table">
-              <thead><tr><th>选择</th><th>序号</th><th>类型</th><th>来源 / 关键词</th><th>作者</th><th>作品标题</th><th>评 / 藏 / 赞</th><th>发布时间</th><th>读取时间</th><th>图数</th><th>状态</th><th>操作</th></tr></thead>
-              <tbody id="artTableBody"><tr><td colspan="12" style="text-align:center;color:var(--muted)">正在加载作品列表…</td></tr></tbody>
+              <thead><tr><th>选择</th><th>序号</th><th>类型</th><th>来源</th><th>关键词 / 采集方式</th><th>作者</th><th>作品标题</th><th>评 / 藏 / 赞</th><th>发布时间</th><th>读取时间</th><th>图数</th><th>状态</th><th>操作</th></tr></thead>
+              <tbody id="artTableBody"><tr><td colspan="13" style="text-align:center;color:var(--muted)">正在加载作品列表…</td></tr></tbody>
             </table>
           </div>
 
           <div class="btn-row">
-            <button class="secondary" type="button" onclick="openDownloadDir()">打开作品保存目录</button>
             <button class="secondary" type="button" onclick="ingestCheckedArtworks()">一键入库选中作品</button>
             <button class="primary" id="downloadCheckedBtn" type="button" onclick="downloadCheckedArtworks()">开始下载选中作品</button>
           </div>
@@ -695,15 +705,13 @@ details.drawer[open] summary:after{transform:rotate(180deg)}
               <span style="font-size:12px;color:var(--muted)" id="loginDyInfo">用于抖音关键词搜索、主页发现与人机验证</span>
               <div style="display:flex;gap:8px;flex-wrap:wrap">
                 <button class="mini-btn" type="button" onclick="engineAction('open_platform_login',{platform:'douyin'})">抖音登录 / 打开窗口</button>
-                <button class="mini-btn" type="button" onclick="engineAction('switch_platform',{platform:'douyin'})">激活抖音核心</button>
               </div>
             </div>
             <div class="login-card">
               <strong>小红书桌面会话</strong>
-              <span style="font-size:12px;color:var(--muted)" id="loginXhsInfo">用于小红书登录态与搜索笔记采集</span>
+              <span style="font-size:12px;color:var(--muted)" id="loginXhsInfo">用于小红书登录态、主页与搜索笔记采集</span>
               <div style="display:flex;gap:8px;flex-wrap:wrap">
                 <button class="mini-btn" type="button" onclick="engineAction('open_platform_login',{platform:'xiaohongshu'})">小红书登录 / 打开窗口</button>
-                <button class="mini-btn" type="button" onclick="engineAction('switch_platform',{platform:'xiaohongshu'})">激活小红书核心</button>
               </div>
             </div>
             <div class="login-card">
@@ -751,8 +759,6 @@ details.drawer[open] summary:after{transform:rotate(180deg)}
             </div>
             <div class="check-grid" style="margin-top:12px">
               <label class="check-item"><input type="checkbox" id="d_skip_downloaded_history" checked> 自动跳过已下载过的历史作品（去重）</label>
-              <label class="check-item"><input type="checkbox" id="d_down_teletex" checked> 下载图文作品</label>
-              <label class="check-item"><input type="checkbox" id="d_down_video"> 同时下载视频作品</label>
             </div>
             <div style="margin-top:14px;padding-top:12px;border-top:1px solid var(--line);display:grid;gap:10px">
               <strong style="font-size:12.5px">本地素材自动分类入库（01月~12月平铺硬链接 · 主题合集 · 多维元数据 · 广告滤图）</strong>
@@ -796,11 +802,7 @@ details.drawer[open] summary:after{transform:rotate(180deg)}
           </div>
 
           <div class="subpanel" id="subTheme">
-            <div class="check-grid">
-              <label class="check-item"><input type="checkbox" id="sw_app_window_mode" checked> 优先以独立无地址栏桌面窗口打开</label>
-              <label class="check-item"><input type="checkbox" id="sw_minimize_to_tray"> 最小化隐藏任务栏偏好</label>
-            </div>
-            <div style="margin-top:12px;padding-top:12px;border-top:1px solid var(--line);display:grid;gap:10px">
+            <div style="display:grid;gap:10px">
               <div class="form-grid">
                 <div class="wide"><label for="sw_proxy_url">网络代理地址（可选，留空直接直连；例：http://127.0.0.1:7890）</label><input type="text" id="sw_proxy_url" placeholder="可选：http://127.0.0.1:7890（留空直连）"></div>
               </div>
@@ -835,10 +837,15 @@ details.drawer[open] summary:after{transform:rotate(180deg)}
                 </div>
               </details>
             </div>
-            <div style="margin-top:14px;padding-top:12px;border-top:1px solid var(--line);display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap">
-              <span style="font-size:12px;color:var(--muted)">旧版历史档案迁移：如曾使用旧采集器积累了词表与作品档案，可在此手工导入合并</span>
-              <button class="mini-btn" type="button" onclick="migrateLegacyArchive()">导入旧版历史词库与档案</button>
-            </div>
+            <details class="drawer" style="margin-top:10px">
+              <summary>高级维护与旧版档案迁移</summary>
+              <div class="drawer-body">
+                <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap">
+                  <span style="font-size:12px;color:var(--muted)">旧版历史档案迁移：如曾使用旧采集器积累了词表与作品档案，可在此手工导入合并</span>
+                  <button class="mini-btn" type="button" onclick="migrateLegacyArchive()">导入旧版历史词库与档案</button>
+                </div>
+              </div>
+            </details>
           </div>
 
           <div class="subpanel" id="subAi">
@@ -874,7 +881,6 @@ details.drawer[open] summary:after{transform:rotate(180deg)}
           </div>
 
           <div class="btn-row">
-            <button class="secondary" type="button" onclick="openDownloadDir()">打开保存目录</button>
             <button class="primary" type="button" onclick="saveAllWorkbenchSettings(true)">保存全部设置到本地档案</button>
           </div>
         </section>
@@ -941,7 +947,7 @@ const THEME_LABELS={'light':'浅色','dark':'深色','neo':'浅色拟态','neo-d
 let currentThemeMode='auto';
 const $=id=>document.getElementById(id);
 let activeJob=null,pollTimer=null,historyItems=[],historyOffset=0,historyTotal=0,collectorEnabled=true,collectorOnline=false;
-let wbKeywords=[],wbAuthors=[],wbArtworks=[],wbSettings={},activeKwPlatform='douyin',activeAuPlatform='douyin',activeSinglePlatform='douyin',activeArtView='current';
+let wbKeywords=[],wbAuthors=[],wbArtworks=[],wbSettings={},activeKwPlatform='douyin',activeAuPlatform='douyin',activeArtView='current';
 let activeKwGroup='all',activeAuGroup='all',kwSortDir='asc',auSortDir='asc',kwGroups=[],auGroups=[],kwBatchQueueStop=false,activeKeywordRun=false;
 let collectionPollTimers={homepage:null,keyword:null},toastTimer=null,autoSaveTimer=null;
 let activeEnginePlatform='douyin',lastVerifyKey='',lastKwCounter='';
@@ -1066,10 +1072,6 @@ document.querySelectorAll('#auPlatformSeg .seg-btn').forEach(btn=>btn.addEventLi
   document.querySelectorAll('#auPlatformSeg .seg-btn').forEach(b=>b.classList.toggle('active',b===btn));
   refreshAuthors();
 }));
-document.querySelectorAll('#singlePlatformSeg .seg-btn').forEach(btn=>btn.addEventListener('click',()=>{
-  activeSinglePlatform=btn.dataset.plat;
-  document.querySelectorAll('#singlePlatformSeg .seg-btn').forEach(b=>b.classList.toggle('active',b===btn));
-}));
 document.querySelectorAll('#artViewSeg .seg-btn').forEach(btn=>btn.addEventListener('click',()=>{
   activeArtView=btn.dataset.mode;
   document.querySelectorAll('#artViewSeg .seg-btn').forEach(b=>b.classList.toggle('active',b===btn));
@@ -1193,11 +1195,11 @@ function collectSettingsPatch(){
   const gVal=id=>{const el=$(id);return el?(el.type==='checkbox'?el.checked:(el.type==='number'?Number(el.value||0):el.value)):undefined;};
   const mtype=gVal('k_media_type')||'image';
   return {
-    single:{...(wbSettings.single||{}),platform:activeSinglePlatform},
+    single:{...(wbSettings.single||{}),platform:'auto'},
     keyword:{...(wbSettings.keyword||{}),platform:activeKwPlatform,direct_download:gVal('k_direct_download'),media_type:mtype,type_video:mtype!=='image',max_per_keyword:gVal('keywordCount'),min_images:gVal('minImages'),max_images:gVal('maxImages'),web_sort:gVal('k_web_sort')||'综合排序',web_publish_time:gVal('k_web_publish_time')||'不限'},
     author:{...(wbSettings.author||{}),platform:activeAuPlatform,max_per_author:gVal('a_max_per_author'),min_images:gVal('a_min_images'),max_images:gVal('a_max_images')},
-    download:{...(wbSettings.download||{}),down_video:gVal('d_down_video'),down_teletex:gVal('d_down_teletex'),output_dir:gVal('d_output_dir')||getOutputDir(),skip_downloaded_history:gVal('d_skip_downloaded_history'),image_format:gVal('d_image_format'),delay_mode:gVal('d_delay_mode'),title_template:gVal('d_title_template'),set_file_time_to_publish:gVal('d_set_file_time_to_publish'),auto_ingest_material:gVal('d_auto_ingest_material'),auto_ingest_copy_only:gVal('d_auto_ingest_copy_only'),write_metadata:gVal('d_write_metadata'),auto_ingest_config_path:gVal('d_auto_ingest_config_path')},
-    software:{...(wbSettings.software||{}),theme:currentThemeMode||'auto',app_window_mode:gVal('sw_app_window_mode'),minimize_to_tray:gVal('sw_minimize_to_tray'),auto_topmost_verify_window:gVal('sw_auto_topmost_verify_window'),notify_desktop_toast:gVal('sw_notify_desktop_toast'),notify_feishu:gVal('sw_notify_feishu'),notify_on_complete:gVal('sw_notify_on_complete'),notify_feishu_target:gVal('sw_notify_feishu_target'),notify_feishu_app_id:gVal('sw_notify_feishu_app_id'),notify_feishu_app_secret:gVal('sw_notify_feishu_app_secret'),notify_feishu_webhook:gVal('sw_notify_feishu_webhook'),proxy_url:gVal('sw_proxy_url')||'',theme_day_start:gVal('sw_theme_day_start'),theme_night_start:gVal('sw_theme_night_start'),theme_auto_style:gVal('sw_theme_auto_style')||'rotate'}
+    download:{...(wbSettings.download||{}),output_dir:gVal('d_output_dir')||getOutputDir(),skip_downloaded_history:gVal('d_skip_downloaded_history'),image_format:gVal('d_image_format'),delay_mode:gVal('d_delay_mode'),title_template:gVal('d_title_template'),set_file_time_to_publish:gVal('d_set_file_time_to_publish'),auto_ingest_material:gVal('d_auto_ingest_material'),auto_ingest_copy_only:gVal('d_auto_ingest_copy_only'),write_metadata:gVal('d_write_metadata'),auto_ingest_config_path:gVal('d_auto_ingest_config_path')},
+    software:{...(wbSettings.software||{}),theme:currentThemeMode||'auto',auto_topmost_verify_window:gVal('sw_auto_topmost_verify_window'),notify_desktop_toast:gVal('sw_notify_desktop_toast'),notify_feishu:gVal('sw_notify_feishu'),notify_on_complete:gVal('sw_notify_on_complete'),notify_feishu_target:gVal('sw_notify_feishu_target'),notify_feishu_app_id:gVal('sw_notify_feishu_app_id'),notify_feishu_app_secret:gVal('sw_notify_feishu_app_secret'),notify_feishu_webhook:gVal('sw_notify_feishu_webhook'),proxy_url:gVal('sw_proxy_url')||'',theme_day_start:gVal('sw_theme_day_start'),theme_night_start:gVal('sw_theme_night_start'),theme_auto_style:gVal('sw_theme_auto_style')||'rotate'}
   };
 }
 
@@ -1591,18 +1593,21 @@ let artworkReadSequence=0;
 async function refreshArtworks(){
   const sequence=++artworkReadSequence;
   const sortBy=($('artSortBy')&&$('artSortBy').value)||'collected_at';
+  const artType=($('artTypeFilter')&&$('artTypeFilter').value)||'all';
   const params=new URLSearchParams({
-    mode:activeArtView,search:$('artSearch').value||'',artwork_type:$('artTypeFilter').value||'all',
+    mode:activeArtView,search:$('artSearch').value||'',artwork_type:artType,
     sort_by:sortBy,sort_dir:sortBy==='seq'?'asc':'desc',
     include_kw:$('artIncludeKw').value||'',exclude_kw:$('artExcludeKw').value||'',
     min_likes:$('artMinLikes').value||'0',min_favorites:($('artMinFavorites')&&$('artMinFavorites').value)||'0',min_comments:$('artMinComments').value||'0',min_images:$('artMinImages').value||'0'
   });
   const d=await api('/api/v1/workbench/artworks?'+params.toString());
   if(sequence!==artworkReadSequence)return;
-  wbArtworks=d.items||[];
-  $('artSummaryText').textContent=`当前 ${d.current_count||0} 条 · 历史 ${d.history_count||0} 条 · 显示 ${d.shown_count||0} 条`;
+  const rawItems=d.items||[];
+  wbArtworks=artType==='AI任务'?rawItems:rawItems.filter(r=>!r.is_shell_job);
+  $('artSummaryText').textContent=`当前 ${d.current_count||0} 条 · 历史 ${d.history_count||0} 条 · 显示 ${wbArtworks.length} 条`;
   const body=$('artTableBody');
-  if(!wbArtworks.length){body.innerHTML='<tr><td colspan="12" style="text-align:center;color:var(--muted)">暂无符合条件的作品记录</td></tr>';return;}
+  if(!wbArtworks.length){body.innerHTML='<tr><td colspan="13" style="text-align:center;color:var(--muted)">暂无符合条件的作品记录</td></tr>';return;}
+  const fmtStat=v=>(v===null||v===undefined||v==='')?'—':String(v);
   body.innerHTML=wbArtworks.map(r=>{
     const openPath=r.ingested_dir||r.save_path||'';
     const stText=String(r.download_status||'已读取未下载');
@@ -1611,15 +1616,19 @@ async function refreshArtworks(){
     const pubDate=String(r.publish_time||'').trim()||'—';
     const colRaw=String(r.collected_at||'').trim();
     const colShort=colRaw?colRaw.slice(5,16):'—';
-    const srcLabel=r.keyword||r.extract_type||'—';
+    const srcChan=r.source_channel||(r.artwork_type==='AI任务'?'AI':((r.extract_type==='剪贴板'||r.keyword==='剪贴板采集')?'剪贴板':(String(r.extract_type||'').includes('主页')?'主页':(r.extract_type==='单作品'?'单作品':'关键词'))));
+    const srcDetail=r.source_detail||r.keyword||r.extract_type||'—';
+    const hasMissingStat=[r.comments,r.favorites,r.likes].some(v=>v===null||v===undefined||v==='');
+    const statTip=hasMissingStat?'title="列表页接口未返回该项计数，下载或补全详情后自动更新"':'';
     const canDownload=r.artwork_type!=='AI任务'||!!r.url;
     return `<tr>
       <td><input type="checkbox" ${r.checked?'checked':''} onchange="artToggle('${esc(r.id)}',this.checked)"></td>
       <td>${esc(r.seq)}</td>
       <td><span class="badge">${esc(r.artwork_type)}</span></td>
-      <td class="cell-ellipsis" title="${esc(srcLabel)}">${esc(srcLabel)}</td><td>${esc(r.author)}</td>
+      <td><span class="badge">${esc(srcChan)}</span></td>
+      <td class="cell-ellipsis" title="${esc(srcDetail)}">${esc(srcDetail)}</td><td>${esc(r.author)}</td>
       <td class="cell-ellipsis" title="${esc(openPath||r.title)}">${esc(r.title)}</td>
-      <td style="white-space:nowrap;font-variant-numeric:tabular-nums">${esc(r.comments??'—')} / ${esc(r.favorites??'—')} / ${esc(r.likes??'—')}</td>
+      <td style="white-space:nowrap;font-variant-numeric:tabular-nums" ${statTip}>${esc(fmtStat(r.comments))} / ${esc(fmtStat(r.favorites))} / ${esc(fmtStat(r.likes))}</td>
       <td style="white-space:nowrap">${esc(pubDate)}</td>
       <td style="white-space:nowrap;font-variant-numeric:tabular-nums" title="${esc(colRaw||'未记录')}">${esc(colShort)}</td>
       <td>${esc(r.image_count)}</td>
@@ -1955,7 +1964,21 @@ function stopTrackingDownload(clearSaved=false){
   if(clearSaved){try{sessionStorage.removeItem(DOWNLOAD_JOB_KEY);}catch(_){}}
 }
 function downloadItemDescription(item){
-  const engineNames={'local-cli':'小红书本地 CLI','douyin-edge':'抖音 Edge','yt-dlp':'yt-dlp','history':'本地历史'};
+  const engineNames={
+    'local-cli':'小红书本地 CLI',
+    'douyin-fast-api':'抖音原画秒解',
+    'douyin-edge':'抖音 Edge 兜底',
+    'yt-dlp':'yt-dlp 通用引擎',
+    'history':'本地历史复用',
+    'cn-kuaishou':'快手直解',
+    'cn-weibo':'微博直解',
+    'cn-toutiao':'今日头条',
+    'cn-doubao':'豆包 AI',
+    'cn-jimeng':'即梦 AI',
+    'cn-pipixia':'皮皮虾',
+    'cn-pipigx':'皮皮搞笑',
+    'cn-zuiyou':'最右'
+  };
   if(item.deduplicated)return '本地已存在';
   const stages={note_detail:'读取详情',media_write:'保存素材'};
   const message=item.error||item.save_dir||(item.success?'素材已保存':'未下载成功');
@@ -2104,6 +2127,19 @@ async function refreshCollectionCapabilities(){
 
 const SOURCE_ZH={'downloader-history':'历史',clipboard:'剪贴板',web:'工作台',keyword:'关键词',homepage:'主页',api:'接口',ai:'AI'};
 const STATUS_ZH={completed:'已完成',running:'进行中',queued:'排队中',pending:'等待中',paused:'已暂停',error:'失败',accepted:'已受理'};
+function readableTaskTitle(r){
+  const isHexId=v=>/^[0-9a-f]{24,}$/i.test(String(v||'').trim());
+  const rawTitle=String((r&&r.title)||'').trim();
+  if(rawTitle&&!isHexId(rawTitle))return rawTitle;
+  const items=Array.isArray(r&&r.items)?r.items:[];
+  const firstItemTitle=items.map(it=>String((it&&it.title)||'').trim()).find(t=>t&&!isHexId(t));
+  const total=Number((r&&r.total)||items.length||0);
+  if(firstItemTitle)return total>1?`${firstItemTitle} 等 ${total} 条`:firstItemTitle;
+  if(total>1)return `批量下载任务（共 ${total} 条）`;
+  if(total===1)return '单作品下载任务';
+  if(r&&r.note_id&&!isHexId(r.note_id))return String(r.note_id);
+  return '后台采集任务';
+}
 function renderTaskList(el,rows,emptyText){
   if(!rows||!rows.length){el.innerHTML=`<div class="panel-sub">${esc(emptyText)}</div>`;return;}
   el.innerHTML=rows.slice(0,30).map(r=>{
@@ -2111,9 +2147,11 @@ function renderTaskList(el,rows,emptyText){
     const st=STATUS_ZH[r.status]||r.status||'';
     const processed=r.total?`已处理 ${r.done||0}/${r.total} · 成功 ${r.success||0} · 失败 ${r.failed||0}`:'';
     const tag=[src,st,processed].filter(Boolean).join(' · ');
+    const titleText=readableTaskTitle(r);
+    const metaText=r.completed_at||r.error||r.pause_reason||r.url||r.save_dir||processed||st||'';
     const openBtn=r.save_dir?`<button class="mini-btn" type="button" data-open-dir="${esc(r.save_dir)}">打开</button>`:'';
     const jobBtn=/^[0-9a-f]{32}$/.test(r.job_id||'')?`<button class="mini-btn" type="button" data-download-job="${esc(r.job_id)}">查看进度</button>`:'';
-    return `<div class="task-row"><div class="task-main"><span class="task-title">${esc(r.title||r.note_id||r.job_id||'任务')}</span><span class="task-meta">${esc(r.completed_at||r.url||r.save_dir||st||'')}</span></div><div style="display:flex;align-items:center;gap:6px">${openBtn}${jobBtn}<span class="badge ${r.status==='completed'?'ok':(r.status==='error'?'bad':'')}">${esc(tag)}</span></div></div>`;
+    return `<div class="task-row"><div class="task-main"><span class="task-title">${esc(titleText)}</span><span class="task-meta">${esc(metaText)}</span></div><div style="display:flex;align-items:center;gap:6px">${openBtn}${jobBtn}<span class="badge ${r.status==='completed'?'ok':(r.status==='error'?'bad':'')}">${esc(tag)}</span></div></div>`;
   }).join('');
 }
 
@@ -2126,9 +2164,8 @@ async function refreshDashboard(){
     tog.setAttribute('aria-checked',collectorEnabled?'true':'false');
     $('collectorToggleText').textContent=collectorOnline?(collectorEnabled?'剪贴板采集 开':'剪贴板采集 关'):(collectorEnabled?'启动剪贴板开':'剪贴板 离线');
     const liveTasks=[...(d.running||[]),...(d.waiting||d.queue||[])];
-    const recovery=(d.web_history||[]).filter(job=>job.status==='paused'||job.failed>0).slice(0,5);
+    const recovery=(d.web_history||[]).filter(job=>job.status==='paused'||job.failed>0).slice(0,3);
     if($('waitingCount'))$('waitingCount').textContent=liveTasks.length;
-    if($('queueDrawer')&&liveTasks.length)$('queueDrawer').open=true;
     if($('queueList'))renderTaskList($('queueList'),[...liveTasks,...recovery],'暂无运行、排队或待处理的下载任务');
   }catch(_){}
 }

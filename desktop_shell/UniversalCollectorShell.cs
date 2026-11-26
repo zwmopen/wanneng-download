@@ -97,7 +97,9 @@ namespace UniversalCollectorShell
         private readonly WebView2 _webView;
         private readonly Panel _splashPanel;
         private readonly Label _splashLabel;
+        private readonly Button _retryButton;
         private readonly string _projectRoot;
+        private bool _navigatedToApp = false;
         private static readonly HttpClient Http = new HttpClient { Timeout = TimeSpan.FromMilliseconds(900) };
 
         public MainForm()
@@ -133,6 +135,31 @@ namespace UniversalCollectorShell
             _splashLabel.ForeColor = Color.FromArgb(31, 41, 55);
             _splashLabel.Text = "∞  万能采集器启动中，正在连接本地工作台…";
             _splashPanel.Controls.Add(_splashLabel);
+
+            _retryButton = new Button();
+            _retryButton.Text = "重新连接并刷新页面";
+            _retryButton.Size = new Size(188, 40);
+            _retryButton.Font = new Font("Microsoft YaHei UI", 10F, FontStyle.Bold);
+            _retryButton.BackColor = Color.FromArgb(38, 105, 155);
+            _retryButton.ForeColor = Color.White;
+            _retryButton.FlatStyle = FlatStyle.Flat;
+            _retryButton.FlatAppearance.BorderSize = 0;
+            _retryButton.Cursor = Cursors.Hand;
+            _retryButton.Visible = false;
+            _retryButton.Anchor = AnchorStyles.Bottom;
+            _retryButton.Location = new Point((_splashPanel.Width - _retryButton.Width) / 2, _splashPanel.Height - 130);
+            _splashPanel.SizeChanged += delegate
+            {
+                _retryButton.Location = new Point((_splashPanel.Width - _retryButton.Width) / 2, Math.Max(40, _splashPanel.Height / 2 + 48));
+            };
+            _retryButton.Click += async delegate
+            {
+                _retryButton.Visible = false;
+                _splashLabel.Text = "∞  正在重新连接本地服务并加载工作台…";
+                await ConnectAndNavigateAsync();
+            };
+            _splashPanel.Controls.Add(_retryButton);
+            _retryButton.BringToFront();
 
             Controls.Add(_splashPanel);
             _splashPanel.BringToFront();
@@ -170,9 +197,22 @@ namespace UniversalCollectorShell
 
                 _webView.CoreWebView2.NavigationCompleted += delegate(object s, CoreWebView2NavigationCompletedEventArgs args)
                 {
-                    if (_splashPanel.Visible)
+                    if (!_navigatedToApp)
                     {
+                        return;
+                    }
+                    string currentUri = _webView.Source != null ? _webView.Source.ToString() : "";
+                    if (args.IsSuccess && currentUri.StartsWith(BaseUrl, StringComparison.OrdinalIgnoreCase))
+                    {
+                        _retryButton.Visible = false;
                         _splashPanel.Visible = false;
+                    }
+                    else
+                    {
+                        _splashLabel.Text = "工作台页面加载失败（" + args.WebErrorStatus + "），请点击下方按钮重试。";
+                        _retryButton.Visible = true;
+                        _splashPanel.Visible = true;
+                        _splashPanel.BringToFront();
                     }
                 };
             }
@@ -182,13 +222,28 @@ namespace UniversalCollectorShell
                 return;
             }
 
+            await FinishConnectAndNavigateAsync(backendTask);
+        }
+
+        private async Task ConnectAndNavigateAsync()
+        {
+            await FinishConnectAndNavigateAsync(EnsureBackendRunningAsync());
+        }
+
+        private async Task FinishConnectAndNavigateAsync(Task<bool> backendTask)
+        {
             bool ready = await backendTask;
             if (!ready)
             {
-                _splashLabel.Text = "未能连接本地服务 http://127.0.0.1:5678 ，请检查 Python 环境或重新双击启动。";
+                _navigatedToApp = false;
+                _splashLabel.Text = "未能连接本地服务 http://127.0.0.1:5678 ，请检查 Python 环境或点击下方按钮重试。";
+                _retryButton.Visible = true;
+                _splashPanel.Visible = true;
+                _splashPanel.BringToFront();
                 return;
             }
 
+            _navigatedToApp = true;
             _webView.CoreWebView2.Navigate(BaseUrl);
         }
 
@@ -239,14 +294,21 @@ namespace UniversalCollectorShell
             long latest = 0;
             try
             {
-                string webDir = Path.Combine(_projectRoot, "xhs_dl", "web");
-                if (Directory.Exists(webDir))
+                string[] dirs = new[]
                 {
-                    foreach (string file in Directory.GetFiles(webDir, "*.py"))
+                    Path.Combine(_projectRoot, "xhs_dl", "web"),
+                    Path.Combine(_projectRoot, "xhs_dl", "core"),
+                };
+                foreach (string dir in dirs)
+                {
+                    if (Directory.Exists(dir))
                     {
-                        DateTime utc = File.GetLastWriteTimeUtc(file);
-                        long unix = new DateTimeOffset(DateTime.SpecifyKind(utc, DateTimeKind.Utc)).ToUnixTimeSeconds();
-                        if (unix > latest) latest = unix;
+                        foreach (string file in Directory.GetFiles(dir, "*.py"))
+                        {
+                            DateTime utc = File.GetLastWriteTimeUtc(file);
+                            long unix = new DateTimeOffset(DateTime.SpecifyKind(utc, DateTimeKind.Utc)).ToUnixTimeSeconds();
+                            if (unix > latest) latest = unix;
+                        }
                     }
                 }
             }

@@ -4,6 +4,7 @@ import random
 import time
 from pathlib import Path
 
+from .cn_short_video_downloader import CnShortVideoEngine
 from .douyin_downloader import DouyinBrowserEngine
 from .generic_downloader import YtDlpEngine
 from .models import DownloadResult, NoteResult
@@ -54,6 +55,12 @@ class UnifiedDownloader:
                     timeout=min(self.timeout, 90),
                     image_format=self.image_format,
                     reusable_browser=self._reuse_browser,
+                )
+                self.engines[platform] = engine
+                self._owned_engines.append(engine)
+            elif platform == "cn_video":
+                engine = CnShortVideoEngine(
+                    timeout=min(self.timeout, 90), image_format=self.image_format
                 )
                 self.engines[platform] = engine
                 self._owned_engines.append(engine)

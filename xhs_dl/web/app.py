@@ -40,12 +40,16 @@ from xhs_dl.web.ui_template import TEMPLATE
 
 def _compute_web_code_stamp():
     web_dir = Path(__file__).resolve().parent
+    core_dir = web_dir.parent / "core"
     stamps = []
-    for py_file in web_dir.glob("*.py"):
-        try:
-            stamps.append(int(py_file.stat().st_mtime))
-        except OSError:
-            pass
+    for folder in (web_dir, core_dir):
+        if not folder.is_dir():
+            continue
+        for py_file in folder.glob("*.py"):
+            try:
+                stamps.append(int(py_file.stat().st_mtime))
+            except OSError:
+                pass
     return max(stamps) if stamps else 0
 
 
@@ -1005,11 +1009,38 @@ def _item_payload(item):
     }
 
 
+def _readable_job_title(job):
+    explicit = str(job.get("title") or "").strip()
+    if explicit:
+        return explicit
+    items = [item for item in (job.get("items") or []) if isinstance(item, dict)]
+    first_title = next(
+        (str(item.get("title") or "").strip() for item in items if str(item.get("title") or "").strip()),
+        "",
+    )
+    total = int(job.get("total") or len(items) or 0)
+    if first_title:
+        return f"{first_title} 等 {total} 条" if total > 1 else first_title
+    if total > 1:
+        return f"批量下载任务（共 {total} 条）"
+    if total == 1:
+        first_url = str((items[0].get("url") if items else "") or "").strip()
+        if first_url:
+            try:
+                host = urllib.parse.urlparse(first_url).netloc or first_url[:36]
+                return f"单作品下载（{host}）"
+            except Exception:
+                pass
+        return "单作品下载任务"
+    return "下载任务"
+
+
 def _job_summary(job, *, include_all_items=False):
     """Keep full identifiers in history and limit the live dashboard preview."""
     items = job.get("items") or []
     return {
         "job_id": job.get("job_id", ""),
+        "title": _readable_job_title(job),
         "status": job.get("status", ""),
         "created_at": job.get("created_at", 0),
         "finished_at": job.get("finished_at", 0),

@@ -12,7 +12,7 @@ import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import List
-from urllib.parse import urlsplit
+from urllib.parse import parse_qs, urlencode, urljoin, urlsplit, urlunsplit
 import requests
 
 from .models import NoteResult
@@ -211,10 +211,22 @@ class DouyinBrowserEngine:
 }
 """
 
-    def __init__(self, timeout=75, image_format="jpg", reusable_browser: bool = False):
+    FAST_DETAIL_ENDPOINT = "https://api.amemv.com/aweme/v1/aweme/detail/"
+    FAST_ORIGINAL_PLAY_ENDPOINT = "https://aweme.snssdk.com/aweme/v1/play/"
+    FAST_MOBILE_UA = (
+        "Mozilla/5.0 (Linux; Android 13; 2210132C Build/TKQ1.220829.002) "
+        "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Mobile Safari/537.36"
+    )
+    FAST_DESKTOP_UA = (
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+        "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36"
+    )
+
+    def __init__(self, timeout=75, image_format="jpg", reusable_browser: bool = False, fast_api_first: bool = True):
         self.timeout = timeout
         self.image_format = image_format
         self.reusable_browser = bool(reusable_browser)
+        self.fast_api_first = bool(fast_api_first)
         self._playwright = None
         self._browser = None
 
@@ -290,7 +302,243 @@ class DouyinBrowserEngine:
         options["proxy"] = {"server": proxy}
         return options
 
+    @staticmethod
+    def _requests_proxies():
+        proxy = os.environ.get("JIANGHU_PROXY_URL", "").strip()
+        if not proxy:
+            for env_name in ("HTTPS_PROXY", "https_proxy", "HTTP_PROXY", "http_proxy"):
+                candidate = os.environ.get(env_name, "").strip()
+                if candidate:
+                    proxy = candidate
+                    break
+        return {"http": proxy, "https": proxy} if proxy else None
+
+    @staticmethod
+    def _to_https(url: str) -> str:
+        text = str(url or "").strip()
+        if text.startswith("//"):
+            return "https:" + text
+        if text.startswith("http://"):
+            return "https://" + text[7:]
+        return text
+
+    @staticmethod
+    def _ensure_video_mime_type(url: str) -> str:
+        text = str(url or "").strip()
+        if not text:
+            return ""
+        parsed = urlsplit(text)
+        query = parse_qs(parsed.query, keep_blank_values=True)
+        if "mime_type" not in query:
+            sep = "&" if parsed.query else ""
+            new_query = f"{parsed.query}{sep}mime_type=video_mp4"
+            return urlunsplit((parsed.scheme, parsed.netloc, parsed.path, new_query, parsed.fragment))
+        return text
+
+    @staticmethod
+    def _extract_aweme_id(url: str) -> str:
+        parsed = urlsplit(str(url or "").strip())
+        query = parse_qs(parsed.query)
+        for key in ("vid", "id", "modal_id", "v", "s", "pid"):
+            vals = query.get(key)
+            if vals and re.fullmatch(r"[1-9][0-9]{15,19}", vals[0]):
+                return vals[0]
+        segments = [seg for seg in parsed.path.split("/") if seg]
+        if segments:
+            last = segments[-1]
+            if last.endswith(".html"):
+                last = last[:-5]
+            if re.fullmatch(r"[1-9][0-9]{15,19}", last):
+                return last
+        match = re.search(r"/(?:video|note|slides)/([1-9][0-9]{15,19})", parsed.path)
+        return match.group(1) if match else ""
+
+    def _resolve_redirect_url(self, url: str) -> str:
+        proxies = self._requests_proxies()
+        resp = requests.get(
+            url,
+            headers={"User-Agent": self.FAST_DESKTOP_UA},
+            allow_redirects=True,
+            timeout=(5, 10),
+            stream=True,
+            proxies=proxies,
+        )
+        try:
+            return str(resp.url or url)
+        finally:
+            resp.close()
+
+    def _resolve_original_play_url(self, vid: str) -> str:
+        if not vid:
+            return ""
+        fallback = f"{self.FAST_ORIGINAL_PLAY_ENDPOINT}?{urlencode({'video_id': vid, 'ratio': 'default', 'line': '0'})}"
+        current = fallback
+        proxies = self._requests_proxies()
+        for _ in range(3):
+            try:
+                resp = requests.get(
+                    current,
+                    headers={"User-Agent": self.FAST_DESKTOP_UA},
+                    allow_redirects=False,
+                    timeout=(5, 10),
+                    stream=True,
+                    proxies=proxies,
+                )
+                try:
+                    if 300 <= resp.status_code < 400 and resp.headers.get("Location"):
+                        current = urljoin(current, resp.headers["Location"].strip())
+                        continue
+                    break
+                finally:
+                    resp.close()
+            except Exception:
+                break
+        return self._to_https(current)
+
+    @staticmethod
+    def _guess_image_ext(url: str) -> str:
+        path = urlsplit(url).path.lower()
+        for ext in (".jpg", ".jpeg", ".png", ".webp", ".gif", ".avif"):
+            if path.endswith(ext):
+                return ext.lstrip(".")
+        return "webp"
+
+    def _extract_via_fast_api(self, url: str):
+        """Fast cookie-free Douyin detail API (video original 302 / images / LivePhoto)."""
+        resolved_url = url
+        aweme_id = self._extract_aweme_id(resolved_url)
+        if not aweme_id:
+            resolved_url = self._resolve_redirect_url(url)
+            aweme_id = self._extract_aweme_id(resolved_url)
+        if not aweme_id:
+            return None
+
+        query = urlencode({
+            "aweme_id": aweme_id,
+            "aid": "6383",
+            "device_platform": "web",
+            "version_code": "190500",
+            "version_name": "19.5.0",
+        })
+        resp = requests.get(
+            f"{self.FAST_DETAIL_ENDPOINT}?{query}",
+            headers={
+                "User-Agent": self.FAST_MOBILE_UA,
+                "Accept": "application/json, text/plain, */*",
+            },
+            timeout=(5, 12),
+            proxies=self._requests_proxies(),
+        )
+        resp.raise_for_status()
+        data = resp.json()
+        if not isinstance(data, dict) or int(data.get("status_code", -1)) != 0:
+            return None
+        detail = data.get("aweme_detail")
+        if not isinstance(detail, dict) or str(detail.get("aweme_id") or "") != aweme_id:
+            return None
+
+        desc = str(detail.get("desc") or "").strip()
+        author = str((detail.get("author") or {}).get("nickname") or "").strip()
+        stats = detail.get("statistics") or {}
+        create_ts = detail.get("create_time") or 0
+        published_at = ""
+        try:
+            ts_val = int(create_ts)
+            if ts_val > 10**12:
+                ts_val //= 1000
+            if ts_val > 0:
+                tz_cn = datetime.timezone(datetime.timedelta(hours=8))
+                published_at = datetime.datetime.fromtimestamp(ts_val, tz=tz_cn).strftime("%Y-%m-%d %H:%M:%S")
+        except Exception:
+            published_at = ""
+
+        media = []
+        images = detail.get("images") or detail.get("image_list") or []
+        if isinstance(images, list) and images:
+            for img in images:
+                if not isinstance(img, dict):
+                    continue
+                url_list = img.get("urlList") or img.get("url_list") or []
+                img_url = ""
+                if isinstance(url_list, list) and url_list:
+                    img_url = self._to_https(str(url_list[0] or url_list[-1] or ""))
+                if img_url:
+                    media.append({
+                        "url": img_url,
+                        "kind": "image",
+                        "extension": self._guess_image_ext(img_url),
+                    })
+                # LivePhoto video paired with image
+                video_info = img.get("video") if isinstance(img.get("video"), dict) else None
+                if video_info:
+                    vid = str((video_info.get("play_addr") or {}).get("uri") or video_info.get("uri") or "").strip()
+                    live_url = self._resolve_original_play_url(vid) if vid else ""
+                    if not live_url:
+                        play_urls = (video_info.get("play_addr") or {}).get("url_list") or []
+                        if isinstance(play_urls, list) and play_urls:
+                            live_url = self._to_https(str(play_urls[0]).replace("playwm", "play"))
+                    if live_url:
+                        media.append({
+                            "url": self._ensure_video_mime_type(live_url),
+                            "kind": "video",
+                            "extension": "mp4",
+                        })
+        else:
+            video = detail.get("video") if isinstance(detail.get("video"), dict) else {}
+            vid = str((video.get("play_addr") or {}).get("uri") or video.get("uri") or "").strip()
+            video_url = self._resolve_original_play_url(vid) if vid else ""
+            if not video_url:
+                bit_rates = video.get("bit_rate") or video.get("bitRateList") or []
+                if isinstance(bit_rates, list) and bit_rates:
+                    bit_rates = sorted(
+                        [item for item in bit_rates if isinstance(item, dict)],
+                        key=lambda x: float(x.get("bit_rate") or x.get("bitRate") or 0),
+                        reverse=True,
+                    )
+                    for item in bit_rates:
+                        cand_list = (item.get("play_addr") or {}).get("url_list") or []
+                        if cand_list:
+                            video_url = self._to_https(str(cand_list[0]).replace("playwm", "play"))
+                            break
+            if not video_url:
+                fallback_list = (video.get("play_addr") or {}).get("url_list") or []
+                if isinstance(fallback_list, list) and fallback_list:
+                    video_url = self._to_https(str(fallback_list[0]).replace("playwm", "play"))
+            if video_url:
+                media.append({
+                    "url": self._ensure_video_mime_type(video_url),
+                    "kind": "video",
+                    "extension": "mp4",
+                })
+
+        if not media:
+            return None
+
+        final_kind = "note" if (isinstance(images, list) and images) else "video"
+        return {
+            "final_url": f"https://www.douyin.com/{final_kind}/{aweme_id}",
+            "title": desc,
+            "author": author,
+            "likes": str(stats.get("digg_count") if stats.get("digg_count") is not None else "未知"),
+            "comments": str(stats.get("comment_count") if stats.get("comment_count") is not None else "未知"),
+            "favorites": str(stats.get("collect_count") if stats.get("collect_count") is not None else "未知"),
+            "shares": str(stats.get("share_count") if stats.get("share_count") is not None else "未知"),
+            "published_at": published_at,
+            "media": media,
+            "_engine": "douyin-fast-api",
+        }
+
     def _extract_page(self, url):
+        if self.fast_api_first:
+            try:
+                fast_payload = self._extract_via_fast_api(url)
+                if fast_payload and fast_payload.get("media"):
+                    return fast_payload
+            except Exception:
+                pass
+        return self._extract_via_browser(url)
+
+    def _extract_via_browser(self, url):
         try:
             import playwright.sync_api  # noqa: F401
         except ImportError as exc:
@@ -430,7 +678,9 @@ class DouyinBrowserEngine:
     def download_one(self, url, output_dir):
         output_dir = Path(output_dir)
         output_dir.mkdir(parents=True, exist_ok=True)
-        work = DouyinWork.from_page_payload(url, self._extract_page(url))
+        payload = self._extract_page(url)
+        engine_tag = str(payload.get("_engine") or "douyin-edge") if isinstance(payload, dict) else "douyin-edge"
+        work = DouyinWork.from_page_payload(url, payload)
         note_dir = self._safe_note_dir(output_dir, work)
         note_dir.mkdir(parents=True, exist_ok=True)
         saved = []
@@ -471,6 +721,6 @@ class DouyinBrowserEngine:
             image_success=len(images),
             desc=work.title,
             topics=" ".join(work.topics),
-            engine="douyin-edge",
+            engine=engine_tag,
             media_format=", ".join(sorted({path.suffix.lstrip(".").upper() for path in saved})),
         )

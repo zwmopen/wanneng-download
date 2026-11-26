@@ -1204,8 +1204,14 @@ def record_discovered_artworks(items, platform="douyin", source="collection", ma
                     "cover_url", "caption", "artwork_type", "ingest_status", "ingested_dir",
                     "ingest_city", "ingest_season",
                 ):
-                    if row_data.get(field):
-                        target[field] = row_data[field]
+                    val = row_data.get(field)
+                    if not val:
+                        continue
+                    if field == "author" and str(val).strip() in {"未知作者", "—"} and str(target.get("author") or "").strip() not in {"", "未知作者", "—"}:
+                        continue
+                    if field == "title" and str(val).strip() in {"未命名作品", art_id} and str(target.get("title") or "").strip() not in {"", "未命名作品", art_id}:
+                        continue
+                    target[field] = val
                 if not row_data.get("save_path") and (row_data.get("save_dir") or row_data.get("save_directory")):
                     target["save_path"] = str(row_data.get("save_dir") or row_data.get("save_directory") or "")
                 target["collected_at"] = str(row_data.get("collected_at") or _now_str())
@@ -1256,6 +1262,46 @@ def _passes_numeric_rule(row, rule):
     if op == "==":
         return actual == threshold
     return True
+
+
+def _enrich_artwork_source_fields(row):
+    src = str(row.get("source") or "").strip()
+    ext = str(row.get("extract_type") or "").strip()
+    kw = str(row.get("keyword") or "").strip()
+    art_type = str(row.get("artwork_type") or "").strip()
+    if src == "ai-job" or art_type == "AI任务":
+        channel = "AI"
+    elif ext == "剪贴板" or kw == "剪贴板采集" or src == "clipboard":
+        channel = "剪贴板"
+    elif "主页" in ext or "主页" in src or kw == "作者主页":
+        channel = "主页"
+    elif ext == "单作品" or kw == "单作品下载" or src == "single":
+        channel = "单作品"
+    else:
+        channel = "关键词"
+
+    if kw and kw not in {"剪贴板采集", "单作品下载", "作者主页", "AI任务"}:
+        detail = kw[5:].strip() if kw.startswith("AI · ") else kw
+    elif ext and ext not in {"collection"}:
+        detail = ext
+    else:
+        detail = channel
+
+    title_str = str(row.get("title") or "").strip()
+    shell_titles = {
+        "universal-download", "extract-keyword", "extract-author",
+        "extract-single", "wait-keyword", "resume-keyword", "download-artworks",
+    }
+    is_shell = (
+        (src == "ai-job" or art_type == "AI任务")
+        and not str(row.get("save_path") or "").strip()
+        and _safe_int(row.get("image_count"), 0) == 0
+        and (title_str in shell_titles or str(row.get("author") or "").strip() == "CLI / MCP")
+    )
+    row["source_channel"] = channel
+    row["source_detail"] = detail
+    row["is_shell_job"] = is_shell
+    return row
 
 
 def list_artworks(
@@ -1380,6 +1426,9 @@ def list_artworks(
             "source": "ai-job",
             "session_current": False,
         })
+
+    for row in all_rows:
+        _enrich_artwork_source_fields(row)
 
     plat = _normalize_platform(platform)
     query = str(search or "").strip().lower()
@@ -1939,6 +1988,10 @@ def record_queued_artwork_downloads(results, bridge_dir=None):
             row["save_path"] = item.save_dir
             row["download_status"] = f"已下载 {count} 张图" if count else "已下载"
             row["image_count"] = max(_safe_int(row.get("image_count"), 0), count)
+            if getattr(item, "title", "") and str(row.get("title") or "").strip() in {"", "未命名作品", str(row.get("id") or "")}:
+                row["title"] = item.title
+            if getattr(item, "author", "") and str(row.get("author") or "").strip() in {"", "未知作者", "—"}:
+                row["author"] = item.author
             updated += 1
         if updated:
             _save_state(state)
