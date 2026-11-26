@@ -465,7 +465,7 @@ _XHS_SEARCH_SNAPSHOT_SCRIPT = r"""
       url: fullUrl,
       title: String((titleEl && titleEl.innerText) || "").trim().slice(0, 200),
       author: String((authorEl && authorEl.innerText) || "").trim().slice(0, 100),
-      like_count: String((likeEl && likeEl.innerText) || "0").trim(),
+      like_count: String((likeEl && likeEl.innerText) || "").trim(),
       is_video: isVideo,
       is_photo: !isVideo,
       image_count: isVideo ? 0 : 1,
@@ -791,6 +791,16 @@ def _parse_cn_count(raw: Any) -> str:
     return "0"
 
 
+def _xhs_optional_count(interact: Any, *keys: str) -> Optional[str]:
+    if not isinstance(interact, dict):
+        return None
+    for key in keys:
+        value = interact.get(key)
+        if value is not None and re.fullmatch(r"\d+|\d+(?:\.\d+)?\s*万\+?", str(value).strip()):
+            return _parse_cn_count(value)
+    return None
+
+
 def _clean_xhs_image_url(img: Dict[str, Any]) -> str:
     if not isinstance(img, dict):
         return ""
@@ -903,7 +913,7 @@ def _parse_xhs_note_card(
     if not title and desc:
         title = desc.splitlines()[0][:120]
 
-    raw_ts = card.get("time") or card.get("last_update_time") or card.get("lastUpdateTime") or ""
+    raw_ts = card.get("time") or card.get("publish_time") or card.get("publishTime") or ""
     create_time = ""
     if raw_ts not in (None, ""):
         try:
@@ -934,9 +944,9 @@ def _parse_xhs_note_card(
         "cover_urls": [cover_url] if cover_url else image_urls[:1],
         "video_url": video_url,
         "create_time": create_time,
-        "like_count": _parse_cn_count(interact.get("liked_count") or interact.get("likedCount")) if isinstance(interact, dict) else "0",
-        "comment_count": _parse_cn_count(interact.get("comment_count") or interact.get("commentCount")) if isinstance(interact, dict) else "0",
-        "collect_count": _parse_cn_count(interact.get("collected_count") or interact.get("collectedCount")) if isinstance(interact, dict) else "0",
+        "like_count": _xhs_optional_count(interact, "liked_count", "likedCount"),
+        "comment_count": _xhs_optional_count(interact, "comment_count", "commentCount"),
+        "collect_count": _xhs_optional_count(interact, "collected_count", "collectedCount"),
         "share_count": _parse_cn_count(interact.get("shared_count") or interact.get("sharedCount") or interact.get("share_count")) if isinstance(interact, dict) else "0",
     }
 
@@ -1014,6 +1024,8 @@ def _attach_response_collector(
                 return
             status = getattr(resp, "status", 200)
             if isinstance(status, int) and status >= 400:
+                if status in {401, 403, 429, 461, 471}:
+                    stats["access_status"] = status
                 return
             data = resp.json()
             items = extractor(data)
@@ -2657,7 +2669,8 @@ class NativeBrowserCollector:
     ) -> Dict[str, Any]:
         target_url = str(profile_url or "").strip()
         skip_set = {str(x).strip() for x in (skip_ids or []) if str(x).strip()}
-        limit = max(1, min(50, int(max_works or 10)))
+        limit = max(1, min(50 if direct_download else 150, int(max_works or 10)))
+        image_filter = min_images > 0 or max_images < 50
         self._cancel_event.clear()
         with self._state_lock:
             self._active_platform = "xiaohongshu"
@@ -2666,24 +2679,39 @@ class NativeBrowserCollector:
 
         api_cards: Dict[str, Dict[str, Any]] = {}
         dom_ids: Set[str] = set()
+        api_stats: Dict[str, int] = {}
         detach_listener: Callable[[], None] = lambda: None
         try:
             def _open_author():
-                nonlocal api_cards, detach_listener
+                nonlocal api_cards, api_stats, detach_listener
                 page = self._ensure_page_in_worker(proxy_url=proxy_url)
-                api_cards, _, detach_listener = _attach_response_collector(
+                api_cards, api_stats, detach_listener = _attach_response_collector(
                     page,
                     ("/api/sns/web/v1/user_posted",),
                     lambda p: _extract_xhs_items_from_api_payload(p, source="pc_user"),
                 )
-                page.goto(target_url, wait_until="domcontentloaded", timeout=30000)
+                response = page.goto(target_url, wait_until="domcontentloaded", timeout=30000)
+                if getattr(response, "status", 200) in {401, 403, 429, 461, 471}:
+                    api_stats["access_status"] = response.status
+                    return {}
+                initial = page.evaluate("""() => (window.__INITIAL_STATE__?.user?.notes?.[0] || [])
+                    .map(entry => ({id: entry.id, note: entry.noteCard}))""")
+                if isinstance(initial, list):
+                    for entry in initial:
+                        if not isinstance(entry, dict) or not isinstance(entry.get("note"), dict):
+                            continue
+                        note = entry["note"]
+                        item = _parse_xhs_note_card(note.get("noteId") or entry.get("id"), note, source="pc_user")
+                        if item:
+                            sid = item["id"]
+                            api_cards[sid] = _merge_discovered_card(item, api_cards.get(sid) or {})
                 deadline = time.monotonic() + 20.0
                 latest: Dict[str, Any] = {}
                 while time.monotonic() < deadline:
                     snap = page.evaluate(_XHS_SEARCH_SNAPSHOT_SCRIPT)
                     if isinstance(snap, dict):
                         latest = snap
-                        if snap.get("verification") or snap.get("login_required") or (snap.get("cards") or []) or api_cards:
+                        if snap.get("verification") or snap.get("login_required") or api_stats.get("access_status") or (snap.get("cards") or []) or api_cards:
                             _pump_wait(page, 0.35)
                             return snap
                     _pump_wait(page, 0.6)
@@ -2709,7 +2737,17 @@ class NativeBrowserCollector:
                 return {"status": gate_status, "success": False, "stage": "browser", "message": gate_msg}
 
             items_by_id: Dict[str, Dict[str, Any]] = {}
-            for _ in range(12):
+            gate_status = ""
+            unchanged = 0
+            reached_end = False
+            for _ in range(36 if not direct_download else 12):
+                if api_stats.get("access_status"):
+                    gate_status = "partial"
+                    break
+                if isinstance(snap, dict) and (snap.get("verification") or snap.get("login_required")):
+                    gate_status = "verification_required" if snap.get("verification") else "login_required"
+                    break
+                before = len(items_by_id)
                 if isinstance(snap, dict):
                     for it in (snap.get("cards") or []):
                         if isinstance(it, dict) and it.get("id"):
@@ -2720,6 +2758,11 @@ class NativeBrowserCollector:
                     items_by_id[sid] = _merge_discovered_card(items_by_id.get(sid), acard)
                 fresh = [it for it in items_by_id.values() if str(it.get("id") or "") not in skip_set]
                 if len(fresh) >= limit or self._cancel_event.is_set():
+                    break
+
+                unchanged = unchanged + 1 if len(items_by_id) == before else 0
+                if unchanged >= 4:
+                    reached_end = True
                     break
 
                 def _scroll_author():
@@ -2744,10 +2787,10 @@ class NativeBrowserCollector:
                         cur_item,
                     ),
                     timeout=30.0,
-                )
+                ) if direct_download and not gate_status else dict(item)
                 detail_item["keyword"] = "作者主页"
                 detail_item["artwork_type"] = "视频" if detail_item.get("is_video") else "图文"
-                if not detail_item.get("is_video"):
+                if image_filter and not gate_status and not detail_item.get("is_video"):
                     img_cnt = int(detail_item.get("image_count") or len(detail_item.get("image_urls") or []) or 0)
                     if not (min_images <= img_cnt <= max_images):
                         continue
@@ -2763,7 +2806,7 @@ class NativeBrowserCollector:
             links = [str(it.get("url") or "") for it in chosen if it.get("url")]
             download_items: List[Dict[str, Any]] = []
             total_media = 0
-            if direct_download and chosen:
+            if direct_download and chosen and not gate_status and not self._cancel_event.is_set():
                 download_items, total_media = self._download_xhs_candidates(
                     chosen,
                     output_dir=output_dir,
@@ -2777,16 +2820,38 @@ class NativeBrowserCollector:
                 if (chosen or health_status != "possible_rule_break")
                 else "小红书主页已打开且未触发验证码，但接口与页面均未解析到作品，规则或登录态可能需更新"
             )
+            status = "completed" if chosen else "completed_zero"
+            if gate_status == "partial":
+                status = "partial"
+                msg = f"平台返回 HTTP {api_stats['access_status']}，已暂停并保留 {len(chosen)} 条作品"
+            elif gate_status:
+                status = gate_status
+                msg = f"遇到平台登录或安全验证，已保留 {len(chosen)} 条作品"
+                try:
+                    self._call_browser(lambda: self._bring_to_front_in_worker(topmost=True), timeout=10.0)
+                except Exception:
+                    pass
+                with self._state_lock:
+                    self._verification_required = True
+                    self._paused_job = dict(job_request or {"kind": "homepage", "platform": "xiaohongshu", "profile_url": target_url})
+                if callable(on_gate_cb):
+                    on_gate_cb(gate_status, msg)
+            elif self._cancel_event.is_set():
+                status = "cancelled"
+                msg = f"已停止，保留 {len(chosen)} 条作品"
+            elif not direct_download and not reached_end and len(fresh_all) < limit:
+                status = "partial"
+                msg = f"已保存 {len(chosen)} 条作品，扫描达到本轮上限"
             return {
-                "status": "completed" if chosen else "completed_zero",
-                "success": True,
+                "status": status,
+                "success": status in {"completed", "completed_zero"},
                 "stage": "completed",
                 "candidates": chosen,
                 "discovered_links": links,
                 "download": {"items": download_items, "success_count": len(download_items)} if direct_download else {},
                 "media_file_count": total_media,
                 "skipped_duplicate_count": skipped_dup,
-                "completion_confirmed": bool(chosen),
+                "completion_confirmed": bool(chosen) and status == "completed",
                 "message": msg,
             }
         finally:

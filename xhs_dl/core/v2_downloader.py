@@ -103,14 +103,21 @@ class LocalCliEngine:
         )
 
     @staticmethod
-    def _media_files(root: Path) -> dict:
-        if not root.exists():
-            return {}
+    def _media_files(root: Path, *, max_depth: Optional[int] = None) -> dict:
         result = {}
-        for path in root.rglob("*"):
-            if path.is_file() and path.suffix.lower() in MEDIA_EXTENSIONS:
-                stat = path.stat()
-                result[path.resolve()] = (stat.st_size, stat.st_mtime_ns)
+        for directory, subdirectories, filenames in os.walk(root, followlinks=False):
+            folder = Path(directory)
+            if max_depth is not None and len(folder.relative_to(root).parts) >= max_depth:
+                subdirectories.clear()
+            for name in filenames:
+                path = folder / name
+                if path.suffix.lower() not in MEDIA_EXTENSIONS:
+                    continue
+                try:
+                    info = path.stat()
+                    result[path.resolve()] = (info.st_size, info.st_mtime_ns)
+                except OSError:
+                    continue
         return result
 
     def download_one(self, url: str, output_dir: Path) -> NoteResult:
@@ -118,7 +125,7 @@ class LocalCliEngine:
         output_dir.mkdir(parents=True, exist_ok=True)
         before = self._media_files(output_dir)
         parent_dir = output_dir.parent
-        before_parent = self._media_files(parent_dir)
+        before_parent = self._media_files(parent_dir, max_depth=2)
         bridge = Path(__file__).resolve().parents[1] / "engine_bridge.py"
         command = [
             str(self.python), str(bridge),
@@ -192,7 +199,7 @@ class LocalCliEngine:
             # 上游 2.9 会清洗 folder_name（例如吞掉前导下划线）并把媒体写到同级目录，
             # 导致 output_dir 里空空如也、被误判为"未生成素材目录"。
             # 兜底：按"本次运行期间新增/变化"扫父目录，定位真实落盘目录。
-            after_parent = self._media_files(parent_dir)
+            after_parent = self._media_files(parent_dir, max_depth=2)
             fresh = [
                 path for path, signature in after_parent.items()
                 if before_parent.get(path) != signature

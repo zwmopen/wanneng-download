@@ -96,7 +96,7 @@ def default_workbench_settings():
             "platform": "douyin",
             "mode": "author_works",
             "clear_before": True,
-            "direct_download": True,
+            "direct_download": False,
             "update_author_info": False,
             "anti_artwork_enabled": True,
             "anti_artwork_count": 10,
@@ -1148,10 +1148,10 @@ def record_discovered_artworks(items, platform="douyin", source="collection", ma
                 continue
             raw_create = _first_non_empty(row_data, ("create_time", "createTime", "publish_time"), "")
             _, _, _, resolved_pub_time = _format_artwork_publish_times(raw_create)
-            likes_val = _safe_int(_first_non_empty(row_data, ("likes", "like_count", "digg_count"), 0), 0)
-            comments_val = _safe_int(_first_non_empty(row_data, ("comments", "comment_count"), 0), 0)
-            favorites_val = _safe_int(_first_non_empty(row_data, ("favorites", "collect_count"), 0), 0)
-            shares_val = _safe_int(_first_non_empty(row_data, ("shares", "share_count"), 0), 0)
+            likes_val = _safe_int(_first_non_empty(row_data, ("likes", "like_count", "digg_count")), None)
+            comments_val = _safe_int(_first_non_empty(row_data, ("comments", "comment_count")), None)
+            favorites_val = _safe_int(_first_non_empty(row_data, ("favorites", "collect_count")), None)
+            shares_val = _safe_int(_first_non_empty(row_data, ("shares", "share_count")), None)
             caption_val = str(_first_non_empty(row_data, ("caption", "text", "title"), "") or "")
             key = (platform, art_id)
             target = existing.get(key)
@@ -1201,7 +1201,7 @@ def record_discovered_artworks(items, platform="douyin", source="collection", ma
                 for field in (
                     "download_status", "save_path", "title", "author",
                     "author_uid", "author_sec_uid", "url", "keyword",
-                    "cover_url", "caption", "ingest_status", "ingested_dir",
+                    "cover_url", "caption", "artwork_type", "ingest_status", "ingested_dir",
                     "ingest_city", "ingest_season",
                 ):
                     if row_data.get(field):
@@ -1214,7 +1214,7 @@ def record_discovered_artworks(items, platform="douyin", source="collection", ma
                         target["create_time"] = str(row_data.get("create_time") or row_data.get("createTime") or "")
                     target["publish_time"] = resolved_pub_time
                 for stat_key, val in (("likes", likes_val), ("comments", comments_val), ("favorites", favorites_val), ("shares", shares_val)):
-                    if val > 0 or target.get(stat_key) is None:
+                    if val is not None and (val > 0 or target.get(stat_key) is None or platform == "xiaohongshu"):
                         target[stat_key] = val
                 if row_data.get("image_urls"):
                     target["image_urls"] = list(row_data.get("image_urls") or [])

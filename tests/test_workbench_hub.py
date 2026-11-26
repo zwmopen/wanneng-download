@@ -1513,3 +1513,55 @@ def test_xhs_homepage_routing_live_photo_download_profiles_and_rule_health(monke
         assert marker in html
 
 
+
+
+def test_xhs_homepage_metadata_only_writes_rows_without_queueing_download(monkeypatch, tmp_path):
+    from xhs_dl.web import native_collector
+
+    monkeypatch.setenv("XHS_DL_WORKBENCH_FILE", str(tmp_path / "workbench.json"))
+    monkeypatch.setenv("XHS_DL_AUTO_SYNC_JIANGHU", "0")
+    monkeypatch.setattr(web_app, "TOOLBOX_BRIDGE_DIR", tmp_path / "bridge")
+    monkeypatch.setattr(web_app, "COLLECTION_TASKS_FILE", tmp_path / "jobs.json")
+    job_id = "metadata-only"
+    profile_url = "https://www.xiaohongshu.com/user/profile/6848db89000000001b022e83"
+    work_id = "689ea05d000000001c034d78"
+    work_url = f"https://www.xiaohongshu.com/explore/{work_id}"
+    monkeypatch.setattr(web_app, "COLLECTION_TASKS", {job_id: {
+        "kind": "homepage",
+        "platform": "xiaohongshu",
+        "profile_url": profile_url,
+        "direct_download": False,
+        "skip_downloaded_history": False,
+    }})
+    monkeypatch.setattr(web_app, "_use_native_engine", lambda: True)
+
+    def fail_download(*args, **kwargs):
+        raise AssertionError("metadata-only collection entered the download queue")
+
+    monkeypatch.setattr(web_app, "_queue_collection_links", fail_download)
+
+    class Engine:
+        def collect_xhs_homepage(self, url, **kwargs):
+            assert url == profile_url
+            assert kwargs["direct_download"] is False
+            return {
+                "status": "completed",
+                "success": True,
+                "candidates": [{
+                    "id": work_id, "url": work_url, "title": "公开作品",
+                    "artwork_type": "图文", "like_count": "0", "create_time": "2025-08-15 10:50:05",
+                }],
+                "discovered_links": [work_url],
+            }
+
+    monkeypatch.setattr(native_collector, "get_engine", Engine)
+    web_app._run_collection_discovery(job_id, [])
+    task = web_app.COLLECTION_TASKS[job_id]
+    assert task["status"] == "completed"
+    assert task["discovered_count"] == 1
+    assert not task.get("download_job_id")
+    row, = toolbox_store.load_state(web_app.TOOLBOX_BRIDGE_DIR)["artworks"]
+    assert row["title"] == "公开作品"
+    assert row["likes"] == 0
+    assert row["comments"] is None and row["favorites"] is None
+    assert row["publish_time"] == "2025-08-15 10:50:05"

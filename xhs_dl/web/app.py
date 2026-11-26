@@ -369,6 +369,8 @@ def _last_json_object(output):
 
 
 def _queue_collection_links(task, links):
+    if task.get("direct_download") is False:
+        return None
     clean_links = []
     seen = set()
     for value in links if isinstance(links, list) else []:
@@ -630,6 +632,14 @@ def _run_collection_discovery(job_id, command, cleanup_files=None):
         for cid, it in dl_by_id.items():
             if cid not in seen_cids:
                 candidates.append(it)
+        if not is_direct and task and not candidates and links:
+            candidates = []
+            for link in links:
+                if not isinstance(link, str):
+                    continue
+                match = re.search(r"/(?:explore|discovery/item|note|video)/([a-zA-Z0-9]+)", urlsplit(link).path)
+                if match:
+                    candidates.append({"id": match.group(1), "url": link})
         if candidates and task:
             try:
                 toolbox_store.record_discovered_artworks(
@@ -640,7 +650,12 @@ def _run_collection_discovery(job_id, command, cleanup_files=None):
                     bridge_dir=TOOLBOX_BRIDGE_DIR,
                 )
             except Exception:
-                pass
+                if not is_direct:
+                    _update_collection_task(
+                        job_id, status="error", stage="workbench",
+                        message="已发现作品，写入作品列表失败",
+                    )
+                    return
 
         if is_direct and (success_downloads > 0 or result.get("success") is True):
             if task.get("kind") == "keyword" and task.get("keyword"):
@@ -746,8 +761,8 @@ def _run_collection_discovery(job_id, command, cleanup_files=None):
             threading.Thread(target=_notify_done, daemon=True).start()
             return
 
-        if task and task.get("kind") == "keyword" and not is_direct and candidates:
-            if task.get("keyword"):
+        if task and not is_direct and candidates and result.get("status") not in {"verification_required", "login_required", "cancelled", "partial"}:
+            if task.get("kind") == "keyword" and task.get("keyword"):
                 try:
                     toolbox_store.mark_keyword_collected(
                         task.get("keyword"),
@@ -757,7 +772,7 @@ def _run_collection_discovery(job_id, command, cleanup_files=None):
                     )
                 except Exception:
                     pass
-            msg_list = f"已采集 {len(candidates)} 条合格图文到作品列表（可在作品列表勾选后直接下载）"
+            msg_list = f"已采集 {len(candidates)} 条作品到作品列表，可勾选后手动下载"
             if skipped_dup:
                 msg_list += f"；已去重跳过 {skipped_dup} 条已采作品"
             _update_collection_task(
@@ -771,7 +786,7 @@ def _run_collection_discovery(job_id, command, cleanup_files=None):
             )
             return
 
-        if links and task:
+        if is_direct and links and task and result.get("status") not in {"verification_required", "login_required", "cancelled", "partial", "error"}:
             download_job_id = _queue_collection_links(task, links)
             if download_job_id:
                 _update_collection_task(
@@ -820,7 +835,7 @@ def _run_collection_discovery(job_id, command, cleanup_files=None):
             job_id,
             status=status,
             stage=result.get("stage", "collection"),
-            discovered_count=len(links),
+            discovered_count=len(candidates) or len(links),
             skipped_duplicate_count=skipped_dup,
             outcome=result.get("outcome", ""),
             completion_confirmed=bool(result.get("completion_confirmed")),
@@ -851,8 +866,8 @@ def _validate_profile_url(value):
     )
     if is_dy and "/user/" in path_lower:
         return url, "douyin"
-    is_xhs = host == "xiaohongshu.com" or host.endswith(".xiaohongshu.com") or host == "xhslink.com"
-    if is_xhs and ("/user/profile/" in path_lower or host == "xhslink.com"):
+    is_xhs = host == "xiaohongshu.com" or host.endswith(".xiaohongshu.com") or host in {"xhslink.com", "xhslink.cn"}
+    if is_xhs and ("/user/profile/" in path_lower or host in {"xhslink.com", "xhslink.cn"}):
         return url, "xiaohongshu"
     raise ValueError("请输入抖音（含 /user/）或小红书（含 /user/profile/）作者主页链接")
 
@@ -1321,7 +1336,7 @@ def _openapi_document():
             },
             "/api/v1/collections/homepage": {
                 "post": {
-                    "summary": "发现抖音主页公开图文并加入统一下载队列",
+                    "summary": "采集抖音或小红书公开主页，默认只回填作品列表",
                     "parameters": [{"name": "Idempotency-Key", "in": "header", "required": False, "schema": {"type": "string", "maxLength": 128}}],
                     "requestBody": {"required": True, "content": {"application/json": {"schema": {"type": "object", "required": ["profile_url"], "properties": {"profile_url": {"type": "string", "format": "uri"}, "output_dir": {"type": "string"}, "mode": {"type": "string", "enum": ["auto", "fast", "normal", "cautious", "slow", "very-slow"]}, "image_format": {"type": "string", "enum": ["keep", "jpg", "png"]}}}}}},
                     "responses": {"202": {"description": "主页发现任务已排队；随后下载任务进入统一任务列表"}, "200": {"description": "幂等请求返回原任务"}, "400": {"description": "主页链接或保存设置无效"}, "409": {"description": "原生验证中、平台不符或另一个发现任务正在运行"}, "503": {"description": "江湖工具箱离线或未安装"}},
@@ -1940,18 +1955,20 @@ class Handler(BaseHTTPRequestHandler):
                         Path(path_str).unlink(missing_ok=True)
                     self._json({"error": str(exc)}, 400)
                     return
+                direct_download = body.get("direct_download") is True
+                max_works_cap = 150 if profile_plat == "xiaohongshu" and not direct_download and _use_native_engine() else 50
                 max_works = body.get("max_works", 10)
-                min_images = body.get("min_images", 4)
-                max_images = body.get("max_images", 20)
-                if (isinstance(max_works, bool) or not isinstance(max_works, int) or not 1 <= max_works <= 50
+                xmin, xmax = (0, 50) if profile_plat == "xiaohongshu" and not direct_download else (4, 20)
+                min_images = body.get("min_images", xmin)
+                max_images = body.get("max_images", xmax)
+                if (isinstance(max_works, bool) or not isinstance(max_works, int) or not 1 <= max_works <= max_works_cap
                         or isinstance(min_images, bool) or not isinstance(min_images, int)
                         or isinstance(max_images, bool) or not isinstance(max_images, int)
                         or not 0 <= min_images <= max_images <= 50):
                     for path_str in skip_cleanup_files:
                         Path(path_str).unlink(missing_ok=True)
-                    self._json({"error": "主页作品数量需在 1–50；图片范围需满足 0 ≤ 最小张数 ≤ 最大张数 ≤ 50"}, 400)
+                    self._json({"error": f"主页作品数量需在 1–{max_works_cap}；图片范围需满足 0 ≤ 最小张数 ≤ 最大张数 ≤ 50"}, 400)
                     return
-                direct_download = bool(body.get("direct_download", True))
                 command = [
                     _python_console_executable(), str(TOOLBOX_PROJECT / "jianghu_cli.py"),
                     "--bridge-dir", str(TOOLBOX_BRIDGE_DIR), "--timeout", "120",

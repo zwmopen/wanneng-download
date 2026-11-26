@@ -582,12 +582,12 @@ details.drawer[open] summary:after{transform:rotate(180deg)}
               </div>
             </div>
             <div class="param-chips">
-              <div class="param-chip"><span>每主页数量</span><input type="number" id="a_max_per_author" min="1" max="50" value="10"></div>
-              <div class="param-chip"><span>图文张数</span><input type="number" id="a_min_images" min="0" max="50" value="4"><span>至</span><input type="number" id="a_max_images" min="0" max="50" value="20"><span>张</span></div>
-              <label class="param-chip" style="cursor:pointer"><input type="checkbox" id="a_direct_download" checked style="width:15px;height:15px;margin:0;accent-color:var(--accent)"> 提取直接下载</label>
+              <div class="param-chip"><span>每主页数量</span><input type="number" id="a_max_per_author" min="1" max="150" value="10"></div>
+              <div class="param-chip"><span>图文张数</span><input type="number" id="a_min_images" min="0" max="50" value="0"><span>至</span><input type="number" id="a_max_images" min="0" max="50" value="50"><span>张</span></div>
+              <label class="param-chip" style="cursor:pointer"><input type="checkbox" id="a_direct_download" style="width:15px;height:15px;margin:0;accent-color:var(--accent)"> 同时下载素材</label>
             </div>
             <div class="btn-row" style="margin-top:0">
-              <button class="primary" id="startHomepage" type="button">采集主页并下载图文</button>
+              <button class="primary" id="startHomepage" type="button">采集主页</button>
               <button class="secondary" type="button" onclick="openDownloadDir()">打开作品保存目录</button>
             </div>
             <p class="panel-sub" id="homepageCapability" style="margin:0">正在检测内置 Edge 采集核心…</p>
@@ -635,6 +635,7 @@ details.drawer[open] summary:after{transform:rotate(180deg)}
             <button class="mini-btn" type="button" onclick="artBatch('invert')">反选</button>
             <button class="mini-btn" type="button" onclick="artBatch('none')">清空</button>
             <button class="mini-btn" type="button" onclick="artResetFilters()">重置筛选</button>
+            <button class="mini-btn" id="artRefreshBtn" type="button">刷新列表</button>
             <button class="mini-btn" type="button" onclick="artExportCsv()">导出 CSV</button>
             <button class="mini-btn danger" type="button" onclick="artDeleteSelected()">删除</button>
           </div>
@@ -1104,7 +1105,7 @@ function bindSettingFields(s){
   syncMediaTypeUi();
   Object.keys(au).forEach(k=>{
     if(k==='mode'){document.querySelectorAll('input[name="a_mode"]').forEach(r=>r.checked=r.value===au[k]);}
-    else setVal('a_'+k,au[k]);
+    else if(k!=='direct_download')setVal('a_'+k,au[k]);
   });
   Object.keys(dl).forEach(k=>setVal('d_'+k,dl[k]));
   if(dl.auto_ingest_material!=null){
@@ -1190,7 +1191,7 @@ function collectSettingsPatch(){
   return {
     single:{...(wbSettings.single||{}),platform:activeSinglePlatform},
     keyword:{...(wbSettings.keyword||{}),platform:activeKwPlatform,direct_download:gVal('k_direct_download'),media_type:mtype,type_video:mtype!=='image',max_per_keyword:gVal('keywordCount'),min_images:gVal('minImages'),max_images:gVal('maxImages'),web_sort:gVal('k_web_sort')||'综合排序',web_publish_time:gVal('k_web_publish_time')||'不限'},
-    author:{...(wbSettings.author||{}),platform:activeAuPlatform,direct_download:gVal('a_direct_download'),max_per_author:gVal('a_max_per_author'),min_images:gVal('a_min_images'),max_images:gVal('a_max_images')},
+    author:{...(wbSettings.author||{}),platform:activeAuPlatform,max_per_author:gVal('a_max_per_author'),min_images:gVal('a_min_images'),max_images:gVal('a_max_images')},
     download:{...(wbSettings.download||{}),down_video:gVal('d_down_video'),down_teletex:gVal('d_down_teletex'),output_dir:gVal('d_output_dir')||getOutputDir(),skip_downloaded_history:gVal('d_skip_downloaded_history'),image_format:gVal('d_image_format'),delay_mode:gVal('d_delay_mode'),title_template:gVal('d_title_template'),set_file_time_to_publish:gVal('d_set_file_time_to_publish'),auto_ingest_material:gVal('d_auto_ingest_material'),auto_ingest_copy_only:gVal('d_auto_ingest_copy_only'),write_metadata:gVal('d_write_metadata'),auto_ingest_config_path:gVal('d_auto_ingest_config_path')},
     software:{...(wbSettings.software||{}),theme:currentThemeMode||'auto',app_window_mode:gVal('sw_app_window_mode'),minimize_to_tray:gVal('sw_minimize_to_tray'),auto_topmost_verify_window:gVal('sw_auto_topmost_verify_window'),notify_desktop_toast:gVal('sw_notify_desktop_toast'),notify_feishu:gVal('sw_notify_feishu'),notify_on_complete:gVal('sw_notify_on_complete'),notify_feishu_target:gVal('sw_notify_feishu_target'),notify_feishu_app_id:gVal('sw_notify_feishu_app_id'),notify_feishu_app_secret:gVal('sw_notify_feishu_app_secret'),notify_feishu_webhook:gVal('sw_notify_feishu_webhook'),proxy_url:gVal('sw_proxy_url')||'',theme_day_start:gVal('sw_theme_day_start'),theme_night_start:gVal('sw_theme_night_start'),theme_auto_style:gVal('sw_theme_auto_style')||'rotate'}
   };
@@ -1582,7 +1583,9 @@ function copyAiSnippet(elId){
 }
 
 // Artworks library
+let artworkReadSequence=0;
 async function refreshArtworks(){
+  const sequence=++artworkReadSequence;
   const sortBy=($('artSortBy')&&$('artSortBy').value)||'collected_at';
   const params=new URLSearchParams({
     mode:activeArtView,search:$('artSearch').value||'',artwork_type:$('artTypeFilter').value||'all',
@@ -1591,6 +1594,7 @@ async function refreshArtworks(){
     min_likes:$('artMinLikes').value||'0',min_favorites:($('artMinFavorites')&&$('artMinFavorites').value)||'0',min_comments:$('artMinComments').value||'0',min_images:$('artMinImages').value||'0'
   });
   const d=await api('/api/v1/workbench/artworks?'+params.toString());
+  if(sequence!==artworkReadSequence)return;
   wbArtworks=d.items||[];
   $('artSummaryText').textContent=`当前 ${d.current_count||0} 条 · 历史 ${d.history_count||0} 条 · 显示 ${d.shown_count||0} 条`;
   const body=$('artTableBody');
@@ -1600,7 +1604,7 @@ async function refreshArtworks(){
     const stText=String(r.download_status||'已读取未下载');
     const stCls=(stText.includes('已下载')||stText==='成功')?'ok':((stText.includes('失败')||stText.includes('验证'))?'warn':'');
     const ingestBadge=r.ingest_status?` <span class="badge ${String(r.ingest_status).includes('已入库')?'ok':'warn'}">${esc(r.ingest_status)}</span>`:'';
-    const pubDate=String(r.publish_time||'').slice(0,10)||'—';
+    const pubDate=String(r.publish_time||'').trim()||'—';
     const colRaw=String(r.collected_at||'').trim();
     const colShort=colRaw?colRaw.slice(5,16):'—';
     const srcLabel=r.keyword||r.extract_type||'—';
@@ -1611,7 +1615,7 @@ async function refreshArtworks(){
       <td><span class="badge">${esc(r.artwork_type)}</span></td>
       <td class="cell-ellipsis" title="${esc(srcLabel)}">${esc(srcLabel)}</td><td>${esc(r.author)}</td>
       <td class="cell-ellipsis" title="${esc(openPath||r.title)}">${esc(r.title)}</td>
-      <td style="white-space:nowrap;font-variant-numeric:tabular-nums">${esc(r.comments||0)} / ${esc(r.favorites||0)} / ${esc(r.likes||0)}</td>
+      <td style="white-space:nowrap;font-variant-numeric:tabular-nums">${esc(r.comments??'—')} / ${esc(r.favorites??'—')} / ${esc(r.likes??'—')}</td>
       <td style="white-space:nowrap">${esc(pubDate)}</td>
       <td style="white-space:nowrap;font-variant-numeric:tabular-nums" title="${esc(colRaw||'未记录')}">${esc(colShort)}</td>
       <td>${esc(r.image_count)}</td>
@@ -1787,6 +1791,8 @@ async function pollCollection(kind,jobId){
         if(bar){bar.classList.remove('active');if(t.status==='completed')bar.style.width='100%';}
         refreshKeywords();refreshArtworks();refreshDashboard();
         showToast(t.message||'关键词采集已结束',t.status!=='completed'&&t.status!=='accepted');
+      }else{
+        refreshArtworks().catch(e=>showToast('作品列表刷新失败：'+e.message,true));
       }
       return t;
     }
@@ -1847,7 +1853,7 @@ async function submitCollection(kind){
   if(kind==='homepage'){
     const profile_url=($('authorUrl').value||'').trim()||(wbAuthors.find(a=>a.checked)||{}).url||'';
     if(!profile_url){setCollectionStatus(kind,null,'请填写或勾选一个作者主页链接');showToast('请先填写或勾选主页链接',true);return;}
-    const hpPlat=/xiaohongshu\.com|xhslink\.com/i.test(profile_url)?'xiaohongshu':'douyin';
+    const hpPlat=/xiaohongshu\.com|xhslink\.(com|cn)/i.test(profile_url)?'xiaohongshu':'douyin';
     btn.disabled=true;
     setCollectionStatus(kind,{status:'queued',label:'准备引擎',message:'正在检查引擎状态并连接采集流程…'},null);
     try{
@@ -1855,17 +1861,21 @@ async function submitCollection(kind){
       const req={
         platform:hpPlat,
         profile_url,
-        max_works:Math.max(1,Math.min(50,Number(($('a_max_per_author')||{}).value)||10)),
-        min_images:Number(($('a_min_images')||{}).value)||4,
-        max_images:Number(($('a_max_images')||{}).value)||20,
-        direct_download:!!($('a_direct_download')?$('a_direct_download').checked:true),
+        max_works:Math.max(1,Math.min(hpPlat==='xiaohongshu'&&!$('a_direct_download').checked?150:50,Number($('a_max_per_author').value)||10)),
+        min_images:Number($('a_min_images').value||0),
+        max_images:Number($('a_max_images').value||50),
+        direct_download:$('a_direct_download').checked,
         ...settings()
       };
       showToast(`已启动${hpPlat==='xiaohongshu'?'小红书':'抖音'}作者主页采集`);
       const task=await api('/api/v1/collections/homepage','POST',req);
       await pollCollection('homepage',task.job_id);
     }catch(e){setCollectionStatus(kind,null,e.message);showToast(e.message,true);}
-    finally{btn.disabled=false;}
+    finally{
+      btn.disabled=false;
+      $('a_direct_download').checked=false;
+      btn.textContent='采集主页';
+    }
     return;
   }
   const typed=($('keywordValue').value||'').trim();
@@ -1890,6 +1900,16 @@ async function submitCollection(kind){
     activeKeywordRun=false;btn.disabled=false;updateStartKeywordLabel();
   }
 }
+$('a_direct_download').addEventListener('change',()=>{
+  $('startHomepage').textContent=$('a_direct_download').checked?'采集主页并下载素材':'采集主页';
+});
+$('artRefreshBtn').addEventListener('click',async()=>{
+  const button=$('artRefreshBtn');
+  button.disabled=true;
+  try{await refreshArtworks();}
+  catch(e){showToast('作品列表刷新失败：'+e.message,true);}
+  finally{button.disabled=false;}
+});
 $('startHomepage').addEventListener('click',()=>submitCollection('homepage'));
 $('startKeyword').addEventListener('click',()=>submitCollection('keyword'));
 
@@ -2088,7 +2108,7 @@ $('collectorToggle').addEventListener('click',async()=>{
   }
   $('keywordValue')&&$('keywordValue').addEventListener('input',updateStartKeywordLabel);
   function triggerAutoSave(){if(autoSaveTimer)clearTimeout(autoSaveTimer);autoSaveTimer=setTimeout(()=>saveAllWorkbenchSettings(false),400);}
-  ['keywordCount','minImages','maxImages','k_media_type','k_web_sort','k_web_publish_time','k_direct_download','a_direct_download','a_max_per_author','a_min_images','a_max_images'].forEach(id=>{
+  ['keywordCount','minImages','maxImages','k_media_type','k_web_sort','k_web_publish_time','k_direct_download','a_max_per_author','a_min_images','a_max_images'].forEach(id=>{
     const el=$(id);
     if(el)el.addEventListener('change',()=>{
       if(id==='keywordCount'&&!activeKeywordRun&&$('kwKpiTarget')){$('kwKpiTarget').textContent=Number(el.value)===0?'全部':String(Number(el.value)||20);}
