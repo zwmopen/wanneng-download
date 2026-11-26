@@ -97,7 +97,8 @@ feishu_cfg = notify_cfg.get("feishu", {})
 rules_cfg = LOADED_CONFIG.get("classification_rules", {})
 filter_cfg = LOADED_CONFIG.get("filter_rules", {})
 project_routing_cfg = LOADED_CONFIG.get("project_routing", {})
-MAX_IMAGE_ALLOWED = int(filter_cfg.get("max_images_allowed", 15))
+image_limit_value = filter_cfg.get("max_images_allowed", 15)
+MAX_IMAGE_ALLOWED = 0 if image_limit_value is None or str(image_limit_value).strip() == "" else int(image_limit_value)
 
 # 运行时数据与日志目录（预演：代码仓库与运行数据分离；不自动搬移旧数据）
 PATHS = resolve_paths(
@@ -1552,6 +1553,39 @@ def _effective_ingest_config() -> dict:
 
 
 # 核心下载执行函数
+
+def _graphic_download_qualification(work_dir: Path, *, title: str, note_type: str) -> str:
+    media_suffixes = {".jpg", ".jpeg", ".png", ".webp", ".bmp", ".heic", ".avif", ".gif"}
+    if note_type == "video" or any(
+        p.is_file() and p.suffix.lower() in {".mp4", ".mov", ".mkv", ".webm"}
+        for p in work_dir.iterdir()
+    ):
+        return ""
+    from PIL import Image
+
+    images = 0
+    for path in work_dir.iterdir():
+        if not path.is_file() or path.suffix.lower() not in media_suffixes:
+            continue
+        try:
+            with Image.open(path) as image:
+                image.verify()
+        except (OSError, SyntaxError, ValueError):
+            continue
+        images += 1
+    if images < 5:
+        return f"图文原料只有 {images} 张图片，低于 5 张"
+    copy_path = work_dir / "文案.txt"
+    if not copy_path.is_file():
+        return "缺少文案.txt"
+    lines = [line.strip() for line in copy_path.read_text(encoding="utf-8-sig").splitlines() if line.strip()]
+    body = [line for line in lines if not line.startswith("#") and line not in {title.strip(), "（正文为空）"}]
+    if not body:
+        return "文案.txt 缺少正文"
+    return ""
+
+
+
 def execute_download_and_file(target_url: str) -> tuple[bool, str, dict]:
     """
     执行万能下载器无感解包，并完成城市分流、四季硬链接、元数据打标。
@@ -1617,6 +1651,22 @@ def execute_download_and_file(target_url: str) -> tuple[bool, str, dict]:
                 "deduplicated": True,
             }
         return False, "UNKNOWN_NO_OUTPUT: 下载引擎未产出目录，原因未证实，保留任务并退避重试", {}
+
+    failure = _graphic_download_qualification(
+        work_dir, title=str(getattr(note_result, "title", "") or ""),
+        note_type=str(getattr(note_result, "note_type", "") or ""),
+    )
+    if failure:
+        # Keep incomplete evidence outside the temporary intake directory.
+        holding = TEMP_DOWNLOAD_DIR.parent / "待补下载素材"
+        holding.mkdir(parents=True, exist_ok=True)
+        target = holding / work_dir.name
+        if target.exists():
+            target = holding / f"{work_dir.name}-{time.time_ns()}"
+        if work_dir.resolve().is_relative_to(TEMP_DOWNLOAD_DIR.resolve()):
+            work_dir.rename(target)
+            return False, f"MATERIAL_INCOMPLETE: {failure}，已留待补目录", {}
+        return False, f"MATERIAL_INCOMPLETE: {failure}，输出路径在临时目录之外，已保留", {}
 
     mode_info = get_current_collector_mode()
     curr_mode = mode_info.get("mode", "auto")
@@ -1866,6 +1916,11 @@ def queue_worker_loop(queue_mgr: QueueManager, history_set: set):
                 if sys.stdout:
                     print(f"[Worker Discard Oversized]: Discarded item {url} ({result_msg}), moving to next...")
                 time.sleep(1.0)
+                continue
+
+            elif result_msg.startswith("MATERIAL_INCOMPLETE:"):
+                queue_mgr.pop_discard(item_id, result_msg)
+                log_daemon(f"[Worker Material Incomplete]: {result_msg}")
                 continue
 
             elif "UNSUPPORTED_PROFILE" in result_msg or any(
