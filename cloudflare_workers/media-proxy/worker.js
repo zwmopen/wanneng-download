@@ -25,6 +25,8 @@ const MAX_REDIRECTS = 10;
  */
 const ALLOWED_HOST_SUFFIXES = [
   'douyinvod.com', 'douyinpic.com', 'snssdk.com', 'amemv.com',
+  'zjcdn.com', 'ixigua.com', 'bytevcloudapi.com', 'ibytedtos.com',
+  'pstatp.com', 'toutiaovod.com', 'bytedcdn.com', 'bytetos.com', 'bytecdntp.com',
   'weibo.com', 'weibocdn.com', 'sinaimg.cn',
   'kwimgs.com', 'yximgs.com', 'kuaishou.com',
   'xhscdn.com', 'xiaohongshu.com',
@@ -99,13 +101,17 @@ async function hashFilename(str) {
     return hex.slice(0, 16);
 }
 
-/** 白名单校验：空配置放行；否则按后缀匹配目标域名 */
+/** 白名单校验：强制 http(s) 协议并按后缀匹配目标域名 */
 function isHostAllowed(targetUrl) {
     if (!ALLOWED_HOST_SUFFIXES.length) {
         return true;
     }
     try {
-        const host = new URL(targetUrl).hostname.toLowerCase();
+        const parsed = new URL(targetUrl);
+        if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+            return false;
+        }
+        const host = parsed.hostname.toLowerCase();
         return ALLOWED_HOST_SUFFIXES.some((suffix) => host === suffix || host.endsWith("." + suffix));
     } catch {
         return false;
@@ -165,6 +171,9 @@ async function proxyMedia(targetUrl, platformKey, mediaKey, download) {
             }
             await response.body?.cancel().catch(() => {});
             current = new URL(location, current).href;
+            if (!isHostAllowed(current)) {
+                return {status: 403, data: {code: 403, msg: "重定向目标域名不在白名单内"}};
+            }
             response = await fetchWithTimeout(
                 current,
                 {method: "GET", headers: requestHeaders, redirect: "manual"},
@@ -259,6 +268,9 @@ export default {
         const decodedUrl = decodeProxyUrl(proxyurl);
         if (!decodedUrl) {
             return jsonResponse({code: 400, msg: "URL解码失败", original_url: proxyurl}, 400);
+        }
+        if (!isHostAllowed(decodedUrl)) {
+            return jsonResponse({code: 403, msg: "目标域名不在白名单内"}, 403);
         }
 
         // mediatype 未指定时自动探测上游媒体类型
