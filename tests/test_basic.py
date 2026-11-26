@@ -204,7 +204,8 @@ def test_web_job_api():
         assert 'data-theme="neo"' in page
         assert "xhs-dl-theme" in page
         assert json.dumps(str(Path.home() / "Downloads"), ensure_ascii=False) in page
-        assert "MIN_PROGRESS_MS=1100" in page
+        assert "xhs-dl-active-download-job" in page
+        assert "正在直连高速解析并下载" not in page
         assert 'id="settingsPanel"' in page
         assert 'id="d_output_dir"' in page
         assert 'id="tabHomepage"' in page

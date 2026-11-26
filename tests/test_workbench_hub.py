@@ -134,7 +134,7 @@ def test_workbench_http_crud_settings_and_4_themes(monkeypatch, tmp_path):
             "navLiquidPill",
             "wbToast",
             "showToast",
-            "extract_single",
+            "trackDownloadJob",
             'max="500"',
             "kwImportPreset",
             "btnBannerPopBrowser",

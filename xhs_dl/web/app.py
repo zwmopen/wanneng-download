@@ -957,6 +957,7 @@ def _item_payload(item):
         "image_success": item.image_success,
         "save_dir": item.save_dir,
         "note_id": item.note_id,
+        "engine": item.engine,
     }
 
 
