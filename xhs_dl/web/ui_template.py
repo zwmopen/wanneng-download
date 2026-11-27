@@ -645,11 +645,13 @@ details.drawer[open] summary:after{transform:rotate(180deg)}
           <div class="toolbar">
             <input class="search-box" type="text" id="artSearch" placeholder="按标题、关键词、作者搜索…" oninput="refreshArtworks()">
             <select id="artTypeFilter" style="width:105px;height:34px" onchange="refreshArtworks()"><option value="all">全部类型</option><option value="图文">仅图文</option><option value="视频">仅视频</option><option value="AI任务">AI任务</option></select>
+            <select id="artStatusFilter" style="width:132px;height:34px" onchange="refreshArtworks()"><option value="all">全部状态</option><option value="problem">失败/待补/未知</option><option value="done">已下载成功</option><option value="pending">待补素材</option><option value="blocked">规则拦截</option><option value="unknown">结果未知/部分失败</option></select>
             <select id="artSortBy" style="width:120px;height:34px" onchange="refreshArtworks()"><option value="collected_at" selected>按读取时间</option><option value="seq">默认序号</option><option value="likes">按点赞量</option><option value="favorites">按收藏量</option><option value="comments">按评论量</option><option value="image_count">按图片数</option><option value="publish_time">按发布时间</option></select>
             <button class="mini-btn" type="button" onclick="artBatch('all')">全选</button>
             <button class="mini-btn" type="button" onclick="artBatch('invert')">反选</button>
             <button class="mini-btn" type="button" onclick="artBatch('none')">清空</button>
             <button class="mini-btn" type="button" onclick="artResetFilters()">重置筛选</button>
+            <button class="mini-btn" id="retryProblemBtn" type="button" onclick="retryProblemArtworks()">重试全部异常项</button>
             <button class="mini-btn" id="artRefreshBtn" type="button">刷新列表</button>
             <button class="mini-btn" type="button" onclick="artExportCsv()">导出 CSV</button>
             <button class="mini-btn danger" type="button" onclick="artDeleteSelected()">删除</button>
@@ -1594,6 +1596,7 @@ async function refreshArtworks(){
   const sequence=++artworkReadSequence;
   const sortBy=($('artSortBy')&&$('artSortBy').value)||'collected_at';
   const artType=($('artTypeFilter')&&$('artTypeFilter').value)||'all';
+  const statusFilter=($('artStatusFilter')&&$('artStatusFilter').value)||'all';
   const params=new URLSearchParams({
     mode:activeArtView,search:$('artSearch').value||'',artwork_type:artType,
     sort_by:sortBy,sort_dir:sortBy==='seq'?'asc':'desc',
@@ -1603,7 +1606,17 @@ async function refreshArtworks(){
   const d=await api('/api/v1/workbench/artworks?'+params.toString());
   if(sequence!==artworkReadSequence)return;
   const rawItems=d.items||[];
-  wbArtworks=artType==='AI任务'?rawItems:rawItems.filter(r=>!r.is_shell_job);
+  const statusHit=r=>{
+    const s=String(r.download_status||'');
+    if(statusFilter==='problem')return /待补|失败|未知|验证|搁置/.test(s);
+    if(statusFilter==='done')return /已下载|成功/.test(s);
+    if(statusFilter==='pending')return s.includes('待补');
+    if(statusFilter==='blocked')return s.includes('拦截');
+    if(statusFilter==='unknown')return /未知|部分失败/.test(s);
+    return true;
+  };
+  const statusItems=statusFilter==='all'?rawItems:rawItems.filter(statusHit);
+  wbArtworks=artType==='AI任务'?statusItems:statusItems.filter(r=>!r.is_shell_job);
   $('artSummaryText').textContent=`当前 ${d.current_count||0} 条 · 历史 ${d.history_count||0} 条 · 显示 ${wbArtworks.length} 条`;
   const body=$('artTableBody');
   if(!wbArtworks.length){body.innerHTML='<tr><td colspan="13" style="text-align:center;color:var(--muted)">暂无符合条件的作品记录</td></tr>';return;}
@@ -1642,6 +1655,7 @@ async function artBatch(mode){await api('/api/v1/workbench/artworks','POST',{op:
 function artResetFilters(){
   ['artSearch','artIncludeKw','artExcludeKw'].forEach(id=>{if($(id))$(id).value='';});
   if($('artTypeFilter'))$('artTypeFilter').value='all';
+  if($('artStatusFilter'))$('artStatusFilter').value='all';
   if($('artSortBy'))$('artSortBy').value='collected_at';
   ['artMinLikes','artMinFavorites','artMinComments','artMinImages'].forEach(id=>{if($(id))$(id).value='0';});
   refreshArtworks();
@@ -1678,6 +1692,23 @@ async function downloadCheckedArtworks(){
       $('input').value=res.fallback_urls.join('\n');activateNavTab('tabSingle');$('go').click();
     }
   }catch(e){showToast('下载失败：'+e.message,true);}
+  finally{button.disabled=false;}
+}
+async function retryProblemArtworks(){
+  const ids=wbArtworks.filter(r=>r.artwork_type!=='AI任务'&&r.url).map(r=>String(r.id));
+  if(!ids.length){showToast('当前筛选下没有可重试的异常作品',true);return;}
+  const button=$('retryProblemBtn');
+  if(button.disabled||activeJob){showToast('已有下载任务正在处理，请查看下载进度');return;}
+  button.disabled=true;
+  showToast(`正在重试 ${ids.length} 条异常作品…`);
+  try{
+    const res=await api('/api/v1/workbench/artworks','POST',{op:'download',ids,mode:activeArtView,output_dir:getOutputDir()});
+    refreshArtworks();refreshDashboard();
+    showToast(res.message||'批量重试完成',res.downloaded_works===0&&!(res.fallback_urls&&res.fallback_urls.length));
+    if(res.fallback_urls&&res.fallback_urls.length){
+      $('input').value=res.fallback_urls.join('\n');activateNavTab('tabSingle');$('go').click();
+    }
+  }catch(e){showToast('重试失败：'+e.message,true);}
   finally{button.disabled=false;}
 }
 async function ingestCheckedArtworks(){
