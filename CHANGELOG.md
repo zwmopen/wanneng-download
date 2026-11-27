@@ -21,6 +21,7 @@
 - Duplicate share URLs for the same canonical note ID collapse to one history row.
 - Clipboard pending/failure records now join the artwork history, with staging folder names and files supplying only verifiable author, like/comment counts and image counts; incomplete assets and rule blocks get explicit status labels.
 - AI task rows distinguish partial failures and unknown outcomes from active work instead of labeling every unrecognized state as “进行中”.
+- The native single-work action now uses `UnifiedDownloader.download`; metadata-only requests fail closed with a clear no-download result instead of calling a missing method or starting media transfer.
 
 ## 4.1.0 反检测内核与接口直听升级 · 小红书实况/主页 · 多账号档案 · 全站 DIY — 2026-11-26
 

@@ -391,6 +391,53 @@ def test_engine_extract_single_and_multiplatform_queue(monkeypatch, tmp_path):
     assert "https://www.baidu.com/" not in queued["urls"]
 
 
+def test_native_single_metadata_only_fails_closed_and_download_uses_supported_api(monkeypatch, tmp_path):
+    from types import SimpleNamespace
+    from xhs_dl.core import unified_downloader
+    from xhs_dl.web import native_collector
+
+    monkeypatch.setenv("XHS_DL_LEGACY_JIANGHU_ENGINE", "0")
+    monkeypatch.setattr(native_collector, "get_engine", lambda: object())
+    monkeypatch.setattr(
+        toolbox_store,
+        "get_settings",
+        lambda bridge_dir=None: {"download": {"output_dir": str(tmp_path), "image_format": "jpg"}, "software": {}},
+    )
+    calls = []
+
+    class FakeDownloader:
+        def __init__(self, **kwargs):
+            pass
+
+        def download(self, urls):
+            calls.append(list(urls))
+            item = SimpleNamespace(success=True, title="测试笔记", save_dir=str(tmp_path / "测试笔记"), error="")
+            return SimpleNamespace(results=[item])
+
+    monkeypatch.setattr(unified_downloader, "UnifiedDownloader", FakeDownloader)
+    args = (tmp_path / "bridge", tmp_path / "toolbox", "python.exe")
+    url = "https://xhslink.cn/o/example"
+
+    meta = toolbox_store.run_engine_action(
+        "extract_single",
+        {"url": url, "metadata_only": True},
+        *args,
+    )
+    assert meta["status"] == "unsupported"
+    assert meta["metadata_only"] is True
+    assert "已跳过下载" in meta["message"]
+    assert calls == []
+
+    downloaded = toolbox_store.run_engine_action(
+        "extract_single",
+        {"url": url, "direct_download": True},
+        *args,
+    )
+    assert downloaded["success"] is True
+    assert downloaded["title"] == "测试笔记"
+    assert calls == [[url]]
+
+
 def test_bring_verify_browser_and_resume_keyword_actions(monkeypatch, tmp_path):
     monkeypatch.setenv("XHS_DL_LEGACY_JIANGHU_ENGINE", "1")
     project_dir = tmp_path / "toolbox"

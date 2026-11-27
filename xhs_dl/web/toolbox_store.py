@@ -2931,13 +2931,22 @@ def run_engine_action(action, params, bridge_dir, toolbox_project, python_exe):
             url = str(params.get("url") or "").strip()
             if not url:
                 raise ValueError("请提供有效作品链接")
+            metadata_only = bool(params.get("metadata_only")) or not bool(params.get("direct_download", True))
+            if metadata_only:
+                return {
+                    "status": "unsupported",
+                    "success": False,
+                    "metadata_only": True,
+                    "message": "内置单作品入口暂不支持纯元数据读取；已跳过下载。",
+                }
             from xhs_dl.core.unified_downloader import UnifiedDownloader
             base_out = str(params.get("output_dir") or dl_cfg.get("output_dir") or str(Path.home() / "Downloads"))
             dl = UnifiedDownloader(
                 output_dir=base_out,
                 image_format=str(dl_cfg.get("image_format") or "jpg"),
             )
-            res_items = dl.download_urls([url])
+            download_result = dl.download([url])
+            res_items = getattr(download_result, "results", []) or []
             first = res_items[0] if res_items else None
             if first and getattr(first, "success", False):
                 title = getattr(first, "title", "") or "单作品"

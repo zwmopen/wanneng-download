@@ -36,3 +36,11 @@
 
 - 如果剪贴板失败存档会被定期清理，应将失败/待补记录在队列移除前持久化进 `workbench_hub.json`，否则这些列表项会随源存档消失。
 - MCP 长驻 worker 进程尚未重新加载新诊断代码；需要在无任务运行时重启该服务后，未来异常任务才能记录脱敏摘要与退出码。
+
+## 追加：2026-11-27 · 单图笔记入口防误下载
+
+- 用户偏好：单张图片即可表达的泛流量作品默认跳过批量采集/下载；用户点名某一条做设计分析时，仅处理该条。
+- 修复 `run_engine_action(extract_single)` 调用不存在的 `UnifiedDownloader.download_urls()`；正式下载改用 `download()` 并读取 `DownloadResult.results`。
+- `metadata_only=true` 或 `direct_download=false` 现在明确返回 unsupported/no-download，防止元数据读取请求意外传入下载分支。内置单作品元数据读取尚未实现。
+- 测试：工作台专项套件 27 passed；正式配置服务重启后对 `https://xhslink.cn/o/2AhLZlQBSsT` 做了一次 metadata-only 入口验证，得到 no-download 状态，没有创建媒体文件。
+- 设计分析边界：XHS 原图页面无法公开读取；仅依据用户粘贴的标题给设计建议，不推断原图细节或路线数据。
