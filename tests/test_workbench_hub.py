@@ -1029,6 +1029,28 @@ def test_collected_at_unified_history_ingest_labels_and_write_metadata_toggle(mo
 
     monkeypatch.setenv("XHS_DL_WORKBENCH_FILE", str(tmp_path / "workbench_hub.json"))
     monkeypatch.setenv("XHS_DL_AUTO_SYNC_JIANGHU", "0")
+    clip_dir = tmp_path / "02-图文原料" / "01月" / "剪贴板测试作品"
+    clip_dir.mkdir(parents=True)
+    (clip_dir / "metadata.json").write_text(
+        json.dumps(
+            {
+                "platform": "小红书",
+                "note_type": "图文",
+                "title": "剪贴板测试作品",
+                "author": "测试作者",
+                "note_id": "canonical-clip1",
+                "likes_count": 61,
+                "comments_count": 1,
+                "favorites_count": 0,
+                "images_count": 5,
+                "images_list": [f"P{i}.png" for i in range(1, 6)],
+                "publish_timestamp": None,
+                "publish_time": "",
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
 
     toolbox_store.record_discovered_artworks(
         [
@@ -1044,11 +1066,18 @@ def test_collected_at_unified_history_ingest_labels_and_write_metadata_toggle(mo
         sort_dir="desc",
         extra_history=[
             {
-                "note_id": "clip1",
+                "note_id": "",
                 "title": "剪贴板测试作品",
                 "url": "https://www.xiaohongshu.com/explore/clip1",
                 "completed_at": "2026-11-25 22:01:00",
-                "save_dir": str(tmp_path / "02-图文原料" / "01月" / "剪贴板测试作品"),
+                "save_dir": str(clip_dir),
+            },
+            {
+                "note_id": "",
+                "title": "同笔记的另一条短链",
+                "url": "https://xhslink.cn/o/another-share-code",
+                "completed_at": "2026-11-25 22:02:00",
+                "save_dir": str(clip_dir),
             }
         ],
         extra_ai_jobs=[
@@ -1063,13 +1092,39 @@ def test_collected_at_unified_history_ingest_labels_and_write_metadata_toggle(mo
         ],
     )
     ids = [r["id"] for r in listed["items"]]
-    assert ids == ["aijob:jh-ai-01", "clip1", "w1"]
+    assert ids == ["aijob:jh-ai-01", "canonical-clip1", "w1"]
     assert listed["items"][0]["artwork_type"] == "AI任务"
     assert listed["items"][0]["download_status"] == "成功"
     assert listed["items"][1]["keyword"] == "剪贴板采集"
     assert listed["items"][1]["ingest_status"] == "已入库"
+    assert listed["items"][1]["author"] == "测试作者"
+    assert listed["items"][1]["likes"] == 61
+    assert listed["items"][1]["comments"] == 1
+    assert listed["items"][1]["favorites"] == 0
+    assert listed["items"][1]["image_count"] == 5
+    assert listed["items"][1]["publish_time"] == "—"
+    assert listed["items"][1]["collected_at"] == "2026-11-25 22:01:00"
     assert listed["items"][2]["download_status"] == "已读取未下载"
     assert listed["items"][2]["keyword"] == "作者主页"
+
+    missing_metadata_rows = toolbox_store.list_artworks(
+        mode="history",
+        extra_history=[
+            {
+                "note_id": "clip-without-metadata",
+                "title": "缺元数据作品",
+                "url": "https://www.xiaohongshu.com/explore/clip-without-metadata",
+                "completed_at": "2026-11-25 21:00:00",
+                "save_dir": str(tmp_path / "missing-package"),
+            }
+        ],
+    )["items"]
+    missing_metadata = next(row for row in missing_metadata_rows if row["id"] == "clip-without-metadata")
+    assert missing_metadata["likes"] is None
+    assert missing_metadata["comments"] is None
+    assert missing_metadata["favorites"] is None
+    assert missing_metadata["image_count"] is None
+    assert missing_metadata["publish_time"] == "—"
 
     # Flattened month ingest status labels
     r_months = {}
@@ -1117,6 +1172,88 @@ def test_collected_at_unified_history_ingest_labels_and_write_metadata_toggle(mo
     ing_with_meta = mi.ingest_work_package(info_no_meta["save_path"], config=cfg, copy_only=True, write_metadata=True)
     assert ing_with_meta["success"] is True
     assert (Path(ing_with_meta["target_dir"]) / "metadata.json").is_file()
+
+
+def test_ai_job_terminal_partial_and_unknown_states_are_not_shown_as_running():
+    listed = toolbox_store.list_artworks(
+        mode="history",
+        extra_ai_jobs=[
+            {"job_id": "partial", "status": "partial", "outcome": "completed_partial"},
+            {
+                "job_id": "unknown",
+                "status": "unknown",
+                "observed_state": "worker_exited_without_terminal_record",
+            },
+            {"job_id": "running", "status": "running"},
+            {"job_id": "complete", "status": "completed"},
+        ],
+    )
+    by_id = {row["remark"]: row["download_status"] for row in listed["items"]}
+
+    assert by_id["partial"] == "部分失败"
+    assert by_id["unknown"] == "结果未知，需核对"
+    assert by_id["running"] == "进行中"
+    assert by_id["complete"] == "成功"
+
+
+def test_clipboard_queue_failures_join_artwork_history_with_staged_facts(tmp_path):
+    staged = tmp_path / "待补下载素材" / "评17-赞835-江浙沪周边九大赏秋城市｜宝藏地推荐-江浙沪定制游"
+    staged.mkdir(parents=True)
+    for name in ("P1-封面.png", "P2-内页1.png", "P3-内页2.png"):
+        (staged / name).write_bytes(b"image")
+
+    partial_url = "https://xhslink.cn/o/partial-autumn"
+    blocked_url = "https://xhslink.cn/o/blocked-autumn"
+    listed = toolbox_store.list_artworks(
+        mode="history",
+        extra_history=[
+            {
+                "note_id": "canonical-partial-autumn",
+                "title": "江浙沪周边九大赏秋城市｜宝藏地推荐",
+                "url": partial_url,
+                "completed_at": "2026-11-27 13:41:32",
+                "save_dir": str(staged),
+            }
+        ],
+        extra_clipboard_items=[
+            {
+                "id": "clipboard-partial-autumn",
+                "url": partial_url,
+                "title_hint": "江浙沪周边九大赏秋城市｜宝藏地推荐，打开小红书查看",
+                "status": "discarded",
+                "last_error": "MATERIAL_INCOMPLETE: 图文原料只有 3 张图片，低于 5 张，已留待补目录",
+                "added_at": "2026-11-27 13:41:32",
+            },
+            {
+                "id": "clipboard-blocked-autumn",
+                "url": blocked_url,
+                "title_hint": "上海周边赏秋必去清单",
+                "status": "discarded",
+                "last_error": "检测到商业广告/营销软文",
+                "added_at": "2026-11-27 13:41:43",
+            },
+        ],
+        material_roots=[staged.parent],
+    )
+
+    by_url = {row["url"]: row for row in listed["items"]}
+    partial = by_url[partial_url]
+    assert listed["total"] == 2
+    assert partial["id"] == "canonical-partial-autumn"
+    assert partial["title"] == "江浙沪周边九大赏秋城市｜宝藏地推荐"
+    assert partial["author"] == "江浙沪定制游"
+    assert partial["likes"] == 835
+    assert partial["comments"] == 17
+    assert partial["image_count"] == 3
+    assert partial["favorites"] is None
+    assert partial["publish_time"] == "—"
+    assert partial["download_status"] == "待补素材 · 3张图"
+    assert partial["remark"].startswith("MATERIAL_INCOMPLETE")
+
+    blocked = by_url[blocked_url]
+    assert blocked["download_status"] == "规则拦截"
+    assert blocked["author"] == "—"
+    assert blocked["likes"] is None
 
 
 def test_open_feishu_webhook_openapi_and_browser_channel_detection(monkeypatch):

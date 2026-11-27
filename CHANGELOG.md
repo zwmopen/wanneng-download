@@ -15,6 +15,13 @@
   - 全屏自适应布局吃满视口高度；左侧导航底部收敛唯一「打开作品保存目录」入口；单作品页移除多余平台切换按钮，展示全部支持平台徽章并支持整段带废话分享文本自动提取。
   - 解锁主页采集的 **小红书** 平台入口；排队抽屉默认折叠且全面替换为可读中文任务标题，消灭 32 位哈希乱码；作品列表拆清「来源」列与「关键词 / 采集方式」列，默认隐藏纯调度空壳行并严谨区分 `0` 与未返回字段。
 
+## [Unreleased] 作品历史元数据与 AI 任务状态准确性 — 2026-11-27
+
+- Workbench reads author, interaction counts, image count, media type and canonical note ID from an existing local `metadata.json`; missing values stay blank, and publish time is never replaced with collection time.
+- Duplicate share URLs for the same canonical note ID collapse to one history row.
+- Clipboard pending/failure records now join the artwork history, with staging folder names and files supplying only verifiable author, like/comment counts and image counts; incomplete assets and rule blocks get explicit status labels.
+- AI task rows distinguish partial failures and unknown outcomes from active work instead of labeling every unrecognized state as “进行中”.
+
 ## 4.1.0 反检测内核与接口直听升级 · 小红书实况/主页 · 多账号档案 · 全站 DIY — 2026-11-26
 
 - **反检测浏览器底座升级（`native_collector.py`, `pyproject.toml`）**：

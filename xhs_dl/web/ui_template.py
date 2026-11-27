@@ -1611,7 +1611,7 @@ async function refreshArtworks(){
   body.innerHTML=wbArtworks.map(r=>{
     const openPath=r.ingested_dir||r.save_path||'';
     const stText=String(r.download_status||'已读取未下载');
-    const stCls=(stText.includes('已下载')||stText==='成功')?'ok':((stText.includes('失败')||stText.includes('验证'))?'warn':'');
+    const stCls=(stText.includes('已下载')||stText==='成功')?'ok':((stText.includes('失败')||stText.includes('验证')||stText.includes('待补')||stText.includes('拦截')||stText.includes('未知')||stText.includes('搁置'))?'warn':'');
     const ingestBadge=r.ingest_status?` <span class="badge ${String(r.ingest_status).includes('已入库')?'ok':'warn'}">${esc(r.ingest_status)}</span>`:'';
     const pubDate=String(r.publish_time||'').trim()||'—';
     const colRaw=String(r.collected_at||'').trim();

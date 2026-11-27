@@ -14,6 +14,7 @@ import time
 import uuid
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
+from urllib.parse import urlsplit
 
 DEFAULT_RUNTIME_DIR = Path(r"D:\AICode\运行数据\江湖工具箱\repair-smoke-v4-20261112")
 JZH_GAP_KEYWORDS_FILE = Path(r"D:\AICode\工具开发\projects\jianghu-collector-gui\keywords\江浙沪补缺采集关键词.txt")
@@ -216,6 +217,136 @@ def _read_json_safe(path, default):
         return data
     except (OSError, ValueError, TypeError):
         return default
+
+
+def _read_saved_metadata(save_dir):
+    """Read the small metadata manifest beside a downloaded artwork, if present."""
+    directory = Path(str(save_dir or "")).expanduser()
+    if not directory.is_dir():
+        return {}
+    metadata = _read_json_safe(directory / "metadata.json", {})
+    return metadata if isinstance(metadata, dict) else {}
+
+
+def _optional_metadata_int(metadata, *keys):
+    for key in keys:
+        value = metadata.get(key)
+        if value is not None and value != "":
+            return _safe_int(value, None)
+    return None
+
+
+_ARTWORK_IMAGE_SUFFIXES = {".png", ".jpg", ".jpeg", ".webp", ".avif"}
+
+
+def _normalize_artwork_url(url):
+    raw = str(url or "").strip()
+    if not raw:
+        return ""
+    try:
+        parts = urlsplit(raw)
+        if parts.scheme and parts.netloc:
+            return f"{parts.scheme.lower()}://{parts.netloc.lower()}{parts.path.rstrip('/')}"
+    except ValueError:
+        pass
+    return raw.split("#", 1)[0].split("?", 1)[0].rstrip("/")
+
+
+def _material_folder_info(directory):
+    """Read facts encoded by the collector's staging folder name and files."""
+    path = Path(str(directory or "")).expanduser()
+    if not path.is_dir():
+        return {}
+    name = path.name
+    match = re.match(r"^评(?P<comments>\d+)-赞(?P<likes>\d+)-(?P<rest>.+)$", name)
+    if not match:
+        return {}
+    rest = re.sub(r"-\d{10,}$", "", match.group("rest"))
+    title, separator, author = rest.rpartition("-")
+    if not separator:
+        title, author = rest, ""
+    try:
+        image_count = sum(
+            1 for item in path.iterdir()
+            if item.is_file() and item.suffix.lower() in _ARTWORK_IMAGE_SUFFIXES
+        )
+    except OSError:
+        image_count = None
+    return {
+        "title": title.strip(),
+        "author": author.strip(),
+        "comments": _safe_int(match.group("comments"), None),
+        "likes": _safe_int(match.group("likes"), None),
+        "image_count": image_count,
+        "save_path": str(path),
+    }
+
+
+def _normalized_title(value):
+    return re.sub(r"[^\w]", "", str(value or "").lower(), flags=re.UNICODE)
+
+
+def _common_prefix_length(left, right):
+    size = min(len(left), len(right))
+    for index in range(size):
+        if left[index] != right[index]:
+            return index
+    return size
+
+
+def _find_staged_material(title_hint, material_roots):
+    hint = _normalized_title(title_hint)
+    if len(hint) < 7:
+        return {}
+    best = None
+    seen = set()
+    for root_value in material_roots or ():
+        root = Path(str(root_value or "")).expanduser()
+        if not root.is_dir():
+            continue
+        try:
+            children = list(root.iterdir())
+        except OSError:
+            continue
+        for child in children:
+            if not child.is_dir() or str(child) in seen:
+                continue
+            seen.add(str(child))
+            info = _material_folder_info(child)
+            title = _normalized_title(info.get("title"))
+            prefix = _common_prefix_length(hint, title)
+            required = min(8, len(title), len(hint))
+            if required < 7 or prefix < required:
+                continue
+            try:
+                modified = child.stat().st_mtime
+            except OSError:
+                modified = 0
+            score = (prefix, -abs(len(title) - len(hint)), modified)
+            if best is None or score > best[0]:
+                best = (score, info)
+    return best[1] if best else {}
+
+
+def _clipboard_artwork_status(item):
+    state = str(item.get("status") or "").strip().lower()
+    error = str(item.get("last_error") or "").strip()
+    if "MATERIAL_INCOMPLETE" in error:
+        if "缺少正文" in error:
+            return "待补正文"
+        image_match = re.search(r"只有\s*(\d+)\s*张图片", error)
+        return f"待补素材 · {image_match.group(1)}张图" if image_match else "待补素材"
+    if any(token in error for token in ("广告", "营销软文")):
+        return "规则拦截"
+    if state in {"pending", "queued", "waiting"}:
+        return "待采集"
+    if state in {"running", "downloading", "processing"}:
+        return "进行中"
+    if state in {"failed", "error"}:
+        return "失败，待核对"
+    if state == "discarded":
+        return "已搁置"
+    return "结果未知，需核对"
 
 
 def _write_json_atomic(path, payload):
@@ -1316,6 +1447,8 @@ def list_artworks(
     sort_dir="asc",
     extra_history=None,
     extra_ai_jobs=None,
+    extra_clipboard_items=None,
+    material_roots=None,
     bridge_dir=None,
 ):
     state = load_state(bridge_dir)
@@ -1329,50 +1462,75 @@ def list_artworks(
             row["keyword"] = str(row.get("extract_type") or "单作品").strip()
 
     known_ids = {str(r.get("id") or "") for r in all_rows}
+    known_urls = {
+        _normalize_artwork_url(r.get("url")): r
+        for r in all_rows
+        if _normalize_artwork_url(r.get("url"))
+    }
     for hist in (extra_history or []):
         if not isinstance(hist, dict):
             continue
-        hid = str(hist.get("note_id") or hist.get("url") or hist.get("job_id") or "")
+        url = str(hist.get("url") or "")
+        save_dir = str(hist.get("save_dir") or "")
+        metadata = _read_saved_metadata(save_dir)
+        material_info = _material_folder_info(save_dir)
+        hid = str(hist.get("note_id") or metadata.get("note_id") or url or hist.get("job_id") or "")
         if not hid or hid in known_ids:
             continue
         known_ids.add(hid)
-        url = str(hist.get("url") or "")
-        save_dir = str(hist.get("save_dir") or "")
+        normalized_url = _normalize_artwork_url(url)
         completed_at = str(hist.get("completed_at") or "")
+        raw_publish_time = _first_non_empty(metadata, ("publish_time", "publish_date", "publish_timestamp"), "")
+        if raw_publish_time:
+            _, _, _, publish_time = _format_artwork_publish_times(raw_publish_time)
+            publish_time = publish_time or str(raw_publish_time).strip()
+        else:
+            publish_time = "—"
+        image_count = _optional_metadata_int(metadata, "images_count", "image_count")
+        if image_count is None and isinstance(metadata.get("images_list"), list):
+            image_count = len(metadata["images_list"])
+        if image_count is None:
+            image_count = material_info.get("image_count")
+        history_artwork_type = str(metadata.get("note_type") or metadata.get("artwork_type") or "图文").strip()
         plat = "xiaohongshu" if ("xiaohongshu" in url or "xhslink" in url) else "douyin"
         is_clip = hist.get("source") == "clipboard" or any(
             tok in save_dir for tok in ("02-图文原料", "剪贴板", "staging")
         )
         all_rows.append({
             "id": hid,
-            "platform": plat,
+            "platform": _normalize_platform(metadata.get("platform") or plat),
             "checked": False,
             "seq": len(all_rows) + 1,
-            "artwork_type": "图文",
+            "artwork_type": history_artwork_type,
             "keyword": "剪贴板采集" if is_clip else "单作品下载",
-            "author": "—",
-            "author_fans": 0,
-            "title": str(hist.get("title") or "未命名作品"),
-            "likes": 0,
-            "comments": 0,
-            "favorites": 0,
-            "shares": 0,
-            "image_count": 0,
+            "author": str(metadata.get("author") or material_info.get("author") or "—").strip(),
+            "author_fans": _optional_metadata_int(metadata, "author_fans", "author_fans_count"),
+            "title": str(metadata.get("title") or hist.get("title") or material_info.get("title") or "未命名作品"),
+            "likes": _optional_metadata_int(metadata, "likes_count", "likes", "like_count") if _optional_metadata_int(metadata, "likes_count", "likes", "like_count") is not None else material_info.get("likes"),
+            "comments": _optional_metadata_int(metadata, "comments_count", "comments", "comment_count") if _optional_metadata_int(metadata, "comments_count", "comments", "comment_count") is not None else material_info.get("comments"),
+            "favorites": _optional_metadata_int(metadata, "favorites_count", "favorites", "collect_count"),
+            "shares": _optional_metadata_int(metadata, "shares_count", "shares", "share_count"),
+            "image_count": image_count,
             "resolution": "",
             "url": url,
             "cover_url": "",
-            "image_urls": [],
-            "publish_time": "—",
+            "image_urls": list(metadata.get("image_urls") or []) if isinstance(metadata.get("image_urls"), list) else [],
+            "publish_time": publish_time,
             "collected_at": completed_at,
             "extract_type": "剪贴板" if is_clip else "单作品",
-            "download_status": "已下载",
-            "ingest_status": "已入库" if "02-图文原料" in save_dir else "",
+            "download_status": (
+                f"待补素材 · {image_count}张图" if "download_staging" in save_dir.lower() or "待补下载素材" in save_dir
+                else "已下载"
+            ),
+            "ingest_status": "已入库" if "02-图文原料" in save_dir else ("待补素材" if "download_staging" in save_dir.lower() or "待补下载素材" in save_dir else ""),
             "ingested_dir": save_dir if "02-图文原料" in save_dir else "",
             "save_path": save_dir,
             "remark": "默认",
             "source": "downloader-history",
             "session_current": False,
         })
+        if normalized_url:
+            known_urls[normalized_url] = all_rows[-1]
 
     for job in (extra_ai_jobs or []):
         if not isinstance(job, dict):
@@ -1385,16 +1543,25 @@ def list_artworks(
             continue
         known_ids.add(art_id)
         st_raw = str(job.get("status") or "").lower()
-        if any(tok in st_raw for tok in ("complet", "accept", "ok", "success")):
-            status_text = "成功"
-        elif any(tok in st_raw for tok in ("err", "fail")):
+        outcome = str(job.get("outcome") or "").lower()
+        observed_state = str(job.get("observed_state") or "").lower()
+        status_tokens = " ".join((st_raw, outcome, observed_state))
+        if "partial" in status_tokens:
+            status_text = "部分失败"
+        elif any(tok in status_tokens for tok in ("err", "fail")):
             status_text = "失败"
+        elif any(tok in status_tokens for tok in ("unknown", "without_terminal_record", "unconfirmed")):
+            status_text = "结果未知，需核对"
+        elif any(tok in st_raw for tok in ("complet", "ok", "success")):
+            status_text = "成功"
         elif job.get("verification_required") or "verify" in st_raw or "login" in st_raw:
             status_text = "等待验证"
         elif "cancel" in st_raw:
             status_text = "已取消"
-        else:
+        elif any(tok in st_raw for tok in ("running", "queued", "pending", "accept", "processing")):
             status_text = "进行中"
+        else:
+            status_text = "结果未知，需核对"
         kw_val = str(job.get("keyword") or job.get("kind") or "AI 采集").strip()
         title_val = str(job.get("message") or job.get("target_url") or job.get("author_url") or kw_val or jid).strip()
         all_rows.append({
@@ -1426,6 +1593,80 @@ def list_artworks(
             "source": "ai-job",
             "session_current": False,
         })
+
+    for item in (extra_clipboard_items or []):
+        if not isinstance(item, dict):
+            continue
+        url = str(item.get("url") or "").strip()
+        normalized_url = _normalize_artwork_url(url)
+        if not normalized_url:
+            continue
+        hint = str(item.get("title_hint") or item.get("title") or "").strip()
+        existing_row = known_urls.get(normalized_url)
+        material_info = {}
+        if existing_row:
+            material_info = _material_folder_info(existing_row.get("save_path"))
+        if not material_info:
+            material_info = _find_staged_material(hint, material_roots)
+        if existing_row:
+            if material_info:
+                if str(existing_row.get("title") or "").strip() in {"", "未命名作品", "精选图文作品"}:
+                    existing_row["title"] = material_info.get("title") or existing_row.get("title")
+                if str(existing_row.get("author") or "").strip() in {"", "—", "未知作者"} and material_info.get("author"):
+                    existing_row["author"] = material_info["author"]
+                for field in ("likes", "comments", "image_count"):
+                    if existing_row.get(field) is None and material_info.get(field) is not None:
+                        existing_row[field] = material_info[field]
+                if not existing_row.get("save_path"):
+                    existing_row["save_path"] = material_info.get("save_path", "")
+            clip_status = _clipboard_artwork_status(item)
+            is_already_archived = existing_row.get("ingest_status") == "已入库"
+            if not is_already_archived and clip_status not in {"待采集", "进行中"}:
+                existing_row["download_status"] = clip_status
+                if clip_status.startswith("待补"):
+                    existing_row["ingest_status"] = "待补素材"
+            if item.get("last_error"):
+                existing_row["remark"] = str(item.get("last_error"))
+            continue
+
+        status_text = _clipboard_artwork_status(item)
+        row_id = str(item.get("id") or url)
+        if row_id in known_ids:
+            row_id = url
+        known_ids.add(row_id)
+        row_title = material_info.get("title") or hint or "待解析作品链接"
+        row = {
+            "id": row_id,
+            "platform": "xiaohongshu" if ("xiaohongshu" in url.lower() or "xhslink" in url.lower()) else "douyin",
+            "checked": False,
+            "seq": len(all_rows) + 1,
+            "artwork_type": "图文",
+            "keyword": "剪贴板采集",
+            "author": material_info.get("author") or "—",
+            "author_fans": None,
+            "title": row_title,
+            "likes": material_info.get("likes"),
+            "comments": material_info.get("comments"),
+            "favorites": None,
+            "shares": None,
+            "image_count": material_info.get("image_count"),
+            "resolution": "",
+            "url": url,
+            "cover_url": "",
+            "image_urls": [],
+            "publish_time": "—",
+            "collected_at": str(item.get("added_at") or ""),
+            "extract_type": "剪贴板",
+            "download_status": status_text,
+            "ingest_status": "待补素材" if status_text.startswith("待补") else "",
+            "ingested_dir": "",
+            "save_path": material_info.get("save_path", ""),
+            "remark": str(item.get("last_error") or ""),
+            "source": "clipboard",
+            "session_current": False,
+        }
+        all_rows.append(row)
+        known_urls[normalized_url] = row
 
     for row in all_rows:
         _enrich_artwork_source_fields(row)

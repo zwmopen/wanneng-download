@@ -1334,6 +1334,35 @@ def _download_history(limit=MAX_DASHBOARD_ROWS, offset=0):
     return rows[offset : offset + limit], len(rows)
 
 
+def _clipboard_artwork_records():
+    """Return the small, non-secret clipboard queue fields used by the workbench."""
+    queue_data = _read_json(CLIPBOARD_QUEUE_FILE, {})
+    if not isinstance(queue_data, dict):
+        return []
+    by_url = {}
+    for key in ("queue", "failed"):
+        records = queue_data.get(key, [])
+        if not isinstance(records, list):
+            continue
+        for item in records:
+            if not isinstance(item, dict):
+                continue
+            url = str(item.get("url") or "").strip()
+            if not url:
+                continue
+            normalized_url = url.split("#", 1)[0].split("?", 1)[0].rstrip("/")
+            by_url[normalized_url] = {
+                "id": str(item.get("id") or ""),
+                "url": url,
+                "title_hint": str(item.get("title_hint") or ""),
+                "status": str(item.get("status") or ("pending" if key == "queue" else "failed")),
+                "retry_count": item.get("retry_count", 0),
+                "last_error": str(item.get("last_error") or ""),
+                "added_at": str(item.get("added_at") or ""),
+            }
+    return list(by_url.values())
+
+
 def _dashboard_payload(limit=50, history_offset=0):
     with JOBS_LOCK:
         current_jobs = [copy.deepcopy(value) for value in JOBS.values()]
@@ -1817,6 +1846,11 @@ class Handler(BaseHTTPRequestHandler):
             query = parse_qs(parsed.query)
             extra_history, _ = _download_history(limit=150, offset=0)
             ai_jobs_data = toolbox_store.read_ai_jobs(TOOLBOX_BRIDGE_DIR, limit=40)
+            clipboard_artwork_items = _clipboard_artwork_records()
+            clipboard_material_roots = (
+                APP_PATHS.temp_download_dir,
+                APP_PATHS.data_dir / "待补下载素材",
+            )
             rules = []
             for key_name, field in (
                 ("min_likes", "likes"),
@@ -1844,6 +1878,8 @@ class Handler(BaseHTTPRequestHandler):
                     sort_dir=query.get("sort_dir", ["asc"])[0],
                     extra_history=extra_history,
                     extra_ai_jobs=(ai_jobs_data.get("jobs") if isinstance(ai_jobs_data, dict) else []),
+                    extra_clipboard_items=clipboard_artwork_items,
+                    material_roots=clipboard_material_roots,
                     bridge_dir=TOOLBOX_BRIDGE_DIR,
                 )
             )
