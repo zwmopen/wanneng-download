@@ -89,6 +89,9 @@ def default_workbench_settings():
             "no_vip": False,
             "web_sort": "综合排序",
             "web_publish_time": "不限",
+            "juguang_category": "客资收集",
+            "juguang_sort": "阅读量",
+            "juguang_time": "近7日",
             "media_type": "image",
             "schedule_enabled": False,
             "schedule_interval_min": 30,
@@ -385,17 +388,17 @@ def _empty_state():
         "keywords": [],
         "authors": [],
         "artworks": [],
-        "keyword_groups": {"douyin": [], "xiaohongshu": []},
+        "keyword_groups": {"douyin": [], "xiaohongshu": [], "juguang": []},
         "author_groups": {"douyin": [], "xiaohongshu": []},
         "settings": default_workbench_settings(),
     }
 
 
 def _normalize_group_map(raw_map):
-    out = {"douyin": [], "xiaohongshu": []}
+    out = {"douyin": [], "xiaohongshu": [], "juguang": []}
     if not isinstance(raw_map, dict):
         return out
-    for plat in ("douyin", "xiaohongshu"):
+    for plat in ("douyin", "xiaohongshu", "juguang"):
         seen = set()
         vals = raw_map.get(plat)
         if not isinstance(vals, list):
@@ -607,6 +610,8 @@ def _save_state(state):
 
 def _normalize_platform(value):
     key = str(value or "").strip().lower()
+    if key in {"juguang", "xhs_juguang", "聚光", "小红书聚光", "聚光内容广场"}:
+        return "juguang"
     if key in {"xiaohongshu", "xhs", "小红书"}:
         return "xiaohongshu"
     if key in {"all", "全部"}:
@@ -629,7 +634,8 @@ def _summarize_groups(rows, default_name="默认分组", extra_names=None):
 
 def _explicit_groups_for_platform(state, groups_key, plat):
     gmap = state.get(groups_key) if isinstance(state.get(groups_key), dict) else {}
-    plats = ["douyin", "xiaohongshu"] if plat == "all" else [plat]
+    all_plats = ["douyin", "xiaohongshu", "juguang"] if groups_key == "keyword_groups" else ["douyin", "xiaohongshu"]
+    plats = all_plats if plat == "all" else [plat]
     names = []
     for p in plats:
         vals = gmap.get(p) or []
@@ -639,11 +645,12 @@ def _explicit_groups_for_platform(state, groups_key, plat):
 
 
 def _mutate_group_op(state, rows_key, groups_key, op, payload, target_plat, entity_label):
-    gmap = state.setdefault(groups_key, {"douyin": [], "xiaohongshu": []})
-    for p in ("douyin", "xiaohongshu"):
+    default_plats = ("douyin", "xiaohongshu", "juguang") if groups_key == "keyword_groups" else ("douyin", "xiaohongshu")
+    gmap = state.setdefault(groups_key, {p: [] for p in default_plats})
+    for p in default_plats:
         if not isinstance(gmap.get(p), list):
             gmap[p] = []
-    plats = ["douyin", "xiaohongshu"] if target_plat == "all" else [target_plat]
+    plats = list(default_plats) if target_plat == "all" else [target_plat]
     invalid = {"", "all", "全部", "全部分组"}
 
     if op == "create_group":
@@ -1283,7 +1290,15 @@ def record_discovered_artworks(items, platform="douyin", source="collection", ma
             comments_val = _safe_int(_first_non_empty(row_data, ("comments", "comment_count")), None)
             favorites_val = _safe_int(_first_non_empty(row_data, ("favorites", "collect_count")), None)
             shares_val = _safe_int(_first_non_empty(row_data, ("shares", "share_count")), None)
-            caption_val = str(_first_non_empty(row_data, ("caption", "text", "title"), "") or "")
+            reads_val = _safe_int(_first_non_empty(row_data, ("reads", "read_count", "readNum")), None)
+            desc_val = str(row_data.get("desc") or "").strip()
+            topics_val = [str(t).strip().lstrip("#") for t in (row_data.get("topics") or []) if str(t).strip()]
+            caption_val = str(_first_non_empty(row_data, ("caption", "text"), "") or "").strip()
+            if not caption_val and (desc_val or topics_val):
+                parts = [str(row_data.get("title") or "").strip(), desc_val, " ".join(f"#{t}" for t in topics_val if f"#{t}" not in desc_val)]
+                caption_val = "\n\n".join([p for p in parts if p])
+            elif not caption_val:
+                caption_val = str(row_data.get("title") or "")
             key = (platform, art_id)
             target = existing.get(key)
             if target is None:
@@ -1300,10 +1315,15 @@ def record_discovered_artworks(items, platform="douyin", source="collection", ma
                     "author_fans": _safe_int(row_data.get("author_fans"), 0),
                     "title": str(row_data.get("title") or art_id),
                     "caption": caption_val[:12000],
+                    "desc": desc_val[:12000],
+                    "topics": topics_val[:30],
+                    "juguang_category": str(row_data.get("juguang_category") or ""),
+                    "source_channel": str(row_data.get("source_channel") or ""),
                     "likes": likes_val,
                     "comments": comments_val,
                     "favorites": favorites_val,
                     "shares": shares_val,
+                    "reads": reads_val,
                     "image_count": _safe_int(row_data.get("image_count"), len(row_data.get("image_urls") or [])),
                     "resolution": str(row_data.get("resolution") or ""),
                     "url": str(row_data.get("url") or ""),
@@ -1332,7 +1352,8 @@ def record_discovered_artworks(items, platform="douyin", source="collection", ma
                 for field in (
                     "download_status", "save_path", "title", "author",
                     "author_uid", "author_sec_uid", "url", "keyword",
-                    "cover_url", "caption", "artwork_type", "ingest_status", "ingested_dir",
+                    "cover_url", "caption", "desc", "topics", "juguang_category", "source_channel",
+                    "artwork_type", "ingest_status", "ingested_dir",
                     "ingest_city", "ingest_season",
                 ):
                     val = row_data.get(field)
@@ -1350,8 +1371,8 @@ def record_discovered_artworks(items, platform="douyin", source="collection", ma
                     if row_data.get("create_time") or row_data.get("createTime"):
                         target["create_time"] = str(row_data.get("create_time") or row_data.get("createTime") or "")
                     target["publish_time"] = resolved_pub_time
-                for stat_key, val in (("likes", likes_val), ("comments", comments_val), ("favorites", favorites_val), ("shares", shares_val)):
-                    if val is not None and (val > 0 or target.get(stat_key) is None or platform == "xiaohongshu"):
+                for stat_key, val in (("likes", likes_val), ("comments", comments_val), ("favorites", favorites_val), ("shares", shares_val), ("reads", reads_val)):
+                    if val is not None and (val > 0 or target.get(stat_key) is None or platform in {"xiaohongshu", "juguang"}):
                         target[stat_key] = val
                 if row_data.get("image_urls"):
                     target["image_urls"] = list(row_data.get("image_urls") or [])
@@ -1400,6 +1421,8 @@ def _enrich_artwork_source_fields(row):
     ext = str(row.get("extract_type") or "").strip()
     kw = str(row.get("keyword") or "").strip()
     art_type = str(row.get("artwork_type") or "").strip()
+    plat = str(row.get("platform") or "").strip()
+    jg_cat = str(row.get("juguang_category") or "").strip()
     if src == "ai-job" or art_type == "AI任务":
         channel = "AI"
     elif ext == "剪贴板" or kw == "剪贴板采集" or src == "clipboard":
@@ -1408,11 +1431,15 @@ def _enrich_artwork_source_fields(row):
         channel = "主页"
     elif ext == "单作品" or kw == "单作品下载" or src == "single":
         channel = "单作品"
+    elif plat == "juguang" or str(row.get("source_channel") or "").strip() == "聚光内容广场":
+        channel = "聚光内容广场"
     else:
         channel = "关键词"
 
     if kw and kw not in {"剪贴板采集", "单作品下载", "作者主页", "AI任务"}:
         detail = kw[5:].strip() if kw.startswith("AI · ") else kw
+        if jg_cat and jg_cat not in detail:
+            detail = f"{jg_cat} · {detail}"
     elif ext and ext not in {"collection"}:
         detail = ext
     else:
@@ -1951,7 +1978,6 @@ def _download_single_artwork_row(row, base_output_dir, download_settings=None):
 
     saved_files = []
     saved_paths = []
-    inner = 0
     saved = 0
     for pos, idx in enumerate(sorted(downloaded_map), 1):
         content, suffix = downloaded_map[idx]
@@ -1959,11 +1985,8 @@ def _download_single_artwork_row(row, base_output_dir, download_settings=None):
             content, suffix = _convert_artwork_image_bytes(content, suffix, effective_format)
         except Exception:
             pass
-        if pos == 1:
-            dst = pkg_dir / f"封面.{suffix}"
-        else:
-            inner += 1
-            dst = pkg_dir / f"内页{inner}.{suffix}"
+        label = "封面" if pos == 1 else f"内页{pos - 1}"
+        dst = pkg_dir / f"P{pos}-{label}.{suffix}"
         tmp = dst.with_suffix(dst.suffix + ".part")
         tmp.write_bytes(content)
         tmp.replace(dst)
@@ -1994,7 +2017,14 @@ def _download_single_artwork_row(row, base_output_dir, download_settings=None):
     if not saved and not video_file:
         raise RuntimeError(errors[0] if errors else "媒体全部下载失败")
 
-    caption = str(row.get("caption") or row.get("title") or "").strip()
+    desc_text = str(row.get("desc") or "").strip()
+    topics_list = [str(t).strip().lstrip("#") for t in (row.get("topics") or []) if str(t).strip()]
+    caption = str(row.get("caption") or "").strip()
+    if not caption and (desc_text or topics_list):
+        parts = [title, desc_text, " ".join(f"#{t}" for t in topics_list if f"#{t}" not in desc_text)]
+        caption = "\n\n".join([p for p in parts if p])
+    if not caption:
+        caption = title
     copy_written = False
     if caption:
         try:
@@ -2009,15 +2039,20 @@ def _download_single_artwork_row(row, base_output_dir, download_settings=None):
     comments_val = _safe_int(_first_non_empty(row, ("comments", "comment_count"), 0), 0)
     favorites_val = _safe_int(_first_non_empty(row, ("favorites", "collect_count"), 0), 0)
     shares_val = _safe_int(_first_non_empty(row, ("shares", "share_count"), 0), 0)
+    reads_val = _safe_int(_first_non_empty(row, ("reads", "read_count", "readNum"), 0), 0)
     has_watermark = any(re.search(r"tplv-dy-water|watermark", u, re.I) for u in urls[:50])
     meta_payload = {
         "schema_version": "2.0",
         "platform": str(row.get("platform") or "douyin"),
+        "source_channel": str(row.get("source_channel") or ""),
+        "juguang_category": str(row.get("juguang_category") or ""),
         "id": art_id,
         "note_id": art_id,
         "url": str(row.get("url") or ""),
         "keyword": str(row.get("keyword") or ""),
         "title": title,
+        "desc": desc_text,
+        "topics": topics_list,
         "caption": caption,
         "author": str(row.get("author") or row.get("author_name") or ""),
         "author_uid": str(row.get("author_uid") or ""),
@@ -2026,6 +2061,7 @@ def _download_single_artwork_row(row, base_output_dir, download_settings=None):
         "comments_count": comments_val,
         "favorites_count": favorites_val,
         "shares_count": shares_val,
+        "reads_count": reads_val,
         "publish_timestamp": publish_ts,
         "publish_time": publish_iso_space,
         "publish_date": publish_date,
@@ -2479,14 +2515,41 @@ def mutate_artworks(op, payload, bridge_dir=None):
         elif op == "export_csv":
             buf = io.StringIO()
             writer = csv.writer(buf)
-            writer.writerow(["序号", "平台", "类型", "标题", "作者", "来源/关键词", "图片数", "评论", "收藏", "点赞", "发布时间", "读取时间", "状态", "入库状态", "网址", "保存路径"])
+            writer.writerow([
+                "序号", "平台", "来源渠道", "聚光分类", "类型", "标题", "正文文案", "话题标签",
+                "作者", "来源/关键词", "图片数", "阅读量", "评论", "收藏", "点赞", "转发",
+                "发布时间", "读取时间", "状态", "入库状态", "网址", "保存路径",
+            ])
             for r in items:
+                topics_str = " ".join(
+                    f"#{str(t).strip().lstrip('#')}"
+                    for t in (r.get("topics") or [])
+                    if str(t).strip()
+                )
+                body_text = str(r.get("desc") or r.get("caption") or "").strip()
                 writer.writerow([
-                    r.get("seq", ""), r.get("platform", ""), r.get("artwork_type", ""),
-                    r.get("title", ""), r.get("author", ""), r.get("keyword") or r.get("extract_type") or "",
-                    r.get("image_count", 0), r.get("comments", 0), r.get("favorites", 0), r.get("likes", 0),
-                    r.get("publish_time", ""), r.get("collected_at", ""),
-                    r.get("download_status", ""), r.get("ingest_status", ""), r.get("url", ""), r.get("save_path", ""),
+                    r.get("seq", ""),
+                    r.get("platform", ""),
+                    r.get("source_channel", ""),
+                    r.get("juguang_category", ""),
+                    r.get("artwork_type", ""),
+                    r.get("title", ""),
+                    body_text,
+                    topics_str,
+                    r.get("author", ""),
+                    r.get("keyword") or r.get("extract_type") or "",
+                    r.get("image_count") if r.get("image_count") is not None else "",
+                    r.get("reads") if r.get("reads") is not None else "",
+                    r.get("comments") if r.get("comments") is not None else "",
+                    r.get("favorites") if r.get("favorites") is not None else "",
+                    r.get("likes") if r.get("likes") is not None else "",
+                    r.get("shares") if r.get("shares") is not None else "",
+                    r.get("publish_time", ""),
+                    r.get("collected_at", ""),
+                    r.get("download_status", ""),
+                    r.get("ingest_status", ""),
+                    r.get("url", ""),
+                    r.get("save_path", ""),
                 ])
             return {"csv": buf.getvalue(), "count": len(items)}
 
@@ -2707,7 +2770,7 @@ def focus_and_bring_verify_browser(
     """Send native CLI focus/login-open command, then restore, center, and pin verification browser topmost."""
     cli = Path(toolbox_project) / "jianghu_cli.py"
     plat = str(platform or "douyin").strip().lower()
-    if plat not in {"douyin", "xiaohongshu", "bilibili"}:
+    if plat not in {"douyin", "xiaohongshu", "juguang", "bilibili"}:
         plat = "douyin"
 
     def _run_cli(args):
@@ -3085,7 +3148,7 @@ def run_engine_action(action, params, bridge_dir, toolbox_project, python_exe):
     cmd = [str(python_exe), str(cli), "--bridge-dir", str(bridge), "--timeout", str(cli_timeout)]
     if action == "open_platform_login":
         plat = str(params.get("platform") or "douyin").strip().lower()
-        if plat not in {"douyin", "xiaohongshu", "bilibili"}:
+        if plat not in {"douyin", "xiaohongshu", "juguang", "bilibili"}:
             plat = "douyin"
         cmd.extend(["open-platform-login", "--platform", plat])
     elif action == "switch_platform":

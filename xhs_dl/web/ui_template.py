@@ -287,7 +287,7 @@ table.data-table tbody tr:hover{background:var(--active)}
   display:inline-flex;align-items:center;padding:2px 8px;border-radius:999px;font-size:11px;font-weight:700;
   background:var(--active);color:var(--text);border:1px solid var(--line);white-space:nowrap;
 }
-.badge.dy{color:var(--accent)}.badge.xhs{color:var(--bad)}.badge.ok{color:var(--ok)}.badge.warn{color:var(--warn)}
+.badge.dy{color:var(--accent)}.badge.xhs{color:var(--bad)}.badge.jg{color:#b45309}.badge.ok{color:var(--ok)}.badge.warn{color:var(--warn)}
 
 /* Collapsible Filter Drawer */
 details.drawer{
@@ -422,7 +422,7 @@ details.drawer[open] summary:after{transform:rotate(180deg)}
         <button class="nav-item" id="tabKeyword" type="button" role="tab" aria-selected="true" data-panel="keywordPanel"><span>关键词采集</span><small>词表管理 · 图文筛选</small></button>
         <button class="nav-item" id="tabHomepage" type="button" role="tab" aria-selected="false" data-panel="homepagePanel"><span>主页采集</span><small>作者库 · 批量主页提取</small></button>
         <button class="nav-item" id="tabArtworks" type="button" role="tab" aria-selected="false" data-panel="artworksPanel"><span>作品列表</span><small>当前/历史 · 剪贴板与AI记录</small></button>
-        <button class="nav-item" id="tabLogin" type="button" role="tab" aria-selected="false" data-panel="loginPanel"><span>平台登录</span><small>抖音 · 小红书 · B站会话</small></button>
+        <button class="nav-item" id="tabLogin" type="button" role="tab" aria-selected="false" data-panel="loginPanel"><span>平台登录</span><small>抖音 · 小红书 · 聚光会话</small></button>
         <button class="nav-item" id="tabSettings" type="button" role="tab" aria-selected="false" data-panel="settingsPanel"><span>下载与软件设置</span><small>路径入库 · 模板通知 · AI 接入</small></button>
       </div>
       <div class="nav-footer">
@@ -484,6 +484,7 @@ details.drawer[open] summary:after{transform:rotate(180deg)}
             <div class="seg-group" id="kwPlatformSeg">
               <button class="seg-btn active" type="button" data-plat="douyin">抖音</button>
               <button class="seg-btn" type="button" data-plat="xiaohongshu">小红书</button>
+              <button class="seg-btn" type="button" data-plat="juguang">小红书聚光</button>
             </div>
           </div>
 
@@ -503,8 +504,11 @@ details.drawer[open] summary:after{transform:rotate(180deg)}
               <div class="param-chip"><span>目标套数 (0=全部)</span><input type="number" id="keywordCount" min="0" max="500" value="20"></div>
               <div class="param-chip"><span>作品类型</span><select id="k_media_type" style="width:auto;height:30px;padding:0 8px;border-radius:9px;font-weight:700"><option value="image" selected>仅图文</option><option value="video">仅视频</option><option value="all">全部（图文+视频）</option></select></div>
               <div class="param-chip" id="kwImgRangeChip"><span>图文张数</span><input type="number" id="minImages" min="0" max="50" value="4"><span>至</span><input type="number" id="maxImages" min="0" max="50" value="20"><span>张</span></div>
-              <div class="param-chip"><span>排序</span><select id="k_web_sort" style="width:auto;height:30px;padding:0 8px;border-radius:9px;font-weight:700"><option value="综合排序">综合排序</option><option value="最多点赞">最多点赞</option><option value="最新发布">最新发布</option></select></div>
-              <div class="param-chip"><span>发布时间</span><select id="k_web_publish_time" style="width:auto;height:30px;padding:0 8px;border-radius:9px;font-weight:700"><option value="不限">时间不限</option><option value="一天内">一天内</option><option value="一周内">一周内</option><option value="半年内">半年内</option></select></div>
+              <div class="param-chip" id="kwStdSortChip"><span>排序</span><select id="k_web_sort" style="width:auto;height:30px;padding:0 8px;border-radius:9px;font-weight:700"><option value="综合排序">综合排序</option><option value="最多点赞">最多点赞</option><option value="最新发布">最新发布</option></select></div>
+              <div class="param-chip" id="kwStdTimeChip"><span>发布时间</span><select id="k_web_publish_time" style="width:auto;height:30px;padding:0 8px;border-radius:9px;font-weight:700"><option value="不限">时间不限</option><option value="一天内">一天内</option><option value="一周内">一周内</option><option value="半年内">半年内</option></select></div>
+              <div class="param-chip" id="kwJuguangCatChip" style="display:none"><span>聚光分类</span><select id="k_juguang_category" style="width:auto;height:30px;padding:0 8px;border-radius:9px;font-weight:700"><option value="客资收集" selected>客资收集</option><option value="产品种草">产品种草</option><option value="商品销量">商品销量</option><option value="直播推广">直播推广</option><option value="全部">全部榜单</option></select></div>
+              <div class="param-chip" id="kwJuguangTimeChip" style="display:none"><span>时间范围</span><select id="k_juguang_time" style="width:auto;height:30px;padding:0 8px;border-radius:9px;font-weight:700"><option value="近7日" selected>近7日</option><option value="近30日">近30日</option><option value="近90日">近90日</option><option value="近1日">近1日</option><option value="不限">时间不限</option></select></div>
+              <div class="param-chip" id="kwJuguangSortChip" style="display:none"><span>筛选标准</span><select id="k_juguang_sort" style="width:auto;height:30px;padding:0 8px;border-radius:9px;font-weight:700"><option value="阅读量" selected>阅读量</option><option value="评论量">评论量</option><option value="点赞量">点赞量</option><option value="收藏量">收藏量</option><option value="互动量">互动量</option><option value="综合排序">综合排序</option></select></div>
               <label class="param-chip" style="cursor:pointer"><input type="checkbox" id="k_direct_download" checked style="width:15px;height:15px;margin:0;accent-color:var(--accent)"> 提取直接下载</label>
               <label class="param-chip" style="cursor:pointer"><input type="checkbox" id="k_skip_dup_chip" checked style="width:15px;height:15px;margin:0;accent-color:var(--accent)"> 已采去重</label>
               <label class="param-chip" style="cursor:pointer"><input type="checkbox" id="k_auto_ingest_chip" checked style="width:15px;height:15px;margin:0;accent-color:var(--accent)"> 自动分类入库</label>
@@ -714,6 +718,13 @@ details.drawer[open] summary:after{transform:rotate(180deg)}
               <span style="font-size:12px;color:var(--muted)" id="loginXhsInfo">用于小红书登录态、主页与搜索笔记采集</span>
               <div style="display:flex;gap:8px;flex-wrap:wrap">
                 <button class="mini-btn" type="button" onclick="engineAction('open_platform_login',{platform:'xiaohongshu'})">小红书登录 / 打开窗口</button>
+              </div>
+            </div>
+            <div class="login-card">
+              <strong>小红书聚光（内容广场）</strong>
+              <span style="font-size:12px;color:var(--muted)" id="loginJuguangInfo">用于聚光内容广场（客资收集 / 近7日 / 阅读量）关键词采集与高潜图文挖掘</span>
+              <div style="display:flex;gap:8px;flex-wrap:wrap">
+                <button class="mini-btn" type="button" onclick="engineAction('open_platform_login',{platform:'juguang'})">聚光登录 / 打开内容广场</button>
               </div>
             </div>
             <div class="login-card">
@@ -955,6 +966,8 @@ let collectionPollTimers={homepage:null,keyword:null},toastTimer=null,autoSaveTi
 let activeEnginePlatform='douyin',lastVerifyKey='',lastKwCounter='';
 
 function esc(v){return String(v==null?'':v).replace(/[&<>"']/g,ch=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]));}
+function platLabel(p){return p==='juguang'?'小红书聚光':(p==='xiaohongshu'?'小红书':'抖音');}
+function platBadgeClass(p){return p==='juguang'?'jg':(p==='xiaohongshu'?'xhs':'dy');}
 function showToast(msg,isErr=false){
   const el=$('wbToast');if(!el||!msg)return;
   el.textContent=msg;el.classList.toggle('err',!!isErr);el.classList.add('show');
@@ -1067,6 +1080,7 @@ document.querySelectorAll('#settingSubTabs .seg-btn').forEach(btn=>btn.addEventL
 document.querySelectorAll('#kwPlatformSeg .seg-btn').forEach(btn=>btn.addEventListener('click',()=>{
   activeKwPlatform=btn.dataset.plat;activeKwGroup='all';
   document.querySelectorAll('#kwPlatformSeg .seg-btn').forEach(b=>b.classList.toggle('active',b===btn));
+  syncKwPlatformUi();
   refreshKeywords();
 }));
 document.querySelectorAll('#auPlatformSeg .seg-btn').forEach(btn=>btn.addEventListener('click',()=>{
@@ -1084,6 +1098,18 @@ function openArtworkView(mode){
   activeArtView=mode;
   document.querySelectorAll('#artViewSeg .seg-btn').forEach(b=>b.classList.toggle('active',b.dataset.mode===mode));
   activateNavTab('tabArtworks');
+}
+
+function syncKwPlatformUi(){
+  const isJg=activeKwPlatform==='juguang';
+  ['kwStdSortChip','kwStdTimeChip'].forEach(id=>{if($(id))$(id).style.display=isJg?'none':'';});
+  ['kwJuguangCatChip','kwJuguangTimeChip','kwJuguangSortChip'].forEach(id=>{if($(id))$(id).style.display=isJg?'':'none';});
+  const inp=$('keywordValue');
+  if(inp){
+    inp.placeholder=isJg
+      ?'输入聚光搜索关键词（如：江浙沪团建，按上方分类 / 近7日 / 阅读量采集）；或勾选词表排队'
+      :'输入单个关键词直接开跑；或勾选下方表格多词自动排队';
+  }
 }
 
 function syncMediaTypeUi(){
@@ -1108,9 +1134,13 @@ function bindSettingFields(s){
     else if(k==='max_images')setVal('maxImages',kw[k]);
     else setVal('k_'+k,kw[k]);
   });
+  setVal('k_juguang_category',kw.juguang_category||'客资收集');
+  setVal('k_juguang_time',kw.juguang_time||'近7日');
+  setVal('k_juguang_sort',kw.juguang_sort||'阅读量');
   const mtype=(kw.media_type&&['image','video','all'].includes(kw.media_type))?kw.media_type:(kw.type_video?'all':'image');
   setVal('k_media_type',mtype);
   syncMediaTypeUi();
+  syncKwPlatformUi();
   Object.keys(au).forEach(k=>{
     if(k==='mode'){document.querySelectorAll('input[name="a_mode"]').forEach(r=>r.checked=r.value===au[k]);}
     else if(k!=='direct_download')setVal('a_'+k,au[k]);
@@ -1198,7 +1228,7 @@ function collectSettingsPatch(){
   const mtype=gVal('k_media_type')||'image';
   return {
     single:{...(wbSettings.single||{}),platform:'auto'},
-    keyword:{...(wbSettings.keyword||{}),platform:activeKwPlatform,direct_download:gVal('k_direct_download'),media_type:mtype,type_video:mtype!=='image',max_per_keyword:gVal('keywordCount'),min_images:gVal('minImages'),max_images:gVal('maxImages'),web_sort:gVal('k_web_sort')||'综合排序',web_publish_time:gVal('k_web_publish_time')||'不限'},
+    keyword:{...(wbSettings.keyword||{}),platform:activeKwPlatform,direct_download:gVal('k_direct_download'),media_type:mtype,type_video:mtype!=='image',max_per_keyword:gVal('keywordCount'),min_images:gVal('minImages'),max_images:gVal('maxImages'),web_sort:gVal('k_web_sort')||'综合排序',web_publish_time:gVal('k_web_publish_time')||'不限',juguang_category:gVal('k_juguang_category')||'客资收集',juguang_time:gVal('k_juguang_time')||'近7日',juguang_sort:gVal('k_juguang_sort')||'阅读量'},
     author:{...(wbSettings.author||{}),platform:activeAuPlatform,max_per_author:gVal('a_max_per_author'),min_images:gVal('a_min_images'),max_images:gVal('a_max_images')},
     download:{...(wbSettings.download||{}),output_dir:gVal('d_output_dir')||getOutputDir(),skip_downloaded_history:gVal('d_skip_downloaded_history'),image_format:gVal('d_image_format'),delay_mode:gVal('d_delay_mode'),title_template:gVal('d_title_template'),set_file_time_to_publish:gVal('d_set_file_time_to_publish'),auto_ingest_material:gVal('d_auto_ingest_material'),auto_ingest_copy_only:gVal('d_auto_ingest_copy_only'),write_metadata:gVal('d_write_metadata'),auto_ingest_config_path:gVal('d_auto_ingest_config_path')},
     software:{...(wbSettings.software||{}),theme:currentThemeMode||'auto',auto_topmost_verify_window:gVal('sw_auto_topmost_verify_window'),notify_desktop_toast:gVal('sw_notify_desktop_toast'),notify_feishu:gVal('sw_notify_feishu'),notify_on_complete:gVal('sw_notify_on_complete'),notify_feishu_target:gVal('sw_notify_feishu_target'),notify_feishu_app_id:gVal('sw_notify_feishu_app_id'),notify_feishu_app_secret:gVal('sw_notify_feishu_app_secret'),notify_feishu_webhook:gVal('sw_notify_feishu_webhook'),proxy_url:gVal('sw_proxy_url')||'',theme_day_start:gVal('sw_theme_day_start'),theme_night_start:gVal('sw_theme_night_start'),theme_auto_style:gVal('sw_theme_auto_style')||'rotate'}
@@ -1258,7 +1288,7 @@ function renderKeywordTable(){
   body.innerHTML=wbKeywords.map(r=>`<tr>
     <td><input type="checkbox" ${r.checked?'checked':''} onchange="kwToggle('${esc(r.id)}',this.checked)"></td>
     <td>${esc(r.seq)}</td>
-    <td><span class="badge ${r.platform==='xiaohongshu'?'xhs':'dy'}">${r.platform==='xiaohongshu'?'小红书':'抖音'}</span></td>
+    <td><span class="badge ${platBadgeClass(r.platform)}">${esc(platLabel(r.platform))}</span></td>
     <td><span class="badge">${esc(r.group||'默认分组')}</span></td>
     <td><strong>${esc(r.keyword)}</strong></td>
     <td><span class="badge ${r.last_extracted==='是'?'ok':''}">${esc(r.last_extracted)}</span></td><td>${esc(r.last_count)}</td><td>${esc(r.recorded_ids)}</td>
@@ -1398,7 +1428,7 @@ function renderAuthorTable(){
   body.innerHTML=wbAuthors.map(r=>`<tr>
     <td><input type="checkbox" ${r.checked?'checked':''} onchange="auToggle('${esc(r.id)}',this.checked)"></td>
     <td>${esc(r.seq)}</td>
-    <td><span class="badge ${r.platform==='xiaohongshu'?'xhs':'dy'}">${r.platform==='xiaohongshu'?'小红书':'抖音'}</span></td>
+    <td><span class="badge ${platBadgeClass(r.platform)}">${esc(platLabel(r.platform))}</span></td>
     <td><span class="badge">${esc(r.group||'默认分组')}</span></td><td><strong>${esc(r.name)}</strong></td>
     <td class="cell-ellipsis">${esc(r.url)}</td><td>${esc(r.fans)}</td><td>${esc(r.works_count)}</td><td>${esc(r.remark)}</td>
     <td style="white-space:nowrap"><button class="mini-btn" type="button" onclick="openRowEdit('authors','${esc(r.id)}')">编辑</button> <button class="mini-btn" type="button" onclick="auRunSingle('${esc(r.url)}')">采集</button></td>
@@ -1447,7 +1477,7 @@ let gmKind='keywords',reKind='keywords',reRowId='';
 function openGroupManager(kind){
   gmKind=kind==='authors'?'authors':'keywords';
   const plat=gmKind==='keywords'?activeKwPlatform:activeAuPlatform;
-  $('gmSub').textContent=(gmKind==='keywords'?'关键词词表':'作者主页')+' · '+(plat==='xiaohongshu'?'小红书':'抖音');
+  $('gmSub').textContent=(gmKind==='keywords'?'关键词词表':'作者主页')+' · '+platLabel(plat);
   $('gmTitle').textContent=gmKind==='keywords'?'关键词分组管理 DIY':'主页分组管理 DIY';
   $('gmNewName').value='';
   renderGroupManager();
@@ -1856,6 +1886,7 @@ async function runSingleKeywordJob(keyword){
   const numCount=rawCount===''?20:Number(rawCount);
   const allResults=numCount===0;
   const mediaType=($('k_media_type')&&$('k_media_type').value)||'image';
+  const isJg=activeKwPlatform==='juguang';
   const req={
     platform:activeKwPlatform,
     keyword,
@@ -1867,12 +1898,13 @@ async function runSingleKeywordJob(keyword){
     allow_video:mediaType!=='image',
     no_filter:false,
     direct_download:!!($('k_direct_download')&&$('k_direct_download').checked),
-    web_sort:($('k_web_sort')&&$('k_web_sort').value)||'综合排序',
-    web_publish_time:($('k_web_publish_time')&&$('k_web_publish_time').value)||'不限',
+    juguang_category:($('k_juguang_category')&&$('k_juguang_category').value)||'客资收集',
+    web_sort:isJg?(($('k_juguang_sort')&&$('k_juguang_sort').value)||'阅读量'):(($('k_web_sort')&&$('k_web_sort').value)||'综合排序'),
+    web_publish_time:isJg?(($('k_juguang_time')&&$('k_juguang_time').value)||'近7日'):(($('k_web_publish_time')&&$('k_web_publish_time').value)||'不限'),
     ...settings()
   };
   activeKeywordRun=true;
-  updateKwKpis({target:allResults?'全部':req.count,crawled:0,qualified:0,downloaded:0,phase:'starting',message:`正在打开 ${activeKwPlatform==='xiaohongshu'?'小红书':'抖音'} 搜索：【${keyword}】`},true);
+  updateKwKpis({target:allResults?'全部':req.count,crawled:0,qualified:0,downloaded:0,phase:'starting',message:`正在打开 ${platLabel(activeKwPlatform)} 搜索：【${keyword}】`},true);
   setCollectionStatus('keyword',{status:'discovering',label:`采集：${keyword}`,message:'正在连接采集内核并检索搜索列表…'},null);
   const task=await api('/api/v1/collections/keyword','POST',req);
   return await pollCollection('keyword',task.job_id);
@@ -1881,7 +1913,7 @@ async function ensureEngineOnline(platform){
   const cap=await api('/api/v1/collections/capabilities').catch(()=>null);
   if(cap&&cap.status==='online'&&(cap.engine_mode==='native-playwright'||cap.active_platform===platform))return true;
   if(cap&&cap.status!=='online'){
-    const platName=platform==='xiaohongshu'?'小红书':'抖音';
+    const platName=platLabel(platform);
     showToast(`正在唤醒内置${platName}浏览器引擎…`);
     await api('/api/v1/workbench/engine','POST',{action:'start_engine',params:{platform}}).catch(()=>{});
     for(let i=0;i<30;i++){
@@ -2138,9 +2170,9 @@ async function refreshCollectionCapabilities(){
         const zh=map[st.status]||'等待采集自检';
         return `${label}：<strong>${esc(zh)}</strong>（接口 ${st.api_items||0} / 页面 ${st.dom_items||0}）`;
       };
-      rhBox.innerHTML=`<div>驱动内核：<span class="badge ok">${esc(drvLabel)}</span> · 浏览器：<strong>${esc(chLabel)}</strong> · 当前档案：<strong>${esc(d.active_profile==='default'?'默认主账号':(d.active_profile||'默认主账号'))}</strong></div><div style="margin-top:4px">${fmtRh('抖音规则',rh.douyin)} &nbsp;|&nbsp; ${fmtRh('小红书规则',rh.xiaohongshu)}</div>`;
+      rhBox.innerHTML=`<div>驱动内核：<span class="badge ok">${esc(drvLabel)}</span> · 浏览器：<strong>${esc(chLabel)}</strong> · 当前档案：<strong>${esc(d.active_profile==='default'?'默认主账号':(d.active_profile||'默认主账号'))}</strong></div><div style="margin-top:4px">${fmtRh('抖音规则',rh.douyin)} &nbsp;|&nbsp; ${fmtRh('小红书规则',rh.xiaohongshu)} &nbsp;|&nbsp; ${fmtRh('聚光规则',rh.juguang)}</div>`;
     }
-    const kwMsg=online?(d.verification_required?'内置浏览器等待人机验证。':(d.engine_mode==='native-playwright'?`内置 ${chLabel}（${drvLabel}）在线（接口直听 + 抖音/小红书随时开采），采集后自动下载入库。`:`底层引擎在线（${activeEnginePlatform==='xiaohongshu'?'小红书':'抖音'}），采集作品将自动送入统一下载队列。`)):'底层引擎离线（公开单链接仍可直接使用）。';
+    const kwMsg=online?(d.verification_required?'内置浏览器等待人机验证。':(d.engine_mode==='native-playwright'?`内置 ${chLabel}（${drvLabel}）在线（接口直听 + 抖音/小红书/聚光随时开采），采集后自动下载入库。`:`底层引擎在线（${platLabel(activeEnginePlatform)}），采集作品将自动送入统一下载队列。`)):'底层引擎离线（公开单链接仍可直接使用）。';
     $('keywordCapability').textContent=kwMsg;$('homepageCapability').textContent=kwMsg;
     const kp=d.keyword_progress;
     const isStaleVerifyKp=kp&&(kp.phase==='verification'||kp.status==='verification_required')&&!d.verification_required;
@@ -2220,7 +2252,7 @@ $('collectorToggle').addEventListener('click',async()=>{
   }
   $('keywordValue')&&$('keywordValue').addEventListener('input',updateStartKeywordLabel);
   function triggerAutoSave(){if(autoSaveTimer)clearTimeout(autoSaveTimer);autoSaveTimer=setTimeout(()=>saveAllWorkbenchSettings(false),400);}
-  ['keywordCount','minImages','maxImages','k_media_type','k_web_sort','k_web_publish_time','k_direct_download','a_max_per_author','a_min_images','a_max_images'].forEach(id=>{
+  ['keywordCount','minImages','maxImages','k_media_type','k_web_sort','k_web_publish_time','k_juguang_category','k_juguang_time','k_juguang_sort','k_direct_download','a_max_per_author','a_min_images','a_max_images'].forEach(id=>{
     const el=$(id);
     if(el)el.addEventListener('change',()=>{
       if(id==='keywordCount'&&!activeKeywordRun&&$('kwKpiTarget')){$('kwKpiTarget').textContent=Number(el.value)===0?'全部':String(Number(el.value)||20);}

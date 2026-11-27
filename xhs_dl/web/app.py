@@ -554,6 +554,28 @@ def _run_collection_discovery(job_id, command, cleanup_files=None):
                     on_gate_cb=_on_gate,
                     job_request=pre_task,
                 )
+            elif plat_code == "juguang":
+                cnt_val = int(pre_task.get("count") if pre_task.get("count") is not None else 20)
+                result = eng.collect_juguang_keyword(
+                    pre_task.get("keyword") or "",
+                    count=cnt_val,
+                    min_images=int(pre_task.get("min_images") if pre_task.get("min_images") is not None else 1),
+                    max_images=int(pre_task.get("max_images") or 50),
+                    allow_video=bool(pre_task.get("allow_video", False)),
+                    media_type=str(pre_task.get("media_type") or ("all" if pre_task.get("allow_video") else "image")),
+                    direct_download=bool(pre_task.get("direct_download", True)),
+                    juguang_category=str(pre_task.get("juguang_category") or "客资收集"),
+                    web_sort=str(pre_task.get("web_sort") or "阅读量"),
+                    web_publish_time=str(pre_task.get("web_publish_time") or "近7日"),
+                    skip_ids=skip_ids,
+                    output_dir=str(pre_task.get("output_dir") or DEFAULT_OUTPUT_DIR),
+                    image_format=str(pre_task.get("image_format") or "jpg"),
+                    title_template=str(pre_task.get("title_template") or toolbox_store.DEFAULT_TITLE_TEMPLATE),
+                    set_file_time=bool(pre_task.get("set_file_time_to_publish", True)),
+                    proxy_url=proxy_url,
+                    on_gate_cb=_on_gate,
+                    job_request=pre_task,
+                )
             else:
                 cnt_val = int(pre_task.get("count") if pre_task.get("count") is not None else 20)
                 result = eng.collect_douyin_keyword(
@@ -2017,13 +2039,18 @@ class Handler(BaseHTTPRequestHandler):
             requested_platform = "douyin"
             if api_path.endswith("/keyword"):
                 raw_plat = str(body.get("platform") or "douyin").strip().lower()
-                requested_platform = "xiaohongshu" if raw_plat in {"xiaohongshu", "xhs", "小红书"} else "douyin"
+                if raw_plat in {"juguang", "xhs_juguang", "聚光", "小红书聚光", "聚光内容广场"}:
+                    requested_platform = "juguang"
+                elif raw_plat in {"xiaohongshu", "xhs", "小红书"}:
+                    requested_platform = "xiaohongshu"
+                else:
+                    requested_platform = "douyin"
             if not _use_native_engine():
                 if capability["verification_required"]:
                     self._json({"error": "原生浏览器正在等待人工验证；完成验证后再提交"}, 409)
                     return
                 if capability["active_platform"] != requested_platform:
-                    expected_name = "小红书" if requested_platform == "xiaohongshu" else "抖音"
+                    expected_name = {"xiaohongshu": "小红书", "juguang": "小红书聚光"}.get(requested_platform, "抖音")
                     self._json({"error": f"当前原生核心不是{expected_name}；请先在平台登录或江湖工具箱切换到{expected_name}"}, 409)
                     return
             if capability["busy"]:
@@ -2178,10 +2205,19 @@ class Handler(BaseHTTPRequestHandler):
                 if not direct_download:
                     command.append("--metadata-only")
                 command.extend(skip_cmd_args)
-                web_sort = str(body.get("web_sort") or kw_cfg.get("web_sort") or "综合排序").strip()
-                web_publish_time = str(body.get("web_publish_time") or kw_cfg.get("web_publish_time") or "不限").strip()
+                juguang_category = str(body.get("juguang_category") or kw_cfg.get("juguang_category") or "客资收集").strip()
+                web_sort = str(
+                    body.get("web_sort")
+                    or (kw_cfg.get("juguang_sort") if requested_platform == "juguang" else kw_cfg.get("web_sort"))
+                    or ("阅读量" if requested_platform == "juguang" else "综合排序")
+                ).strip()
+                web_publish_time = str(
+                    body.get("web_publish_time")
+                    or (kw_cfg.get("juguang_time") if requested_platform == "juguang" else kw_cfg.get("web_publish_time"))
+                    or ("近7日" if requested_platform == "juguang" else "不限")
+                ).strip()
                 kind = "keyword"
-                plat_cn = "小红书" if requested_platform == "xiaohongshu" else "抖音"
+                plat_cn = {"xiaohongshu": "小红书", "juguang": "小红书聚光"}.get(requested_platform, "抖音")
                 label = f"{plat_cn}关键词：{keyword.strip()}"
                 request = {
                     "platform": requested_platform,
@@ -2193,6 +2229,7 @@ class Handler(BaseHTTPRequestHandler):
                     "media_type": media_type,
                     "no_filter": no_filter,
                     "direct_download": direct_download,
+                    "juguang_category": juguang_category,
                     "web_sort": web_sort,
                     "web_publish_time": web_publish_time,
                     "auto_ingest_material": auto_ingest_param,

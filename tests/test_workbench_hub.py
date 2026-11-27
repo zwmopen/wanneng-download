@@ -300,8 +300,8 @@ def test_workbench_http_crud_settings_and_4_themes(monkeypatch, tmp_path):
         assert dl_res["downloaded_images"] == 2
         assert dl_res["ingest"]["ingested"] == 1
         saved_dir = tmp_path / "dl_artworks" / "关键词作品" / "莫干山测试" / "图文作品" / "评12-藏34-赞88-莫干山温泉小院公司团建-旅行笔记-2024-12-25"
-        assert (saved_dir / "封面.jpg").is_file()
-        assert (saved_dir / "内页1.jpg").is_file()
+        assert (saved_dir / "P1-封面.jpg").is_file()
+        assert (saved_dir / "P2-内页1.jpg").is_file()
         assert (saved_dir / "文案.txt").is_file()
         meta = json.loads((saved_dir / "metadata.json").read_text(encoding="utf-8"))
         assert meta["id"] == "77001122334455"
@@ -868,7 +868,7 @@ def test_native_collector_capabilities_always_online_and_proxy_probe(monkeypatch
     assert cap["available"] is True
     assert cap["status"] == "online"
     assert cap["engine_mode"] == "native-playwright"
-    assert cap["supports"]["keyword"] == ["douyin", "xiaohongshu"]
+    assert cap["supports"]["keyword"] == ["douyin", "xiaohongshu", "juguang"]
     # Unreachable local proxy port must be safely skipped rather than breaking Edge launch
     assert native_collector._resolve_reachable_proxy("http://127.0.0.1:1") is None
 
@@ -1667,7 +1667,7 @@ def test_xhs_homepage_routing_live_photo_download_profiles_and_rule_health(monke
     dl_info, _ = toolbox_store._download_single_artwork_row(row, str(tmp_path / "xhs_dl_out"))
     from pathlib import Path as _P
     pkg_dir = _P(dl_info["save_path"])
-    assert (pkg_dir / "封面.jpg").is_file()
+    assert (pkg_dir / "P1-封面.jpg").is_file()
     assert (pkg_dir / "实况1.mp4").is_file()
     meta = json.loads((pkg_dir / "metadata.json").read_text(encoding="utf-8"))
     assert meta["live_photo_files"] == ["实况1.mp4"]

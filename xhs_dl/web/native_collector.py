@@ -21,7 +21,7 @@ import time
 from concurrent.futures import Future
 from pathlib import Path
 from typing import Any, Callable, Dict, Iterable, List, Optional, Set, Tuple
-from urllib.parse import quote, urlsplit
+from urllib.parse import parse_qs, quote, urlsplit
 
 
 DEFAULT_TITLE_TEMPLATE = "评{comments}-藏{favorites}-赞{likes}-{title}-{author}-{publish_time}"
@@ -486,6 +486,91 @@ _XHS_SEARCH_SNAPSHOT_SCRIPT = r"""
 """.strip()
 
 
+_JUGUANG_SNAPSHOT_SCRIPT = r"""
+(function () {
+  var body = document.body ? (document.body.innerText || "") : "";
+  var href = String(location.href || "");
+  var title = document.title || "";
+  var cards = Array.prototype.slice.call(
+    document.querySelectorAll('[data-track-impression], .note-card, [class*="noteCard"], [class*="card-item"]')
+  );
+  var items = [];
+  var seen = {};
+  cards.forEach(function (card, index) {
+    var noteId = card.getAttribute('data-note-id') || card.getAttribute('data-id') || "";
+    if (!noteId) {
+      var imp = card.getAttribute('data-track-impression');
+      if (imp) {
+        try {
+          var parsed = JSON.parse(imp);
+          noteId = String((parsed && parsed.attributes && parsed.attributes.triggerValue) || "");
+        } catch (_) {}
+      }
+    }
+    var rawHref = "";
+    var link = card.querySelector('a[href*="/explore/"]');
+    if (link) {
+      rawHref = String(link.href || link.getAttribute('href') || "");
+      if (!noteId) {
+        var m = rawHref.match(/\/explore\/([a-f0-9]{16,})/i);
+        if (m) noteId = m[1];
+      }
+    }
+    if (!noteId || seen[noteId]) return;
+    seen[noteId] = true;
+    var titleEl = card.querySelector('[data-note-title], .title, h3, h4, .note-meta span, span');
+    var authorEl = card.querySelector('.author, .user-name, [class*="author"], [class*="userName"]');
+    var imgEl = card.querySelector('img');
+    var coverUrl = imgEl ? String(imgEl.currentSrc || imgEl.src || imgEl.getAttribute('data-src') || "") : "";
+    var isVideo = !!(card.querySelector('.play-icon, svg.play-icon, [class*="video"], [class*="Video"]'));
+    var nums = Array.prototype.slice.call(card.querySelectorAll('.note-meta .d-tag-content, .d-tag-content, .tag, span'))
+      .map(function (n) { return String(n.textContent || "").trim(); })
+      .filter(function (t) { return /^\d+(?:\.\d+)?[万wWkK]?$/.test(t); });
+    items.push({
+      index: index,
+      id: noteId,
+      url: rawHref || ('https://www.xiaohongshu.com/explore/' + noteId),
+      title: String((titleEl && titleEl.textContent) || "").trim().slice(0, 200),
+      author: String((authorEl && authorEl.textContent) || "聚光灵感精选").trim().slice(0, 100),
+      reads: nums[0] || "",
+      likes: nums[1] || nums[0] || "",
+      favorites: nums[2] || "",
+      comments: nums[3] || "",
+      is_video: isVideo,
+      is_photo: !isVideo,
+      image_count: isVideo ? 0 : (coverUrl ? 1 : 0),
+      cover_urls: coverUrl ? [coverUrl] : [],
+      image_urls: coverUrl ? [coverUrl] : [],
+      source_layer: "dom_snapshot"
+    });
+  });
+  var gate = /验证码|滑块|安全验证|人机验证|captcha|challenge/i.test(title + " " + body.slice(0, 1200));
+  var hasLoginUrl = /login/i.test(href);
+  var hasPhoneInput = !!document.querySelector("input[placeholder*='手机号'], input[placeholder*='邮箱']");
+  var hasLoginPrompt = /账号登录|扫码登录|登录小红书聚光/.test(body.slice(0, 1500)) && items.length === 0;
+  var loginWall = (hasLoginUrl || hasPhoneInput || hasLoginPrompt) && items.length === 0;
+  return {
+    href: href,
+    title: title,
+    verification: gate,
+    login_required: loginWall,
+    cards: items
+  };
+})()
+""".strip()
+
+
+def _normalize_collector_platform(platform: str) -> str:
+    raw = str(platform or "douyin").strip().lower()
+    if raw in {"juguang", "xhs_juguang", "聚光", "小红书聚光", "聚光内容广场"}:
+        return "juguang"
+    if raw in {"xiaohongshu", "xhs", "小红书"}:
+        return "xiaohongshu"
+    if raw in {"bilibili", "b站"}:
+        return "bilibili"
+    return "douyin"
+
+
 def _build_douyin_search_url(
     keyword: str,
     web_sort: str = "综合排序",
@@ -827,7 +912,7 @@ def _clean_xhs_image_url(img: Dict[str, Any]) -> str:
 
 
 def _extract_xhs_live_photo_url(img: Dict[str, Any]) -> str:
-    if not isinstance(img, dict) or not img.get("live_photo"):
+    if not isinstance(img, dict) or not (img.get("live_photo") or img.get("livePhoto")):
         return ""
     stream = img.get("stream") if isinstance(img.get("stream"), dict) else {}
     for codec in ("h264", "h265", "av1"):
@@ -973,6 +1058,314 @@ def _extract_xhs_items_from_api_payload(payload: Any, *, source: str = "pc_searc
         if not isinstance(card, dict):
             card = entry
         parsed = _parse_xhs_note_card(nid, card, xsec_token=tok, source=source)
+        if parsed and parsed["id"] not in seen:
+            seen.add(parsed["id"])
+            out.append(parsed)
+    return out
+
+
+def _extract_ssr_initial_state(html: str) -> Dict[str, Any]:
+    raw_html = str(html or "")
+    marker = "window.__INITIAL_STATE__="
+    idx = raw_html.find(marker)
+    if idx < 0:
+        return {}
+    json_start = raw_html.find("{", idx)
+    if json_start < 0:
+        return {}
+    depth = 0
+    in_string = False
+    escaped = False
+    for pos in range(json_start, len(raw_html)):
+        ch = raw_html[pos]
+        if escaped:
+            escaped = False
+            continue
+        if ch == "\\" and in_string:
+            escaped = True
+            continue
+        if ch == '"':
+            in_string = not in_string
+            continue
+        if in_string:
+            continue
+        if ch == "{":
+            depth += 1
+        elif ch == "}":
+            depth -= 1
+            if depth == 0:
+                raw_json = re.sub(r"\bundefined\b", "null", raw_html[json_start : pos + 1])
+                try:
+                    data = json.loads(raw_json)
+                    return data if isinstance(data, dict) else {}
+                except ValueError:
+                    return {}
+    return {}
+
+
+def _extract_ssr_note_dict(state: Dict[str, Any]) -> Dict[str, Any]:
+    if not isinstance(state, dict):
+        return {}
+    try:
+        nd = ((state.get("noteData") or {}).get("data") or {}).get("noteData")
+        if isinstance(nd, dict) and (nd.get("title") or nd.get("desc")):
+            return nd
+    except Exception:
+        pass
+    try:
+        detail_map = ((state.get("note") or {}).get("noteDetailMap")) or {}
+        if isinstance(detail_map, dict):
+            for entry in detail_map.values():
+                if not isinstance(entry, dict):
+                    continue
+                n = entry.get("note") if isinstance(entry.get("note"), dict) else entry
+                if isinstance(n, dict) and (n.get("title") or n.get("desc") or n.get("imageList")):
+                    return n
+    except Exception:
+        pass
+    try:
+        preload = (state.get("noteData") or {}).get("normalNotePreloadData")
+        if isinstance(preload, dict) and (preload.get("title") or preload.get("desc")):
+            return preload
+    except Exception:
+        pass
+    return {}
+
+
+def _format_clean_copywriting(title: str, desc: str, topics: Iterable[str]) -> str:
+    clean_title = str(title or "").strip()
+    clean_desc = re.sub(r"\[话题\]#?", "", str(desc or "")).strip()
+    topic_tags: List[str] = []
+    seen_topics: Set[str] = set()
+    for raw_t in (topics or []):
+        t_clean = str(raw_t or "").strip().strip("#")
+        if t_clean and t_clean not in seen_topics:
+            seen_topics.add(t_clean)
+            if f"#{t_clean}" not in clean_desc:
+                topic_tags.append(f"#{t_clean}")
+    parts: List[str] = []
+    if clean_title:
+        parts.append(clean_title)
+    if clean_desc:
+        parts.append(clean_desc)
+    if topic_tags:
+        parts.append(" ".join(topic_tags))
+    return "\n\n".join(parts)
+
+
+def _fetch_xhs_note_ssr_detail(note_link: str, timeout: float = 10.0) -> Dict[str, Any]:
+    """Fetch XHS note HTML (carrying xsec_token) and extract full Chinese title/desc/topics/media."""
+    url = str(note_link or "").strip()
+    if not url or "xiaohongshu.com" not in url.lower():
+        return {}
+    import requests
+
+    headers = {
+        "User-Agent": (
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+            "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36"
+        ),
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
+        "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
+    }
+    try:
+        resp = requests.get(url, headers=headers, timeout=timeout)
+        if getattr(resp, "status_code", 0) != 200:
+            return {}
+        state = _extract_ssr_initial_state(getattr(resp, "text", "") or "")
+        note_data = _extract_ssr_note_dict(state)
+        if not note_data:
+            return {}
+    except Exception:
+        return {}
+
+    title = str(note_data.get("title") or "").strip()
+    raw_desc = str(note_data.get("desc") or "").strip()
+    clean_desc = re.sub(r"\[话题\]#?", "", raw_desc).strip()
+
+    topics: List[str] = []
+    for tag in (note_data.get("tagList") or []):
+        if isinstance(tag, dict) and tag.get("name"):
+            tname = str(tag["name"]).strip().lstrip("#")
+            if tname and tname not in topics:
+                topics.append(tname)
+    for m_tag in re.findall(r"#([^\s#\[\]]+)", clean_desc):
+        tname = m_tag.strip()
+        if tname and len(tname) <= 25 and tname not in topics:
+            topics.append(tname)
+
+    image_urls: List[str] = []
+    live_photo_urls: List[str] = []
+    for img in (note_data.get("imageList") or []):
+        if not isinstance(img, dict):
+            continue
+        iu = _clean_xhs_image_url(img)
+        if iu and iu not in image_urls:
+            image_urls.append(iu)
+        lp = _extract_xhs_live_photo_url(img)
+        if lp and lp not in live_photo_urls:
+            live_photo_urls.append(lp)
+
+    caption = _format_clean_copywriting(title, clean_desc, topics)
+    interact = note_data.get("interactInfo") if isinstance(note_data.get("interactInfo"), dict) else {}
+    out: Dict[str, Any] = {
+        "title": title,
+        "desc": clean_desc,
+        "topics": topics,
+        "caption": caption,
+        "image_urls": image_urls,
+        "live_photo_urls": live_photo_urls,
+        "success": bool(clean_desc or title or image_urls),
+    }
+    if image_urls:
+        out["image_count"] = len(image_urls)
+    for out_k, src_keys in (
+        ("likes", ("likedCount", "liked_count")),
+        ("comments", ("commentCount", "comment_count")),
+        ("favorites", ("collectedCount", "collected_count")),
+        ("shares", ("shareCount", "share_count")),
+    ):
+        val = _xhs_optional_count(interact, *src_keys)
+        if val is not None:
+            out[out_k] = val
+    return out
+
+
+def _normalize_juguang_publish_time(raw_val: Any) -> str:
+    raw = str(raw_val or "").strip()
+    if not raw:
+        return ""
+    try:
+        num = float(raw)
+        if num > 1e11:
+            num /= 1000.0
+        if 946684800 <= num <= 4102444800:
+            return datetime.fromtimestamp(num).strftime("%Y-%m-%d")
+    except (ValueError, OSError, OverflowError):
+        pass
+    m = re.match(r"(\d{4}-\d{2}-\d{2})", raw)
+    return m.group(1) if m else raw[:19]
+
+
+def _clean_juguang_image_url(raw_url: Any) -> str:
+    url = _normalize_https(str(raw_url or "").strip())
+    if not url:
+        return ""
+    url = re.sub(r"\?imageview2.*$", "", url, flags=re.I)
+    return url
+
+
+def _parse_juguang_note_item(
+    note: Dict[str, Any],
+    *,
+    keyword: str = "",
+    category: str = "",
+) -> Optional[Dict[str, Any]]:
+    if not isinstance(note, dict):
+        return None
+    info = note.get("noteInfo") if isinstance(note.get("noteInfo"), dict) else note
+    user = note.get("userInfo") if isinstance(note.get("userInfo"), dict) else (
+        info.get("userInfo") if isinstance(info.get("userInfo"), dict) else {}
+    )
+    ia = note.get("interactInfo") if isinstance(note.get("interactInfo"), dict) else (
+        info.get("interactInfo") if isinstance(info.get("interactInfo"), dict) else {}
+    )
+    nid = str(info.get("noteId") or note.get("noteId") or note.get("id") or "").strip()
+    if not nid:
+        return None
+
+    title = str(info.get("title") or info.get("noteTitle") or note.get("title") or "").strip()
+    author = str(user.get("nickName") or user.get("nickname") or info.get("nickName") or "聚光灵感精选").strip()
+    author_uid = str(user.get("userId") or info.get("userId") or "").strip()
+    note_link = str(info.get("noteLink") or info.get("noteDetailUrl") or note.get("noteLink") or "").strip()
+    note_url = note_link or _build_xhs_note_url(nid, source="juguang")
+    xsec_token = ""
+    if "xsec_token=" in note_url:
+        try:
+            xsec_token = str((parse_qs(urlsplit(note_url).query).get("xsec_token") or [""])[0] or "")
+        except Exception:
+            xsec_token = ""
+
+    image_urls: List[str] = []
+    for im in (info.get("noteImages") or []):
+        if isinstance(im, dict):
+            cu = _clean_juguang_image_url(im.get("imageUrl") or im.get("url"))
+        else:
+            cu = _clean_juguang_image_url(im)
+        if cu and cu not in image_urls:
+            image_urls.append(cu)
+    cover_u = _clean_juguang_image_url(info.get("coverUrl") or info.get("cover"))
+    if cover_u and cover_u not in image_urls:
+        image_urls.insert(0, cover_u)
+
+    raw_type = str(info.get("noteType") or info.get("type") or "").strip().lower()
+    video_url = _normalize_https(str(info.get("videoUrl") or info.get("video_url") or ""))
+    is_video = raw_type in {"2", "video"} or bool(video_url)
+
+    likes = _xhs_optional_count({"v": info.get("likeNum")}, "v") or _xhs_optional_count(ia, "likedCount", "likeNum") or "0"
+    comments = _xhs_optional_count({"v": info.get("cmtNum")}, "v") or _xhs_optional_count(ia, "commentCount", "cmtNum") or "0"
+    favorites = _xhs_optional_count({"v": info.get("favNum")}, "v") or _xhs_optional_count(ia, "collectedCount", "favNum") or "0"
+    reads = _xhs_optional_count({"v": info.get("readNum")}, "v") or _xhs_optional_count(ia, "readNum", "readCount") or "0"
+    shares = _xhs_optional_count({"v": info.get("shareNum")}, "v") or _xhs_optional_count(ia, "shareCount", "shareNum") or "0"
+    pub_time = _normalize_juguang_publish_time(info.get("notePublishTime") or info.get("createTime"))
+
+    kw_clean = str(keyword or "").strip()
+    cat_clean = str(category or "").strip()
+    src_detail = f"{cat_clean} · {kw_clean}" if (cat_clean and kw_clean and cat_clean not in kw_clean) else (kw_clean or cat_clean or "聚光内容广场")
+
+    return {
+        "id": nid,
+        "platform": "juguang",
+        "source_channel": "聚光内容广场",
+        "juguang_category": cat_clean,
+        "source_detail": src_detail,
+        "keyword": kw_clean,
+        "url": note_url,
+        "xsec_token": xsec_token,
+        "title": title or nid,
+        "caption": title,
+        "desc": "",
+        "topics": [],
+        "author": author,
+        "author_uid": author_uid,
+        "likes": likes,
+        "comments": comments,
+        "favorites": favorites,
+        "reads": shares if False else reads,
+        "shares": shares,
+        "publish_time": pub_time,
+        "is_video": is_video,
+        "is_photo": not is_video,
+        "artwork_type": "视频" if is_video else "图文",
+        "video_url": video_url,
+        "image_count": 0 if is_video else len(image_urls),
+        "cover_urls": [cover_u] if cover_u else image_urls[:1],
+        "image_urls": [] if is_video else image_urls,
+        "live_photo_urls": [],
+        "source_layer": "network_api",
+    }
+
+
+def _extract_juguang_items_from_api_payload(
+    payload: Any,
+    *,
+    keyword: str = "",
+    category: str = "",
+) -> List[Dict[str, Any]]:
+    if not isinstance(payload, dict):
+        return []
+    data = payload.get("data") if isinstance(payload.get("data"), dict) else payload
+    if not isinstance(data, dict):
+        return []
+    raw_list: List[Any] = []
+    for key in ("noteList", "notes", "list", "items"):
+        vals = data.get(key)
+        if isinstance(vals, list):
+            raw_list.extend(vals)
+    out: List[Dict[str, Any]] = []
+    seen: Set[str] = set()
+    for entry in raw_list:
+        parsed = _parse_juguang_note_item(entry, keyword=keyword, category=category)
         if parsed and parsed["id"] not in seen:
             seen.add(parsed["id"])
             out.append(parsed)
@@ -1233,6 +1626,7 @@ class NativeBrowserCollector:
     PLATFORM_LOGIN_URLS = {
         "douyin": "https://www.douyin.com/",
         "xiaohongshu": "https://www.xiaohongshu.com/",
+        "juguang": "https://ad.xiaohongshu.com/microapp/creativity/inspire",
         "bilibili": "https://www.bilibili.com/",
     }
 
@@ -1273,6 +1667,7 @@ class NativeBrowserCollector:
         self._rule_health: Dict[str, Dict[str, Any]] = {
             "douyin": {"status": "idle", "api_items": 0, "dom_items": 0, "message": "等待采集自检", "updated_at": ""},
             "xiaohongshu": {"status": "idle", "api_items": 0, "dom_items": 0, "message": "等待采集自检", "updated_at": ""},
+            "juguang": {"status": "idle", "api_items": 0, "dom_items": 0, "message": "等待采集自检", "updated_at": ""},
         }
 
     # ── Multi-account browser profile management ──────────────────────
@@ -1410,7 +1805,9 @@ class NativeBrowserCollector:
         skipped_dup: int = 0,
         message: str = "",
     ) -> str:
-        plat = "xiaohongshu" if platform == "xiaohongshu" else "douyin"
+        plat = _normalize_collector_platform(platform)
+        if plat not in {"douyin", "xiaohongshu", "juguang"}:
+            plat = "douyin"
         if gate_blocked:
             status = "gate_blocked"
             msg = message or "触发人机验证/登录墙"
@@ -1673,13 +2070,16 @@ class NativeBrowserCollector:
                 "rule_health": {k: dict(v) for k, v in self._rule_health.items()},
                 "supports": {
                     "homepage": ["douyin", "xiaohongshu"],
-                    "keyword": ["douyin", "xiaohongshu"],
+                    "keyword": ["douyin", "xiaohongshu", "juguang"],
                     "xiaohongshu_homepage": True,
+                    "juguang_keyword": True,
                 },
             }
 
     def start_engine(self, platform: str = "douyin", proxy_url: str = "") -> Dict[str, Any]:
-        plat = "xiaohongshu" if str(platform).lower() in {"xiaohongshu", "xhs", "小红书"} else "douyin"
+        plat = _normalize_collector_platform(platform)
+        if plat not in {"douyin", "xiaohongshu", "juguang"}:
+            plat = "douyin"
         with self._state_lock:
             self._active_platform = plat
             self._verification_required = False
@@ -1698,18 +2098,19 @@ class NativeBrowserCollector:
         }
 
     def open_platform_login(self, platform: str = "douyin", proxy_url: str = "", topmost: bool = False) -> Dict[str, Any]:
-        raw = str(platform or "douyin").strip().lower()
-        plat = raw if raw in self.PLATFORM_LOGIN_URLS else "douyin"
+        plat = _normalize_collector_platform(platform)
+        if plat not in self.PLATFORM_LOGIN_URLS:
+            plat = "douyin"
         url = self.PLATFORM_LOGIN_URLS[plat]
         with self._state_lock:
-            if plat in {"douyin", "xiaohongshu"}:
+            if plat in {"douyin", "xiaohongshu", "juguang"}:
                 self._active_platform = plat
             self._verification_required = False
         focused = self._call_browser(
             lambda: self._bring_to_front_in_worker(topmost=topmost, open_url=url, proxy_url=proxy_url),
             timeout=35.0,
         )
-        plat_cn = {"douyin": "抖音", "xiaohongshu": "小红书", "bilibili": "B站"}.get(plat, plat)
+        plat_cn = {"douyin": "抖音", "xiaohongshu": "小红书", "juguang": "小红书聚光", "bilibili": "B站"}.get(plat, plat)
         return {
             "status": "ok",
             "platform": plat,
@@ -2853,6 +3254,421 @@ class NativeBrowserCollector:
                 "skipped_duplicate_count": skipped_dup,
                 "completion_confirmed": bool(chosen) and status == "completed",
                 "message": msg,
+            }
+        finally:
+            try:
+                detach_listener()
+            except Exception:
+                pass
+            with self._state_lock:
+                self._busy = False
+
+
+    def _apply_juguang_filters_in_worker(
+        self,
+        page: Any,
+        *,
+        keyword: str,
+        category: str,
+        time_label: str,
+        sort_label: str,
+        api_cards: Dict[str, Dict[str, Any]],
+    ) -> None:
+        def _click_text_option(candidates: List[str], *, wait_sec: float = 1.6) -> bool:
+            for txt in candidates:
+                clean = str(txt or "").strip()
+                if not clean:
+                    continue
+                try:
+                    loc = page.locator(f'text="{clean}"')
+                    if loc.count() > 0 and loc.first.is_visible():
+                        loc.first.click()
+                        _pump_wait(page, wait_sec)
+                        return True
+                except Exception:
+                    pass
+                try:
+                    loc = page.get_by_text(clean, exact=False)
+                    if loc.count() > 0 and loc.first.is_visible():
+                        loc.first.click()
+                        _pump_wait(page, wait_sec)
+                        return True
+                except Exception:
+                    pass
+            return False
+
+        # 1. Category tab (e.g. 客资收集 -> #square-tabs-item-客资收集)
+        cat = str(category or "").strip()
+        if cat and cat not in {"全部", "全部榜单", "不限"}:
+            prev_snap = dict(api_cards)
+            api_cards.clear()
+            clicked = False
+            for sel in (
+                f"#square-tabs-item-{cat}",
+                f'[id*="square-tabs-item"][id*="{cat}"]',
+            ):
+                try:
+                    loc = page.locator(sel)
+                    if loc.count() > 0:
+                        loc.first.click()
+                        _pump_wait(page, 1.5)
+                        clicked = True
+                        break
+                except Exception:
+                    continue
+            if not clicked:
+                clicked = _click_text_option([cat], wait_sec=1.5)
+            if not api_cards and prev_snap:
+                api_cards.update(prev_snap)
+
+        # 2. Keyword search input
+        kw_clean = str(keyword or "").strip()
+        if kw_clean:
+            prev_snap = dict(api_cards)
+            api_cards.clear()
+            for sel in (
+                "#cc-container input[placeholder*='搜索']",
+                "#cc-container input[placeholder*='关键词']",
+                "input[placeholder*='搜索']",
+                "input[placeholder*='关键词']",
+                "input[class*='search']",
+            ):
+                try:
+                    si = page.locator(sel)
+                    if si.count() > 0 and si.first.is_visible():
+                        si.first.click()
+                        _pump_wait(page, 0.25)
+                        si.first.fill("")
+                        si.first.fill(kw_clean)
+                        si.first.press("Enter")
+                        _pump_wait(page, 2.2)
+                        break
+                except Exception:
+                    continue
+            if not api_cards and prev_snap:
+                api_cards.update(prev_snap)
+
+        # 3. Time range (近7日 / 近30日 / 近90日 / 近1日)
+        t_raw = str(time_label or "").strip()
+        time_alias = {"近7天": "近7日", "近30天": "近30日", "近90天": "近90日", "一天内": "近1日", "一周内": "近7日"}
+        t_norm = time_alias.get(t_raw, t_raw)
+        if t_norm and t_norm not in {"不限", "时间不限"}:
+            prev_snap = dict(api_cards)
+            api_cards.clear()
+            for trig in (
+                "text='近7日'", "text='近30日'", "text='近90日'", "text='近1日'",
+                "text='近7天'", "text='近30天'", "text='发布时间'",
+            ):
+                try:
+                    tl = page.locator(trig)
+                    if tl.count() > 0 and tl.first.is_visible():
+                        tl.first.click()
+                        _pump_wait(page, 0.45)
+                        break
+                except Exception:
+                    continue
+            alt = t_norm.replace("日", "天") if "日" in t_norm else t_norm.replace("天", "日")
+            _click_text_option([t_norm, alt], wait_sec=1.6)
+            if not api_cards and prev_snap:
+                api_cards.update(prev_snap)
+
+        # 4. Sort metric (阅读量 / 评论量 / 点赞量 / 收藏量 / 互动量)
+        s_raw = str(sort_label or "").strip()
+        sort_alias = {"最多点赞": "点赞量", "最多评论": "评论量", "最多收藏": "收藏量", "最多阅读": "阅读量", "综合排序": "综合"}
+        s_norm = sort_alias.get(s_raw, s_raw)
+        if s_norm and s_norm not in {"默认"}:
+            prev_snap = dict(api_cards)
+            api_cards.clear()
+            for trig in (
+                "text='综合'", "text='点赞量'", "text='评论量'", "text='阅读量'", "text='互动量'", "text='收藏量'",
+            ):
+                try:
+                    sl = page.locator(trig)
+                    if sl.count() > 0 and sl.first.is_visible():
+                        sl.first.click()
+                        _pump_wait(page, 0.45)
+                        break
+                except Exception:
+                    continue
+            _click_text_option([s_norm, s_raw], wait_sec=1.8)
+            if not api_cards and prev_snap:
+                api_cards.update(prev_snap)
+
+    def collect_juguang_keyword(
+        self,
+        keyword: str,
+        *,
+        count: int = 20,
+        min_images: int = 1,
+        max_images: int = 50,
+        allow_video: bool = False,
+        media_type: str = "",
+        direct_download: bool = True,
+        juguang_category: str = "客资收集",
+        web_sort: str = "阅读量",
+        web_publish_time: str = "近7日",
+        skip_ids: Optional[Iterable[str]] = None,
+        output_dir: str = "",
+        image_format: str = "jpg",
+        title_template: str = DEFAULT_TITLE_TEMPLATE,
+        set_file_time: bool = True,
+        proxy_url: str = "",
+        on_gate_cb: Optional[Callable[[str, str], None]] = None,
+        job_request: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        kw = str(keyword or "").strip()
+        if not kw:
+            return {"status": "error", "success": False, "message": "关键词不能为空"}
+        eff_media_type = str(media_type or "").strip().lower()
+        if eff_media_type not in {"image", "video", "all"}:
+            eff_media_type = "all" if allow_video else "image"
+        cat_clean = str(juguang_category or "客资收集").strip() or "客资收集"
+        sort_clean = str(web_sort or "阅读量").strip() or "阅读量"
+        time_clean = str(web_publish_time or "近7日").strip() or "近7日"
+        skip_set = {str(x).strip() for x in (skip_ids or []) if str(x).strip()}
+        target = MAX_SEARCH_CANDIDATES if int(count or 0) == 0 else max(1, min(200, int(count or 20)))
+
+        self._cancel_event.clear()
+        with self._state_lock:
+            self._active_platform = "juguang"
+            self._busy = True
+            self._verification_required = False
+            self._keyword_progress = {
+                "phase": "starting",
+                "status": "running",
+                "keyword": kw,
+                "target": target,
+                "total": 0,
+                "qualified": 0,
+                "crawled": 0,
+                "downloaded": 0,
+                "message": f"正在打开小红书聚光内容广场（{cat_clean} · {time_clean} · {sort_clean}）：{kw}",
+                "updated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            }
+
+        inspire_url = self.PLATFORM_LOGIN_URLS["juguang"]
+        api_cards: Dict[str, Dict[str, Any]] = {}
+        dom_ids: Set[str] = set()
+        detach_listener: Callable[[], None] = lambda: None
+        try:
+            def _open_and_filter_juguang():
+                nonlocal api_cards, detach_listener
+                page = self._ensure_page_in_worker(proxy_url=proxy_url)
+                api_cards, _, detach_listener = _attach_response_collector(
+                    page,
+                    ("search_note", "/api/leona/creative_center", "/api/pgy_leona/content_square"),
+                    lambda payload: _extract_juguang_items_from_api_payload(
+                        payload,
+                        keyword=kw,
+                        category=cat_clean,
+                    ),
+                )
+                page.goto(inspire_url, wait_until="domcontentloaded", timeout=30000)
+                _pump_wait(page, 2.2)
+                snap0 = page.evaluate(_JUGUANG_SNAPSHOT_SCRIPT)
+                if isinstance(snap0, dict) and (snap0.get("verification") or snap0.get("login_required")):
+                    return snap0
+                self._apply_juguang_filters_in_worker(
+                    page,
+                    keyword=kw,
+                    category=cat_clean,
+                    time_label=time_clean,
+                    sort_label=sort_clean,
+                    api_cards=api_cards,
+                )
+                return page.evaluate(_JUGUANG_SNAPSHOT_SCRIPT)
+
+            snap = self._call_browser(_open_and_filter_juguang, timeout=50.0)
+            if isinstance(snap, dict) and (snap.get("verification") or snap.get("login_required")):
+                gate_status = "verification_required" if snap.get("verification") else "login_required"
+                gate_msg = "小红书聚光需要登录或完成安全验证，已置顶弹出浏览器，请完成后点击「继续采集」"
+                with self._state_lock:
+                    self._verification_required = True
+                    self._paused_job = dict(
+                        job_request
+                        or {
+                            "kind": "keyword",
+                            "platform": "juguang",
+                            "keyword": kw,
+                            "juguang_category": cat_clean,
+                            "web_sort": sort_clean,
+                            "web_publish_time": time_clean,
+                        }
+                    )
+                try:
+                    self._call_browser(lambda: self._bring_to_front_in_worker(topmost=True), timeout=10.0)
+                except Exception:
+                    pass
+                self._record_rule_health("juguang", api_items=len(api_cards), dom_items=len(dom_ids), gate_blocked=True, message=gate_msg)
+                if callable(on_gate_cb):
+                    try:
+                        on_gate_cb(gate_status, gate_msg)
+                    except Exception:
+                        pass
+                return {"status": gate_status, "success": False, "stage": "browser", "message": gate_msg}
+
+            items_by_id: Dict[str, Dict[str, Any]] = {}
+            for _ in range(20):
+                if isinstance(snap, dict):
+                    for it in (snap.get("cards") or []):
+                        if isinstance(it, dict) and it.get("id"):
+                            sid = str(it["id"])
+                            dom_ids.add(sid)
+                            row = dict(it)
+                            row["platform"] = "juguang"
+                            row["source_channel"] = "聚光内容广场"
+                            row["juguang_category"] = cat_clean
+                            row["keyword"] = kw
+                            row["artwork_type"] = "视频" if row.get("is_video") else "图文"
+                            items_by_id[sid] = _merge_discovered_card(items_by_id.get(sid), row)
+                for sid, acard in list(api_cards.items()):
+                    row = dict(acard)
+                    row["platform"] = "juguang"
+                    row["source_channel"] = "聚光内容广场"
+                    row["juguang_category"] = cat_clean
+                    row["keyword"] = kw
+                    row["artwork_type"] = "视频" if row.get("is_video") else "图文"
+                    items_by_id[sid] = _merge_discovered_card(items_by_id.get(sid), row)
+
+                typed_items = [
+                    it for it in items_by_id.values()
+                    if (
+                        eff_media_type == "all"
+                        or (eff_media_type == "video" and it.get("is_video"))
+                        or (eff_media_type == "image" and not it.get("is_video"))
+                    )
+                ]
+                fresh = [it for it in typed_items if str(it.get("id") or "") not in skip_set]
+                self._set_progress(
+                    phase="crawling",
+                    crawled=len(items_by_id),
+                    qualified=len(fresh),
+                    message=f"聚光内容广场已捕获 {len(fresh)} 条新笔记（接口 {len(api_cards)} / 页面 {len(dom_ids)}）",
+                )
+                if len(fresh) >= target or self._cancel_event.is_set():
+                    break
+
+                def _scroll_juguang():
+                    page = self._ensure_page_in_worker(proxy_url=proxy_url)
+                    _human_scroll_page(page, steps=3, settle_min=0.95, settle_max=1.55)
+                    return page.evaluate(_JUGUANG_SNAPSHOT_SCRIPT)
+
+                snap = self._call_browser(_scroll_juguang, timeout=20.0)
+
+            all_items = [
+                it for it in items_by_id.values()
+                if (
+                    eff_media_type == "all"
+                    or (eff_media_type == "video" and it.get("is_video"))
+                    or (eff_media_type == "image" and not it.get("is_video"))
+                )
+            ]
+            fresh_all = [it for it in all_items if str(it.get("id") or "") not in skip_set]
+            skipped_dup = max(0, len(all_items) - len(fresh_all))
+            chosen = fresh_all[:target]
+
+            if chosen:
+                enriched: List[Dict[str, Any]] = []
+                for idx, item in enumerate(chosen, 1):
+                    if self._cancel_event.is_set():
+                        break
+                    self._set_progress(
+                        phase="crawling",
+                        crawled=len(all_items),
+                        qualified=len(chosen),
+                        message=f"正在补全聚光笔记完整中文正文、话题与高清多图 ({idx}/{len(chosen)})…",
+                    )
+                    detail_item = dict(item)
+                    ssr = _fetch_xhs_note_ssr_detail(str(detail_item.get("url") or ""))
+                    if ssr:
+                        if ssr.get("title") and (not detail_item.get("title") or detail_item.get("title") == detail_item.get("id")):
+                            detail_item["title"] = ssr["title"]
+                        if ssr.get("desc"):
+                            detail_item["desc"] = ssr["desc"]
+                        if ssr.get("topics"):
+                            detail_item["topics"] = list(ssr["topics"])
+                        if ssr.get("caption"):
+                            detail_item["caption"] = ssr["caption"]
+                        if len(ssr.get("image_urls") or []) > len(detail_item.get("image_urls") or []):
+                            detail_item["image_urls"] = list(ssr["image_urls"])
+                            detail_item["image_count"] = len(ssr["image_urls"])
+                        if ssr.get("live_photo_urls"):
+                            detail_item["live_photo_urls"] = list(ssr["live_photo_urls"])
+                    elif len(detail_item.get("image_urls") or []) <= 1 and detail_item.get("url"):
+                        detail_item = self._call_browser(
+                            lambda cur_item=detail_item: self._enrich_xhs_note_detail_in_worker(
+                                self._ensure_page_in_worker(proxy_url=proxy_url),
+                                cur_item,
+                            ),
+                            timeout=30.0,
+                        )
+                    if not detail_item.get("caption"):
+                        detail_item["caption"] = _format_clean_copywriting(
+                            str(detail_item.get("title") or ""),
+                            str(detail_item.get("desc") or ""),
+                            detail_item.get("topics") or [],
+                        )
+                    detail_item["platform"] = "juguang"
+                    detail_item["source_channel"] = "聚光内容广场"
+                    detail_item["juguang_category"] = cat_clean
+                    detail_item["keyword"] = kw
+                    detail_item["artwork_type"] = "视频" if detail_item.get("is_video") else "图文"
+                    if eff_media_type == "image" and not detail_item.get("is_video"):
+                        img_cnt = int(detail_item.get("image_count") or len(detail_item.get("image_urls") or []) or 0)
+                        if not (min_images <= img_cnt <= max_images):
+                            continue
+                    enriched.append(detail_item)
+                chosen = enriched
+
+            health_status = self._record_rule_health(
+                "juguang",
+                api_items=len(api_cards),
+                dom_items=len(dom_ids),
+                skipped_dup=skipped_dup,
+            )
+            links = [str(it.get("url") or "") for it in chosen if it.get("url")]
+
+            download_items: List[Dict[str, Any]] = []
+            total_media = 0
+            if direct_download and chosen:
+                download_items, total_media = self._download_xhs_candidates(
+                    chosen,
+                    output_dir=output_dir,
+                    image_format=image_format,
+                    title_template=title_template,
+                    set_file_time=set_file_time,
+                )
+
+            if chosen:
+                done_msg = (
+                    f"小红书聚光采集完成：发现 {len(chosen)} 条，已下载 {len(download_items)} 条（{total_media} 个媒体文件）"
+                    if direct_download
+                    else f"小红书聚光采集完成：发现 {len(chosen)} 条笔记"
+                )
+            elif health_status == "possible_rule_break":
+                done_msg = "聚光内容广场已打开且未触发验证码，但接口与页面均未解析到笔记，请确认账号已登录广告主后台"
+            else:
+                done_msg = f"聚光共发现 {skipped_dup} 条匹配笔记，均已去重跳过" if skipped_dup else "聚光未发现符合条件的笔记"
+
+            self._set_progress(
+                phase="completed",
+                status="completed" if chosen else "completed_zero",
+                crawled=len(all_items),
+                qualified=len(chosen),
+                downloaded=len(download_items),
+                message=done_msg,
+            )
+            return {
+                "status": "completed" if chosen else "completed_zero",
+                "success": True,
+                "stage": "completed",
+                "candidates": chosen,
+                "discovered_links": links,
+                "download": {"items": download_items, "success_count": len(download_items)} if direct_download else {},
+                "media_file_count": total_media,
+                "skipped_duplicate_count": skipped_dup,
+                "completion_confirmed": bool(chosen),
+                "message": done_msg,
             }
         finally:
             try:
